@@ -1,0 +1,2263 @@
+const CabRiderTimes = require("../models/CabRiderTimes");
+const rideRequestModel = require("../models/ride.request.model");
+const Rider = require("../models/Rider.model");
+const generateOtp = require("../utils/Otp.Genreator");
+const send_token = require("../utils/send_token");
+const SendWhatsAppMessage = require("../utils/whatsapp_send");
+const axios = require("axios");
+const cloudinary = require("cloudinary").v2;
+const moment = require("moment");
+const momentTz = require("moment-timezone");
+const VehicleAdds = require("../models/AddNewVheicleForDriver");
+const fs = require("fs");
+const path = require("path");
+
+const Bonus_Model = require("../models/Bonus_Model/Bonus_Model");
+const Parcel_Request = require("../models/Parcel_Models/Parcel_Request");
+const { sendDltMessage } = require("../utils/DltMessageSend");
+const { checkBhAndDoRechargeOnApp } = require("../PaymentWithWebDb/razarpay");
+const NewRideModelModel = require("../src/New-Rides-Controller/NewRideModel.model");
+const sendNotification = require("../utils/sendNotification");
+cloudinary.config({
+  cloud_name: "daxbcusb5",
+  api_key: "984861767987573",
+  api_secret: "tCBu9JNxC_iaUENm1kDwLrdXL0k",
+});
+// Register a new rider
+exports.registerRider = async (req, res) => {
+  try {
+    const { name, phone, rideVehicleInfo, BH, role, aadharNumber } = req.body;
+    console.log("Incoming Request Body:", req.body);
+
+    const {
+      vehicleName,
+      vehicleType,
+      PricePerKm,
+      VehicleNumber,
+      RcExpireDate,
+    } = rideVehicleInfo;
+
+    // Validate input
+    if (!BH) {
+      console.log("BH Number missing");
+      return res.status(400).json({
+        success: false,
+        message: "Please enter your BH Number.",
+      });
+    }
+
+    if (!name || !phone || !vehicleName || !vehicleType || !VehicleNumber) {
+      console.log("Missing required fields");
+      return res.status(400).json({
+        success: false,
+        message: "All required fields must be filled.",
+      });
+    }
+
+    // Check if BH number already exists
+    const bhExists = await Rider.findOne({ BH });
+    console.log("BH Exists:", bhExists);
+    if (bhExists) {
+      return res.status(400).json({
+        success: false,
+        message: `A rider is already registered with BH Number: ${BH}. Please use a different BH Number.`,
+      });
+    }
+
+    // Check if phone number is already registered
+    let existingRider = await Rider.findOne({ phone });
+    console.log("Existing Rider by Phone:", existingRider);
+
+    if (existingRider) {
+      if (!existingRider.isOtpVerify) {
+        console.log("Rider exists but OTP not verified");
+
+        if (existingRider.howManyTimesHitResend >= 5) {
+          console.log("Too many OTP resend attempts");
+
+          existingRider.isOtpBlock = true;
+          existingRider.isDocumentUpload = false;
+          existingRider.otpUnblockAfterThisTime = new Date(
+            Date.now() + 30 * 60 * 1000
+          ); // 30 mins block
+          await existingRider.save();
+
+          await SendWhatsAppMessage(
+            `Hi ${existingRider.name || "User"
+            },\n\nYou’ve attempted OTP verification too many times.\nYour account has been temporarily locked for 30 minutes. Please try again later.\n\n- Team Olyox`,
+            phone
+          );
+
+          return res.status(429).json({
+            success: false,
+            message: "Too many OTP attempts. You are blocked for 30 minutes.",
+          });
+        }
+
+        // Resend OTP
+        const otp = generateOtp();
+        existingRider.otp = otp;
+        existingRider.howManyTimesHitResend += 1;
+        existingRider.isDocumentUpload = false;
+        await existingRider.save();
+        console.log("OTP resent:", otp);
+
+        await SendWhatsAppMessage(
+          `Hi ${existingRider.name || "User"
+          },\n\nYour OTP for registering as ${role} rider is: ${otp}\n\nPlease use this to complete your registration.\n\n- Team Olyox`,
+          phone
+        );
+
+        return res.status(200).json({
+          success: true,
+          message: `OTP resent. Please verify to continue registration.`,
+        });
+      }
+
+      console.log("Phone already registered and verified");
+      return res.status(409).json({
+        success: false,
+        message: `Phone number already registered with a verified account.`,
+      });
+    }
+
+    // Check if Aadhar already exists
+    const existingAadhar = await Rider.findOne({ aadharNumber });
+    console.log("Aadhar Exists:", existingAadhar);
+    if (existingAadhar) {
+      return res.status(409).json({
+        success: false,
+        message: `Aadhar number already exists. Please use a different Aadhar or log in if it's your account.`,
+      });
+    }
+
+    // Check if vehicle number is already registered
+    const existingVehicle = await Rider.findOne({
+      "rideVehicleInfo.VehicleNumber": VehicleNumber,
+    });
+    console.log("Vehicle Exists:", existingVehicle);
+    if (existingVehicle) {
+      return res.status(409).json({
+        success: false,
+        message: `Vehicle number ${VehicleNumber} is already registered with another rider.`,
+      });
+    }
+
+    // Create new rider with OTP
+    const otp = generateOtp();
+    console.log("Generated OTP:", otp);
+
+    const newRider = new Rider({
+      name,
+      phone,
+      rideVehicleInfo: {
+        vehicleName,
+        vehicleType,
+        PricePerKm,
+        VehicleNumber,
+        RcExpireDate,
+      },
+      BH,
+      category: role,
+      aadharNumber,
+      otp,
+      isOtpVerify: false,
+      isDocumentUpload: false,
+      howManyTimesHitResend: 0,
+      isOtpBlock: false,
+    });
+
+    const savedRider = await newRider.save();
+    console.log("New Rider Saved:", savedRider);
+
+    // Send OTP via WhatsApp
+    const message = `Hi ${name},\n\nWelcome to Olyox!\nYour OTP for registering as a ${role} rider is: ${otp}.\n\nPlease verify your OTP to complete your registration.\n\nThank you for choosing us!\n- Team Olyox`;
+    await SendWhatsAppMessage(message, phone);
+    console.log("OTP message sent to:", phone);
+
+    return res.status(201).json({
+      success: true,
+      message: "Rider registration initiated. OTP sent successfully.",
+      rider: savedRider,
+    });
+  } catch (error) {
+    console.error("Error registering rider:", error);
+    return res.status(500).json({
+      success: false,
+      message:
+        "Something went wrong during registration. Please try again later.",
+    });
+  }
+};
+
+exports.getSingleRider = async (req, res) => {
+  try {
+  } catch (error) {
+    console.log("Internal server error", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+exports.updateRechargeDetails = async (req, res) => {
+  try {
+    const { rechargePlan, expireData, approveRecharge, BH } = req.body || {};
+
+    console.log("Request body:", req.body);
+
+    // Validate required fields
+    if (!BH) {
+      return res
+        .status(400)
+        .json({ success: false, message: "BH is required" });
+    }
+
+    // Find the rider by BH
+    const foundRider = await Rider.findOne({ BH });
+    if (!foundRider) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Rider not found" });
+    }
+
+    // If approveRecharge is true, update the recharge details
+    if (approveRecharge) {
+      foundRider.RechargeData = {
+        rechargePlan,
+        expireData,
+        approveRecharge: true,
+      };
+      foundRider.isPaid = true;
+
+      await foundRider.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "Recharge approved and rider marked as paid.",
+        data: foundRider,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Recharge approval is required.",
+      });
+    }
+  } catch (error) {
+    console.error("Error updating recharge details:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error." });
+  }
+};
+
+exports.login = async (req, res) => {
+  try {
+    const { number, otpType, fcmToken } = req.body;
+    // console.log("req.body",req.body)
+
+    if (!number) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number is required",
+      });
+    }
+
+    const partner = await Rider.findOne({ phone: number });
+
+    if (!partner) {
+      try {
+        const response = await axios.post(
+          `https://webapi.olyox.com/api/v1/getProviderDetailsByNumber`,
+          { number }
+        );
+
+        if (response.data.success) {
+          return res.status(403).json({
+            success: false,
+            message:
+              "You are registered with us on website but on vendor complete profile first!!",
+            redirect: "complete-profile",
+          });
+        }
+      } catch (error) {
+        console.log(error?.response?.data || error.message);
+        return res.status(402).json({
+          success: false,
+          message:
+            "Profile not found on website and app. Please register first!",
+        });
+      }
+    }
+
+    if (partner.isBlockByAdmin) {
+      return res.status(401).json({
+        success: false,
+        message: "Your account has been blocked by admin. Contact support.",
+      });
+    }
+
+    // Check if the user is blocked for OTP
+    if (partner.isOtpBlock) {
+      const currentTime = new Date();
+      const unblockTime = new Date(partner.otpUnblockAfterThisTime);
+
+      if (currentTime < unblockTime) {
+        return res.status(403).json({
+          success: false,
+          message: `You are blocked from requesting OTP. Please try again after ${unblockTime.toLocaleTimeString()}`,
+        });
+      }
+
+      // Unblock user
+      partner.isOtpBlock = false;
+      partner.otpUnblockAfterThisTime = null;
+      partner.howManyTimesHitResend = 0;
+    }
+
+    // ✅ Only update fcmToken if it's provided and different
+    if (fcmToken && fcmToken !== partner.fcmToken) {
+      partner.fcmToken = fcmToken;
+    }
+
+    // Generate and save OTP
+    const otp = number === "8287229430" ? "123456" : await generateOtp();
+    partner.otp = otp;
+    await partner.save();
+
+    // Send OTP
+    if (otpType === "text") {
+      await sendDltMessage(otp, number);
+    } else {
+      const otpMessage = `Your OTP for CaB registration is: ${otp}`;
+      await SendWhatsAppMessage(otpMessage, number);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "Please verify OTP sent to your phone.",
+      otp: otp,
+    });
+  } catch (error) {
+    res.status(501).json({
+      success: false,
+      error: error.message || "Something went wrong",
+    });
+  }
+};
+
+exports.saveFcmTokenToken = async (req, res) => {
+  try {
+    const riderId = req.user?.userId;
+    const { fcmToken } = req.body;
+    console.log(req.user);
+    console.log(fcmToken);
+    const partner = await Rider.findById(riderId);
+    if (!partner) {
+      return res.status(401).json({
+        success: false,
+        message: "Notification Update Not done",
+      });
+    }
+    if (fcmToken && fcmToken !== partner.fcmToken) {
+      partner.fcmToken = fcmToken;
+    }
+    await partner.save();
+
+    res.status(201).json({
+      success: true,
+      message: "Notification Update  done",
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.logoutRider = async (req, res) => {
+  try {
+    const { rider_id } = req.params || {};
+
+    const foundRider = await Rider.findById(rider_id);
+    if (!foundRider) {
+      return res.status(401).json({
+        success: false,
+        message: "Please log in to access this feature.",
+      });
+    }
+
+    // Prevent logout if there's an active ride
+    if (foundRider.on_ride_id) {
+      return res.status(402).json({
+        success: false,
+        message:
+          "You currently have an ongoing ride. Please complete the ride before logging out.",
+      });
+    }
+
+    // Update rider status
+    foundRider.isAvailable = false;
+    foundRider.on_ride_id = null;
+    await foundRider.save(); // important to persist the changes
+
+    // Clear authentication token
+    res.clearCookie("auth_token", {
+      httpOnly: true,
+      secure: true, // set to true in production
+      sameSite: "None",
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "You have been logged out successfully. See you next time!",
+    });
+  } catch (error) {
+    console.error("Logout error:", error);
+    return res.status(500).json({
+      success: false,
+      message:
+        "Oops! Something went wrong while logging out. Please try again later.",
+    });
+  }
+};
+
+exports.resendOtp = async (req, res) => {
+  try {
+    const { number } = req.body;
+
+    if (!number) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number is required",
+      });
+    }
+
+    const partner = await Rider.findOne({ phone: number });
+
+    if (!partner) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number is not registered",
+      });
+    }
+    if (partner.isOtpVerify) {
+      return res.status(400).json({
+        success: false,
+        message: "You have already verified your OTP",
+      });
+    }
+
+    // Check if OTP is blocked
+    if (partner.isOtpBlock) {
+      // Check if the unblock time has passed
+      const currentTime = new Date();
+      if (currentTime < partner.otpUnblockAfterThisTime) {
+        const timeRemaining =
+          (partner.otpUnblockAfterThisTime - currentTime) / 1000;
+        return res.status(400).json({
+          success: false,
+          message: `OTP resend is blocked. Try again in ${Math.ceil(
+            timeRemaining
+          )} seconds.`,
+        });
+      } else {
+        // Unblock the OTP after the set time has passed
+        partner.isOtpBlock = false;
+        partner.howManyTimesHitResend = 0; // Reset the resend attempts
+        partner.otpUnblockAfterThisTime = null; // Clear the unblock time
+        await partner.save();
+      }
+    }
+
+    // If resend limit is reached, block the OTP and set the unblock time
+    if (partner.howManyTimesHitResend >= 5) {
+      // Block the OTP and set the time for when it will be unblocked (e.g., 30 minutes)
+      partner.isOtpBlock = true;
+      partner.otpUnblockAfterThisTime = new Date(Date.now() + 30 * 60 * 1000); // Block for 30 minutes
+      await partner.save();
+
+      return res.status(400).json({
+        success: false,
+        message: "OTP resend limit reached. Please try again later.",
+      });
+    }
+
+    const otp = number === "8287229430" ? "123456" : await generateOtp();
+    partner.otp = otp;
+    partner.howManyTimesHitResend += 1;
+    await partner.save();
+
+    const otpMessage = `Your OTP for cab registration is: ${otp}`;
+    const data = await SendWhatsAppMessage(otpMessage, number);
+    console.log(data);
+    res.status(200).json({
+      success: true,
+      message: "OTP resent successfully. Please check your phone.",
+      otp: otp,
+    });
+  } catch (error) {
+    res.status(501).json({
+      success: false,
+      error: error.message || "Something went wrong",
+    });
+  }
+};
+
+exports.verifyOtp = async (req, res) => {
+  try {
+    const { number, otp } = req.body;
+
+    if (!number || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number and OTP are required",
+      });
+    }
+
+    const partner = await Rider.findOne({ phone: number });
+
+    if (!partner) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number is not registered",
+      });
+    }
+
+    // Check if OTP is valid
+    if (partner.otp !== otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP",
+      });
+    }
+
+    // ✅ Clear OTP and update verification status
+    partner.otp = null;
+    partner.isOtpVerify = true;
+    partner.howManyTimesHitResend = 0;
+    partner.isOtpBlock = false;
+    partner.otpUnblockAfterThisTime = null;
+
+    console.log("✅ OTP verified for number:", partner.phone);
+
+    // ✅ Try fetching recharge details ONLY if not already paid
+    if (!partner.isPaid) {
+      console.log(
+        "ℹ️ Partner is not paid, attempting to fetch recharge data..."
+      );
+
+      try {
+        const { success, payment_id, member_id } =
+          await checkBhAndDoRechargeOnApp({ number: partner.phone });
+
+        console.log("✅ Recharge API response:", {
+          success,
+          payment_id,
+          member_id,
+        });
+
+        if (
+          success &&
+          payment_id?.end_date &&
+          member_id?.title &&
+          member_id?.HowManyMoneyEarnThisPlan !== undefined &&
+          payment_id?.createdAt &&
+          typeof payment_id?.payment_approved !== "undefined"
+        ) {
+          partner.RechargeData = {
+            rechargePlan: member_id.title,
+            expireData: payment_id.end_date,
+            onHowManyEarning: member_id.HowManyMoneyEarnThisPlan,
+            whichDateRecharge: payment_id.createdAt,
+            approveRecharge: payment_id.payment_approved,
+          };
+          partner.isPaid = true;
+
+          console.log("✅ Recharge data saved for partner:", partner.phone);
+        } else {
+          console.log(
+            "⚠️ Recharge data incomplete or invalid, not updating RechargeData."
+          );
+        }
+      } catch (rechargeErr) {
+        console.error("❌ Recharge Fetch Failed:", rechargeErr.message);
+        // Don't update RechargeData on failure
+      }
+    } else {
+      console.log("ℹ️ Partner is already paid, skipping recharge fetch.");
+    }
+
+    // ✅ Save partner
+    await partner.save();
+    console.log("✅ Partner data saved successfully:", partner);
+
+    // ✅ Send token
+    await send_token(partner, { type: "CAB" }, res, req);
+  } catch (error) {
+    console.error("❌ OTP Verification Error:", error.message);
+    res.status(501).json({
+      success: false,
+      error: error.message || "Something went wrong",
+    });
+  }
+};
+
+// Get all riders
+exports.getAllRiders = async (req, res) => {
+  try {
+    const riders = await Rider.find();
+    res.status(200).json(riders);
+  } catch (error) {
+    console.error("Error fetching riders:", error);
+    res.status(500).json({ error: "Failed to fetch riders" });
+  }
+};
+
+exports.riderDocumentsVerify = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { DocumentVerify } = req.body;
+    const rider = await Rider.findById(id);
+    if (!rider) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Rider not found" });
+    }
+    rider.DocumentVerify = DocumentVerify;
+    await rider.save();
+    res.status(200).json({
+      success: true,
+      message: "Documents verified successfully",
+    });
+  } catch (error) {
+    console.log("Internal server error", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+// Change location of a rider
+exports.changeLocation = async (req, res) => {
+  try {
+    const { riderId } = req.params;
+    const { location } = req.body;
+
+    if (
+      !location ||
+      !Array.isArray(location.coordinates) ||
+      location.coordinates.length !== 2
+    ) {
+      return res.status(400).json({ error: "Invalid location format" });
+    }
+
+    const updatedRider = await Rider.findByIdAndUpdate(
+      riderId,
+      { location },
+      { new: true }
+    );
+
+    if (!updatedRider) {
+      return res.status(404).json({ error: "Rider not found" });
+    }
+
+    res
+      .status(200)
+      .json({ message: "Location updated successfully", rider: updatedRider });
+  } catch (error) {
+    console.error("Error updating location:", error);
+    res.status(500).json({ error: "Failed to update location" });
+  }
+};
+
+exports.uploadDocuments = async (req, res) => {
+  try {
+    console.log("➡️ /uploadDocuments called");
+
+    const userId = req.user?.userId;
+    if (!userId) {
+      console.log("❌ No user ID found");
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    console.log("✅ Extracted userId:", userId);
+    const findRider = await Rider.findById(userId);
+    if (!findRider) {
+      console.log("❌ Rider not found");
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    if (findRider.isDocumentUpload && findRider.DocumentVerify === true) {
+      return res.status(400).json({
+        success: false,
+        message: "Documents already uploaded and verified. Please login.",
+      });
+    }
+
+    const uploadedDocs = {};
+    const files = req.files || [];
+
+    if (files.length === 0) {
+      console.log("❌ No files found in request");
+      return res
+        .status(400)
+        .json({ success: false, message: "No files uploaded." });
+    }
+
+    for (const file of files) {
+      try {
+        const fileSizeKB = file.size / 1024;
+        console.log(
+          `📄 File received: ${file.originalname} (${fileSizeKB.toFixed(2)}KB)`
+        );
+
+        if (fileSizeKB > 1024) {
+          console.log("⚠️ File too large:", file.originalname);
+          await fs.unlink(file.path).catch(() => { });
+          return res.status(400).json({
+            success: false,
+            message: `${file.originalname} is larger than 1MB`,
+          });
+        }
+
+        console.log("☁️ Uploading to Cloudinary:", file.originalname);
+        const uploaded = await cloudinary.uploader.upload(file.path, {
+          folder: "rider_documents",
+          quality: "auto:low",
+          format: "jpg",
+        });
+
+        console.log("✅ Uploaded:", uploaded.secure_url);
+
+        if (file.originalname.includes("dl"))
+          uploadedDocs.license = uploaded.secure_url;
+        if (file.originalname.includes("rc"))
+          uploadedDocs.rc = uploaded.secure_url;
+        if (file.originalname.includes("insurance"))
+          uploadedDocs.insurance = uploaded.secure_url;
+        if (file.originalname.includes("aadharBack"))
+          uploadedDocs.aadharBack = uploaded.secure_url;
+        if (file.originalname.includes("aadharFront"))
+          uploadedDocs.aadharFront = uploaded.secure_url;
+        if (file.originalname.includes("pancard"))
+          uploadedDocs.pancard = uploaded.secure_url;
+        if (file.originalname.includes("profile"))
+          uploadedDocs.profile = uploaded.secure_url;
+
+        // Delete the temp file
+        try {
+          await fs.promises.unlink(file.path); // ✅ Promise-based
+          console.log(`✅ Temp file deleted: ${file.originalname}`);
+        } catch (err) {
+          console.warn(
+            `⚠️ Could not delete temp file: ${file.originalname}`,
+            err.message
+          );
+        }
+      } catch (fileErr) {
+        console.error("❌ Error processing file:", file.originalname, fileErr);
+        return res.status(500).json({
+          success: false,
+          message: `Failed to process ${file.originalname}`,
+          error: fileErr.message,
+        });
+      }
+    }
+
+    findRider.documents = uploadedDocs;
+    findRider.isDocumentUpload = true;
+    findRider.isProfileComplete = true;
+
+    try {
+      await findRider.save();
+      console.log("✅ Rider saved successfully");
+    } catch (dbErr) {
+      console.error("❌ Error saving rider:", dbErr);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to save documents",
+        error: dbErr.message,
+      });
+    }
+
+    // Prepare documents object
+    const documents = {
+      rc: { url: findRider?.documents?.rc || "", status: "pending", note: "" },
+      pollution: { url: "", status: "pending", note: "", expiryDate: null },
+      aadharFront: {
+        url: findRider?.documents?.aadharFront || "",
+        status: "pending",
+        note: "",
+      },
+      aadharBack: {
+        url: findRider?.documents?.aadharBack || "",
+        status: "pending",
+        note: "",
+      },
+      permit: { url: "", status: "pending", note: "", expiryDate: null },
+      licence: {
+        url: findRider?.documents?.license || "",
+        status: "pending",
+        note: "",
+        expiryDate: null,
+      },
+      insurance: {
+        url: findRider?.documents?.insurance || "",
+        status: "pending",
+        note: "",
+        expiryDate: null,
+      },
+      panCard: {
+        url: findRider?.documents?.pancard || "",
+        status: "pending",
+        note: "",
+      },
+    };
+
+    const newVehicle = new VehicleAdds({
+      riderId: findRider._id,
+      vehicleDetails: {
+        name: findRider?.rideVehicleInfo?.vehicleName || "",
+        type: findRider?.rideVehicleInfo?.vehicleType || "",
+        numberPlate:
+          findRider?.rideVehicleInfo?.VehicleNumber?.toUpperCase() || "",
+      },
+      isDefault: true,
+      isActive: false,
+      documents,
+    });
+
+    await newVehicle.save();
+
+    return res.status(201).json({
+      success: true,
+      message: "Documents uploaded successfully",
+      data: uploadedDocs,
+    });
+  } catch (mainErr) {
+    console.error("❌ Unexpected error in /uploadDocuments:", mainErr);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: mainErr.message,
+    });
+  }
+};
+
+exports.uploadPaymentQr = async (req, res) => {
+  try {
+    console.log("📥 Incoming QR Upload Request");
+
+    const file = req.file;
+    const userId = req.user.userId;
+
+    console.log("📌 User ID:", userId);
+
+    if (!file || !file.path) {
+      console.log("❌ No file uploaded");
+      return res
+        .status(400)
+        .json({ success: false, message: "No file uploaded" });
+    }
+
+    const findRider = await Rider.findById(userId);
+    if (!findRider) {
+      console.log("❌ Rider not found");
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    console.log("☁️ Uploading to Cloudinary:", file.path);
+    const uploadResponse = await cloudinary.uploader.upload(file.path, {
+      folder: "rider_qrs",
+    });
+
+    console.log("✅ Uploaded to Cloudinary:", uploadResponse.secure_url);
+
+    // Remove temp file
+    fs.unlinkSync(file.path);
+    console.log("🧹 Temp file deleted from server");
+
+    // Save URL to rider profile
+    findRider.YourQrCodeToMakeOnline = uploadResponse.secure_url;
+    await findRider.save();
+
+    console.log("📦 Rider document updated with QR");
+
+    return res.status(201).json({
+      success: true,
+      message: "QR code uploaded successfully",
+      data: uploadResponse,
+    });
+  } catch (error) {
+    console.error("🚨 Error uploading QR code:", error);
+    return res.status(500).json({
+      success: false,
+      message: "QR code upload failed",
+      error: error.message,
+    });
+  }
+};
+
+exports.details = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+
+    // Check if userId exists
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    // Find the partner
+    const partner = await Rider.findById(userId);
+    // console.log(partner)
+    // If partner not found, return error
+    if (!partner) {
+      return res.status(404).json({ message: "Partner not found" });
+    }
+
+    // Return response
+    return res.status(200).json({ success: true, partner });
+  } catch (error) {
+    console.error("Error fetching partner details:", error);
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.getMyAllDetails = async (req, res) => {
+  try {
+    const user_id = req.user?.userId;
+    if (!user_id) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    const driver = await Rider.findById(user_id);
+    if (!driver) {
+      return res.status(404).json({ message: "Driver not found" });
+    }
+
+    const completedRides = await NewRideModelModel.find({
+      driver: user_id,
+      ride_status: "completed",
+    });
+
+    const currentRide = driver?.on_ride_id
+      ? await NewRideModelModel.findById(driver.on_ride_id)
+      : null;
+
+    const todayIST = moment().tz("Asia/Kolkata").format("YYYY-MM-DD");
+
+    const todaySessionDoc = await CabRiderTimes.findOne({
+      riderId: user_id,
+      date: todayIST,
+    });
+
+    let totalSeconds = 0;
+    if (todaySessionDoc?.sessions?.length > 0) {
+      totalSeconds = todaySessionDoc.sessions.reduce((acc, session) => {
+        return acc + (session.duration || 0);
+      }, 0);
+    }
+
+    const totalHours = parseFloat((totalSeconds / 3600).toFixed(2));
+    const formattedHours = `${Math.floor(totalSeconds / 3600)}h ${Math.floor(
+      (totalSeconds % 3600) / 60
+    )}m`;
+
+    const totalRides = completedRides.length;
+    const totalEarnings = completedRides.reduce((sum, ride) => {
+      return sum + Number(ride?.pricing?.total_fare || 0);
+    }, 0);
+
+    const totalRatings = completedRides.reduce((sum, ride) => {
+      return sum + Number(ride?.driver_rating?.rating || 0);
+    }, 0);
+
+    const averageRating =
+      totalRides > 0 ? parseFloat((totalRatings / totalRides).toFixed(2)) : 0;
+
+    // === Extracting Today's Specific Data ===
+    const startOfToday = moment().tz("Asia/Kolkata").startOf("day").toDate();
+    const endOfToday = moment().tz("Asia/Kolkata").endOf("day").toDate();
+
+    const todayCompletedRides = await NewRideModelModel.find({
+      driver: user_id,
+      ride_status: "completed",
+      created_at: {
+        $gte: startOfToday,
+        $lte: endOfToday,
+      },
+    });
+
+    console.log("📊 Today's Completed Rides:", todayCompletedRides.length);
+    console.log("📅 Fcm Token:", driver?.fcmToken);
+    const todayEarnings = todayCompletedRides.reduce((sum, ride) => {
+      return sum + Number(ride?.pricing?.total_fare || 0);
+    }, 0);
+
+    console.log("📊 Today's Earnings:", todayEarnings);
+
+    const todayTrips = todayCompletedRides.length;
+    const timestamp = new Date().toISOString();
+
+    console.log("📊 Driver Ride Details:", {
+      isOnRide: !!driver.on_ride_id,
+      isAvailable: driver.isAvailable,
+      currentRide: currentRide || null,
+      totalRides,
+      totalEarnings,
+      averageRating,
+      loggedInHours: totalHours,
+      currentDate: todayIST,
+      location: driver.location?.coordinates,
+
+      earnings: todayEarnings || 0,
+      trips: todayTrips || 0,
+      hours: formattedHours,
+      lastUpdated: timestamp,
+    });
+    return res.status(200).json({
+      isOnRide: !!driver.on_ride_id,
+      isAvailable: driver.isAvailable,
+      currentRide: currentRide || null,
+      totalRides,
+      totalEarnings,
+      averageRating,
+      loggedInHours: totalHours,
+      currentDate: todayIST,
+      location: driver.location?.coordinates,
+
+      // ✅ New Fields
+      earnings: todayEarnings || 0,
+      trips: todayTrips || 0,
+      hours: formattedHours,
+      lastUpdated: timestamp,
+    });
+  } catch (error) {
+    console.error("Error fetching driver ride details:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getMyAllRides = async (req, res) => {
+  try {
+    const user_id = req.user?.userId;
+    if (!user_id) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    const findRideDetails = await NewRideModelModel.find({
+      driver: user_id,
+    }).sort({
+      createdAt: -1,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Ride details fetched successfully",
+      count: findRideDetails.length,
+      data: findRideDetails,
+    });
+  } catch (error) {
+    console.error("Error fetching ride details:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.toggleWorkStatusOfRider = async (req, res) => {
+  try {
+    const user_id = req.user?.userId;
+
+    if (!user_id) {
+      return res.status(401).json({ message: "User ID is required" });
+    }
+
+    // Fetch the current status of the rider
+    const rider = await Rider.findById({ _id: user_id });
+    if (!rider) {
+      return res.status(404).json({ message: "Rider not found" });
+    }
+
+    if (!rider.isPaid) {
+      return res.status(400).json({
+        message:
+          "Oops! It looks like your account isn’t recharged. Please top up to proceed.",
+      });
+    }
+
+    // Toggle the status dynamically
+    const newStatus = !rider.isAvailable;
+
+    // Check if rider is trying to go offline while having an active ride
+    if (!newStatus && rider.on_ride_id) {
+      return res.status(400).json({
+        message:
+          "You currently have an active ride. Please complete the ride before going offline.",
+      });
+    }
+
+    // Update rider's isAvailable status
+    const toggleStatus = await Rider.updateOne(
+      { _id: user_id },
+      { $set: { isAvailable: newStatus } }
+    );
+
+    if (toggleStatus.modifiedCount !== 1) {
+      return res.status(400).json({ message: "Status update failed" });
+    }
+
+    // Handle CabRider session tracking
+    const today = moment().format("YYYY-MM-DD");
+    let cabRider = await CabRiderTimes.findOne({
+      riderId: user_id,
+      date: today,
+    });
+
+    if (!cabRider) {
+      cabRider = new CabRiderTimes({
+        riderId: user_id,
+        status: newStatus ? "online" : "offline",
+        date: today,
+        sessions: [],
+      });
+    } else {
+      // Update status
+      cabRider.status = newStatus ? "online" : "offline";
+    }
+
+    if (newStatus) {
+      // Rider is going online - start a new session
+      cabRider.sessions.push({
+        onlineTime: new Date(),
+        offlineTime: null,
+        duration: null,
+      });
+    } else {
+      // Rider is going offline - close the last session
+      const lastSession = cabRider.sessions[cabRider.sessions.length - 1];
+      if (lastSession && !lastSession.offlineTime) {
+        lastSession.offlineTime = new Date();
+        lastSession.duration = Math.round(
+          (new Date() - new Date(lastSession.onlineTime)) / 60000
+        );
+      }
+    }
+
+    await cabRider.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Status updated to ${newStatus ? "Available (Online)" : "Unavailable (Offline)"
+        } successfully.`,
+      cabRider,
+    });
+  } catch (error) {
+    console.error("Error toggling work status:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+exports.AdmintoggleWorkStatusOfRider = async (req, res) => {
+  try {
+    const user_id = req.params.id;
+
+    if (!user_id) {
+      return res.status(401).json({ message: "User ID is required" });
+    }
+
+    // Fetch the current status of the rider
+    const rider = await Rider.findById({ _id: user_id });
+    if (!rider) {
+      return res.status(404).json({ message: "Rider not found" });
+    }
+
+    if (!rider.isPaid) {
+      return res.status(400).json({
+        message:
+          "Oops! It looks like your account isn’t recharged. Please top up to proceed.",
+      });
+    }
+
+    // Toggle the status dynamically
+    const newStatus = !rider.isAvailable;
+
+    // Check if rider is trying to go offline while having an active ride
+    if (!newStatus && rider.on_ride_id) {
+      return res.status(400).json({
+        message:
+          "You currently have an active ride. Please complete the ride before going offline.",
+      });
+    }
+
+    // Update rider's isAvailable status
+    const toggleStatus = await Rider.updateOne(
+      { _id: user_id },
+      { $set: { isAvailable: newStatus } }
+    );
+
+    if (toggleStatus.modifiedCount !== 1) {
+      return res.status(400).json({ message: "Status update failed" });
+    }
+
+    // Handle CabRider session tracking
+    const today = moment().format("YYYY-MM-DD");
+    let cabRider = await CabRiderTimes.findOne({
+      riderId: user_id,
+      date: today,
+    });
+
+    if (!cabRider) {
+      cabRider = new CabRiderTimes({
+        riderId: user_id,
+        status: newStatus ? "online" : "offline",
+        date: today,
+        sessions: [],
+      });
+    } else {
+      // Update status
+      cabRider.status = newStatus ? "online" : "offline";
+    }
+
+    if (newStatus) {
+      // Rider is going online - start a new session
+      cabRider.sessions.push({
+        onlineTime: new Date(),
+        offlineTime: null,
+        duration: null,
+      });
+    } else {
+      // Rider is going offline - close the last session
+      const lastSession = cabRider.sessions[cabRider.sessions.length - 1];
+      if (lastSession && !lastSession.offlineTime) {
+        lastSession.offlineTime = new Date();
+        lastSession.duration = Math.round(
+          (new Date() - new Date(lastSession.onlineTime)) / 60000
+        );
+      }
+    }
+
+    await cabRider.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Status updated to ${newStatus ? "Available (Online)" : "Unavailable (Offline)"
+        } successfully.`,
+      cabRider,
+    });
+  } catch (error) {
+    console.error("Error toggling work status:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+exports.markPaid = async (req, res) => {
+  try {
+    const { rechargePlan, expireData, approveRecharge, riderBh } =
+      req.body || {};
+
+    // Find the rider by ID
+    const findRider = await Rider.findOne({ BH: riderBh });
+
+    if (!findRider) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Rider not found" });
+    }
+
+    // If approveRecharge is true, update the recharge details
+    if (approveRecharge) {
+      findRider.RechargeData = {
+        rechargePlan: rechargePlan,
+        expireData: expireData,
+        approveRecharge: true,
+      };
+      findRider.isPaid = true;
+
+      // Save the updated rider details
+      await findRider.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "Recharge approved and rider marked as paid.",
+        data: findRider,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Recharge approval is required.",
+      });
+    }
+  } catch (error) {
+    console.error("Error in markPaid:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.getMySessionsByUserId = async (req, res) => {
+  try {
+    const userId = req.query.userId;
+
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required in query." });
+    }
+
+    const sessionsData = await CabRiderTimes.find({ riderId: userId }).sort({
+      date: -1,
+    });
+
+    if (!sessionsData.length) {
+      return res
+        .status(404)
+        .json({ message: "No session data found for this user." });
+    }
+
+    // Prepare response data
+    const result = sessionsData.map((daySession) => {
+      let totalDurationInSeconds = 0;
+
+      // Calculate total duration and format individual sessions
+      const formattedSessions = daySession.sessions.map((session) => {
+        if (session.onlineTime && session.offlineTime) {
+          totalDurationInSeconds += session.duration * 60;
+        }
+
+        return {
+          onlineTime: session.onlineTime,
+          offlineTime: session.offlineTime || "Active", // If still online
+          duration: session.duration
+            ? `${Math.floor(session.duration)} min`
+            : "Ongoing",
+        };
+      });
+
+      // Format total time for the day
+      const hours = Math.floor(totalDurationInSeconds / 3600);
+      const minutes = Math.floor((totalDurationInSeconds % 3600) / 60);
+      const seconds = totalDurationInSeconds % 60;
+
+      const totalTimeFormatted = `${hours}h ${minutes}m ${seconds}s`;
+
+      return {
+        date: daySession.date,
+        totalSessions: daySession.sessions.length,
+        totalTimeOnline: totalTimeFormatted,
+        sessions: formattedSessions,
+      };
+    });
+
+    return res.status(200).json({
+      message: "Session data fetched successfully.",
+      data: result,
+    });
+  } catch (error) {
+    console.error("Error fetching session data:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+exports.verifyDocument = async (req, res) => {
+  try {
+    const BH = req.query.bh || {};
+    const findRider = await Rider.findOne({ BH });
+
+    if (!findRider) {
+      return res.status(404).json({ message: "Rider not found" });
+    }
+
+    if (findRider.DocumentVerify === true) {
+      return res.status(200).json({ message: "Document already verified" });
+    }
+
+    const verifyDocument = await Rider.updateOne(
+      { BH },
+      { $set: { DocumentVerify: true } }
+    );
+
+    if (verifyDocument.modifiedCount === 1) {
+      // Send WhatsApp confirmation message
+      const congratsMessage = `🎉 Congratulations ${findRider.name}! 
+
+Your documents have been successfully verified, and you are now officially part of our team. 
+
+🚀 Get ready to start your journey with us, delivering excellence and earning great rewards. We appreciate your dedication and look forward to seeing you grow with us.
+
+💡 Stay active, provide the best service, and unlock more opportunities in the future.
+
+Welcome aboard! 🚖💨`;
+
+      await SendWhatsAppMessage(congratsMessage, findRider.phone);
+
+      return res
+        .status(200)
+        .json({ message: "Document verified successfully" });
+    }
+
+    return res
+      .status(400)
+      .json({ message: "Verification failed, please try again." });
+  } catch (error) {
+    console.error("Error verifying document:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+exports.updateBlockStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isBlockByAdmin } = req.body;
+    const riderData = await Rider.findById(id);
+    if (!riderData) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Rider not found." });
+    }
+
+    riderData.isBlockByAdmin = isBlockByAdmin;
+    const result = await riderData.save();
+    return res.status(200).json({
+      success: true,
+      message: "Block status updated successfully",
+      data: result,
+    });
+  } catch (error) {
+    console.error("Error updating block status:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
+exports.getSingleRider = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const rider = await Rider.findById(id);
+    if (!rider) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Rider not found" });
+    }
+    res.status(200).json({
+      success: true,
+      message: "Rider found successfully",
+      data: rider,
+    });
+  } catch (error) {
+    console.log("Internal server error", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+exports.updateRiderDocumentVerify = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { DocumentVerify } = req.body || req.query;
+
+    const rider = await Rider.findById(id);
+    if (!rider) {
+      return res.status(404).json({
+        success: false,
+        message: "Rider not found",
+      });
+    }
+
+    // Update document verification status
+    rider.DocumentVerify = DocumentVerify;
+
+    async function grantFreeTier(rider) {
+      rider.isFreeMember = true;
+      rider.isPaid = true;
+
+      const oneYearLater = new Date();
+      oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
+      rider.freeTierEndData = oneYearLater;
+
+      rider.RechargeData = {
+        rechargePlan: "Free Tier",
+        expireData: oneYearLater,
+        approveRecharge: true,
+      };
+
+      await SendWhatsAppMessage(
+        `🎉 Dear ${rider.name
+        }, your documents have been successfully verified, and you've been granted 1 year of Free Tier membership! 🗓️
+    
+    ✅ Plan: Free Tier  
+    ✅ Valid Till: ${oneYearLater.toDateString()}  
+    ✅ Recharge Status: Approved
+    
+    We’re excited to have you on board. Let’s make your journey productive and rewarding. Stay safe and deliver with pride! 🚀  
+    — Team Support`,
+        rider.phone
+      );
+    }
+
+    const vehicleName = rider.rideVehicleInfo?.vehicleName?.toLowerCase();
+    const vehicleType = rider.rideVehicleInfo?.vehicleType?.toLowerCase();
+
+    if (rider.category === "parcel") {
+      grantFreeTier(rider);
+    } else if (
+      rider.category === "cab" &&
+      (vehicleName === "bike" || vehicleType === "bike")
+    ) {
+      grantFreeTier(rider);
+    } else {
+      // All other cases
+      await SendWhatsAppMessage(
+        `✅ Hello ${rider.name}, your documents have been successfully verified! 🎉
+    
+    You are now fully approved to continue providing your services on our platform.
+    
+    Thank you for your patience and welcome to the community! 😊  
+    — Team Support`,
+        rider.phone
+      );
+    }
+
+    const result = await rider.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Rider documents verified and updated successfully.",
+      data: result,
+    });
+  } catch (error) {
+    console.error("Internal server error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while verifying the documents.",
+    });
+  }
+};
+
+exports.updateRiderDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, phone, rideVehicleInfo } = req.body;
+
+    // Find the existing rider
+    const existingData = await Rider.findById(id);
+    if (!existingData) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Rider not found" });
+    }
+
+    console.log("Existing Rider Data:", existingData);
+
+    // Update basic details if provided
+    if (name) existingData.name = name;
+    if (phone) existingData.phone = phone;
+
+    // Update ride vehicle details if provided
+    if (rideVehicleInfo) {
+      existingData.rideVehicleInfo = {
+        ...existingData.rideVehicleInfo,
+        ...rideVehicleInfo, // Merge existing & new data
+      };
+    }
+
+    console.log("Received Files:", req.files);
+
+    // Handle document uploads if files are provided
+    if (req.files && req.files.length > 0) {
+      const uploadedDocs = { ...existingData.documents };
+
+      for (const file of req.files) {
+        // Upload file to Cloudinary
+        const uploadResponse = await cloudinary.uploader.upload(file.path, {
+          folder: "rider_documents",
+        });
+
+        console.log(
+          `Uploading file: ${file.fieldname} -> ${uploadResponse.secure_url}`
+        );
+
+        // Assign uploaded file URL dynamically based on fieldname
+        uploadedDocs[file.fieldname] = uploadResponse.secure_url;
+
+        // Delete the local file after upload
+        fs.unlinkSync(file.path);
+      }
+
+      // Merge updated documents with existing ones
+      existingData.documents = { ...existingData.documents, ...uploadedDocs };
+      existingData.markModified("documents"); // Ensure Mongoose detects the change
+    }
+
+    // Save the updated rider details
+    await existingData.save();
+
+    console.log("Updated Rider Data:", await Rider.findById(id));
+
+    res.status(200).json({
+      success: true,
+      message: "Rider details updated successfully",
+      data: existingData,
+    });
+  } catch (error) {
+    console.error("Internal server error", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.getOnlineTimeByRiderId = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const riderStatus = await CabRiderTimes.find({ riderId: id });
+    if (!riderStatus) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No data found", data: [] });
+    }
+    res.status(200).json({
+      success: true,
+      message: "Online time found successfully",
+      data: riderStatus,
+    });
+  } catch (error) {
+    console.log("Internal server error", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.deleteRider = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deletedRider = await Rider.findByIdAndDelete(id);
+    if (!deletedRider) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Rider not found" });
+    }
+    res.status(200).json({
+      success: true,
+      message: "Rider deleted successfully",
+      data: deletedRider,
+    });
+  } catch (error) {
+    console.log("Internal server error", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.getMyEligibleBonus = async (req, res) => {
+  try {
+    const userId = req.user?.userId || req.query.userId || req.params.userId;
+    // console.log("UserId:", userId);
+
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required in query." });
+    }
+
+    const sessionsData = await CabRiderTimes.find({ riderId: userId }).sort({
+      date: -1,
+    });
+    // console.log("Fetched sessionsData:", sessionsData.length);
+
+    if (!sessionsData.length) {
+      return res
+        .status(404)
+        .json({ message: "No session data found for this user." });
+    }
+
+    const BonusAvailableInDb = await Bonus_Model.find();
+    // console.log("Fetched BonusAvailableInDb:", BonusAvailableInDb.length);
+
+    if (!BonusAvailableInDb.length) {
+      return res.status(404).json({ message: "No bonuses available." });
+    }
+
+    let eligibleBonus = [];
+    let notEligibleBonus = [];
+
+    let totalDurationHours = 0;
+
+    // Calculate total working hours
+    for (let sessionData of sessionsData) {
+      for (let session of sessionData.sessions) {
+        // console.log("Processing session:", session);
+
+        const onlineTime = momentTz(session.onlineTime).tz("Asia/Kolkata");
+        const offlineTime = momentTz(session.offlineTime).tz("Asia/Kolkata");
+
+        // console.log("OnlineTime:", onlineTime.isValid() ? onlineTime.format() : "Invalid");
+        // console.log("OfflineTime:", offlineTime.isValid() ? offlineTime.format() : "Invalid");
+
+        if (!onlineTime.isValid() || !offlineTime.isValid()) {
+          // console.log("Skipping invalid session times.");
+          continue; // skip this session
+        }
+
+        const durationMinutes = offlineTime.diff(onlineTime, "minutes");
+        const durationHours = durationMinutes / 60;
+
+        // console.log("Session durationMinutes:", durationMinutes, "durationHours:", durationHours);
+
+        if (!isNaN(durationHours)) {
+          totalDurationHours += durationHours;
+        } else {
+          console.log("Invalid durationHours, skipping...");
+        }
+      }
+    }
+
+    // console.log("Total Duration Hours:", totalDurationHours);
+
+    // Now check for bonuses
+    BonusAvailableInDb.forEach((bonus) => {
+      // console.log("Checking bonus:", bonus);
+
+      const anyRequiredField = [
+        `Complete login hours: ${bonus.requiredHours} hours worked.`,
+        "Do not reject more than 5 bonus claims per month to maintain eligibility.",
+        "Requires regular check-ins and updates for performance.",
+      ];
+
+      if (totalDurationHours >= bonus.requiredHours) {
+        console.log(
+          `Eligible: totalDurationHours(${totalDurationHours}) >= requiredHours(${bonus.requiredHours})`
+        );
+
+        eligibleBonus.push({
+          requiredHours: bonus.requiredHours,
+          bonusCouponCode: bonus.bonusCouponCode,
+          bonusType: bonus.bonusType,
+          bonusValue: bonus.bonusValue,
+          bonusStatus: bonus.bonusStatus,
+          any_required_field: anyRequiredField,
+          remainingHours: parseFloat(
+            (totalDurationHours - bonus.requiredHours).toFixed(2)
+          ),
+        });
+      } else {
+        // console.log(`Not Eligible: totalDurationHours(${totalDurationHours}) < requiredHours(${bonus.requiredHours})`);
+
+        notEligibleBonus.push({
+          requiredHours: bonus.requiredHours,
+          bonusCouponCode: bonus.bonusCouponCode,
+          bonusType: bonus.bonusType,
+          bonusValue: bonus.bonusValue,
+          bonusStatus: bonus.bonusStatus,
+          any_required_field: anyRequiredField,
+          remainingHours: parseFloat(
+            (bonus.requiredHours - totalDurationHours).toFixed(2)
+          ),
+        });
+      }
+    });
+
+    // console.log("Eligible Bonuses:", eligibleBonus);
+    // console.log("Not Eligible Bonuses:", notEligibleBonus);
+
+    return res.status(200).json({
+      message:
+        "Rider's eligible and not eligible bonuses fetched successfully.",
+      eligibleBonus,
+      notEligibleBonus,
+    });
+  } catch (error) {
+    console.error("Error fetching eligible bonus:", error);
+    return res.status(500).json({
+      message: "An error occurred while fetching eligible bonuses.",
+      error: error.message,
+    });
+  }
+};
+
+exports.inProgressOrder = async (req, res) => {
+  try {
+    const userId = req.user?.userId || req.query.userId || req.params.userId;
+
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required in query." });
+    }
+
+    const rider = await Rider.findOne({ _id: userId, category: "parcel" });
+    if (!rider) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Rider not found" });
+    }
+
+    // Fetch all accepted orders for this rider
+    const inProgress = await Parcel_Request.find({
+      rider_id: userId,
+      status: {
+        $not: /^(pending|delivered|cancelled)$/i,
+      },
+    });
+
+    if (inProgress.length === 0) {
+      // No in-progress orders found
+      return res.status(200).json({
+        success: true,
+        message: "No in-progress orders found.",
+        inProgressOrders: [],
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "In-progress orders fetched successfully.",
+      inProgressOrders: inProgress,
+    });
+  } catch (error) {
+    console.error("Error fetching in-progress orders:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while fetching in-progress orders.",
+      error: error.message,
+    });
+  }
+};
+
+exports.parcelDashboardData = async (req, res) => {
+  try {
+    const userId = req.user?.userId || req.query.userId || req.params.userId;
+
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required in query." });
+    }
+
+    const rider = await Rider.findOne({ _id: userId, category: "parcel" });
+    if (!rider) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Rider not found" });
+    }
+
+    const howManyDeliverDone = await Parcel_Request.countDocuments({
+      rider_id: userId,
+      status: "delivered",
+    });
+
+    const inProgress = await Parcel_Request.find({
+      rider_id: userId,
+      status: {
+        $not: /^(pending|delivered|cancelled)$/i,
+      },
+    });
+
+    const deliveredRequests = await Parcel_Request.find({
+      rider_id: userId,
+      status: "delivered",
+    });
+
+    const totalMoneyEarned = deliveredRequests.reduce(
+      (acc, cur) => acc + Number(cur?.fares?.payableAmount || 0),
+      0
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Parcel dashboard data fetched successfully.",
+      data: {
+        totalDeliveries: howManyDeliverDone,
+        inProgressDeliveries: inProgress.length,
+        totalEarnings: totalMoneyEarned,
+        ridesRejected: rider.ridesRejected,
+      },
+    });
+  } catch (error) {
+    console.error("Internal server error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while fetching dashboard data.",
+      error: error.message,
+    });
+  }
+};
+
+exports.assignFreeRechargeToRider = async (req, res) => {
+  try {
+    console.log("📩 Incoming request for free recharge:", req.body);
+    const { number, rechargeData } = req.body;
+
+    if (!number || !rechargeData) {
+      console.error("❌ Missing required fields in request body");
+      return res.status(400).json({
+        success: false,
+        message: "Phone number and recharge data are required",
+      });
+    }
+
+    // Find rider
+    const rider = await Rider.findOne({ phone: number });
+    if (!rider) {
+      console.warn(`⚠️ Rider not found with number: ${number}`);
+      return res.status(404).json({
+        success: false,
+        message: "Rider not found",
+      });
+    }
+
+    console.log("✅ Rider found:", rider._id);
+
+    // Expiry handling
+    const currentExpire = rider.RechargeData?.expireData
+      ? new Date(rider.RechargeData.expireData)
+      : new Date();
+
+    // If API sends end_date as Date string, ensure it's a Date
+    const newExpireDate = rechargeData?.end_date
+      ? new Date(rechargeData.end_date)
+      : new Date(new Date().setFullYear(new Date().getFullYear() + 1));
+
+    console.log("📆 Current Expiry:", currentExpire);
+    console.log("📆 New Expiry from API:", newExpireDate);
+
+    // Final expiry = max of current expiry and new expiry
+    const finalExpire =
+      currentExpire > newExpireDate ? currentExpire : newExpireDate;
+
+    rider.RechargeData = {
+      onHowManyEarning: rechargeData?.plan?.HowManyMoneyEarnThisPlan || 0,
+      whichDateRecharge: new Date(),
+      rechargePlan: rechargeData?.plan?.title || "Free Tier",
+      expireData: finalExpire,
+      approveRecharge: true,
+    };
+
+    rider.isPaid = true;
+    rider.isFreeMember = true;
+    rider.freeTierEndData = finalExpire;
+
+    // Save rider
+    const result = await rider.save();
+    console.log("💾 Rider updated successfully:", result);
+
+    // Notification (only if FCM token exists)
+    if (rider.fcmToken) {
+      const title = "🎉 Congratulations! Free Recharge Activated 🚀";
+      const body = `Your plan "${rider.RechargeData.rechargePlan
+        }" is now active. Enjoy your benefits until ${rider.RechargeData.expireData.toDateString()}!`;
+
+      try {
+        await sendNotification.sendNotification(
+          rider.fcmToken,
+          title,
+          body,
+          {},
+          true
+        );
+        console.log("📲 Notification sent to rider:", rider._id);
+      } catch (notifError) {
+        console.error("❌ Failed to send notification:", notifError.message);
+      }
+    } else {
+      console.warn("⚠️ Rider has no FCM token, skipping notification");
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Rider marked as paid with free recharge",
+      data: result,
+    });
+  } catch (error) {
+    console.error(
+      "🔥 Error in assignFreeRechargeToRider:",
+      error.message,
+      error.stack
+    );
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error while assigning free recharge",
+      error: error.message,
+    });
+  }
+};
+
+exports.addOnVehicle = async (req, res) => {
+  try {
+    const user_id = req.user?.userId;
+    if (!user_id) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    const driver = await Rider.findById(user_id);
+    if (!driver) {
+      return res.status(404).json({ message: "Driver not found" });
+    }
+
+    const { vehicleDetails } = req.body;
+    const files = req.files; // Uploaded files array
+
+    // Initialize documents object with all keys
+    const documents = {
+      rc: { url: "", status: "pending", note: "" },
+      pollution: { url: "", status: "pending", note: "", expiryDate: null },
+      aadharFront: { url: "", status: "pending", note: "" },
+      aadharBack: { url: "", status: "pending", note: "" },
+      permit: { url: "", status: "pending", note: "", expiryDate: null },
+      licence: { url: "", status: "pending", note: "", expiryDate: null },
+      insurance: { url: "", status: "pending", note: "", expiryDate: null },
+      panCard: { url: "", status: "pending" },
+    };
+
+    // Upload each file to Cloudinary and assign to proper field
+    if (files && files.length > 0) {
+      for (let file of files) {
+        // Determine document type from originalname (before extension)
+        const docType = file.originalname.split(".")[0]; // e.g., "aadharBack"
+
+        if (documents.hasOwnProperty(docType)) {
+          const uploaded = await cloudinary.uploader.upload(file.path, {
+            folder: `vehicles/${driver._id}/${vehicleDetails.numberPlate}`,
+          });
+
+          // Assign secure URL to the corresponding document
+          documents[docType].url = uploaded.secure_url;
+
+          // Optional: log the uploaded URL
+          console.log(`Uploaded ${docType}:`, uploaded.secure_url);
+        }
+      }
+    }
+
+    // Create new Vehicle record
+    const newVehicle = new VehicleAdds({
+      riderId: driver._id,
+      vehicleDetails: {
+        name: vehicleDetails.name,
+        type: vehicleDetails.type,
+        numberPlate: vehicleDetails.numberPlate.toUpperCase(),
+      },
+      documents, // Assign all documents
+    });
+
+    await newVehicle.save();
+
+    console.log("Vehicle Added Successfully:", newVehicle);
+
+    return res.status(200).json({
+      success: true,
+      message: "Vehicle registered successfully",
+      data: newVehicle,
+    });
+  } catch (error) {
+    console.error("Error in addOnVehicle:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+      error: error.message,
+    });
+  }
+};
+
+exports.getMyAddOnVehicle = async (req, res) => {
+  try {
+    const user_id = req.user?.userId;
+    if (!user_id) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    const findDetails = await VehicleAdds.find({ riderId: user_id }); // ✅ fixed
+
+    if (!findDetails || findDetails.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        message: "No Other Vehicle Adds Request Raised",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: findDetails,
+      message: "Details Found Successfully",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      data: [],
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+exports.updateVehicleDetailsForDriver = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: "User ID is required" });
+    }
+
+    const driver = await Rider.findById(userId);
+    if (!driver) {
+      return res.status(404).json({ success: false, message: "Driver not found" });
+    }
+
+    const { activeVehicleId } = req.body;
+    if (!activeVehicleId) {
+      return res.status(400).json({ success: false, message: "activeVehicleId is required" });
+    }
+
+    const vehicleDoc = await VehicleAdds.findOne({ riderId: userId, _id: activeVehicleId });
+    if (!vehicleDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Vehicle not found for this driver",
+      });
+    }
+
+    // Only allow update if approved
+    if (vehicleDoc.vehicleApprovedForRunning?.status === "approved") {
+      driver.rideVehicleInfo = {
+        vehicleName: vehicleDoc.vehicleDetails?.name || "",
+        vehicleType: vehicleDoc.vehicleDetails?.type || "",
+        VehicleNumber: vehicleDoc.vehicleDetails?.numberPlate || "",
+      };
+
+      await driver.save();
+
+      // Reset other vehicles' isActive flag and set this one
+      await VehicleAdds.updateMany(
+        { riderId: userId },
+        { $set: { isActive: false } }
+      );
+      vehicleDoc.isActive = true;
+     
+      await vehicleDoc.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "Driver vehicle updated successfully",
+        data: {
+          rider: driver,
+          activeVehicle: vehicleDoc,
+        },
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Selected vehicle is not approved for running",
+      });
+    }
+  } catch (error) {
+    console.error("❌ Error in updateVehicleDetailsForDriver:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+
+exports.updateDriverVehicleAddsOn = async (req, res) => {
+  try {
+    // Fetch all riders
+    const drivers = await Rider.find();
+
+    if (!drivers || drivers.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No drivers found",
+      });
+    }
+
+    let created = [];
+
+    for (let index = 0; index < drivers.length; index++) {
+      const element = drivers[index];
+
+      // Prepare documents object
+      const documents = {
+        rc: { url: element?.documents?.rc || "", status: "approved", note: "" },
+        pollution: { url: "", status: "approved", note: "", expiryDate: null },
+        aadharFront: {
+          url: element?.documents?.aadharFront || "",
+          status: "approved",
+          note: "",
+        },
+        aadharBack: {
+          url: element?.documents?.aadharBack || "",
+          status: "approved",
+          note: "",
+        },
+        permit: { url: "", status: "approved", note: "", expiryDate: null },
+        licence: {
+          url: element?.documents?.license || "",
+          status: "approved",
+          note: "",
+          expiryDate: null,
+        },
+        insurance: {
+          url: element?.documents?.insurance || "",
+          status: "approved",
+          note: "",
+          expiryDate: null,
+        },
+        panCard: {
+          url: element?.documents?.pancard || "",
+          status: "approved",
+          note: "",
+        },
+      };
+
+      // Skip if no vehicle info
+      if (!element?.rideVehicleInfo) continue;
+
+      const newVehicle = new VehicleAdds({
+        riderId: element._id,
+        vehicleDetails: {
+          name: element?.rideVehicleInfo?.vehicleName || "",
+          type: element?.rideVehicleInfo?.vehicleType || "",
+          numberPlate:
+            element?.rideVehicleInfo?.VehicleNumber?.toUpperCase() || "",
+        },
+        documents,
+      });
+
+      await newVehicle.save();
+      created.push(newVehicle);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "VehicleAdds records created successfully",
+      count: created.length,
+      data: created,
+    });
+  } catch (error) {
+    console.error("Error in updateDriverVehicleAddsOn:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
