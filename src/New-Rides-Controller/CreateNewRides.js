@@ -2868,7 +2868,7 @@ try {
         amount: discountAmount
     });
 
-    const response = await axios.post('https://newweb.olyox.com/api/v1/add-amount-on-wallet', {
+    const response = await axios.post('https://webapi.olyox.com/api/v1/add-amount-on-wallet', {
         BhId: foundRider?.BH,
         amount: discountAmount
     });
