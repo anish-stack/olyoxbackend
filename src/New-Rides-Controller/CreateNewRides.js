@@ -695,34 +695,29 @@ const initiateDriverSearch = async (rideId, req, res) => {
 
                     let decision = false;
 
-                    switch (vehicleType) {
-                        case "MINI":
-                            decision = (
-                                driverType === "MINI" ||
-                                (driverType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
-                                ((driverType === "SUV" || driverType === "XL" || driverType === "SUV/XL") &&
-                                    prefs.OlyoxAcceptMiniRides?.enabled)
-                            );
-                            break;
+                    // Normalize input to uppercase to handle any case variations
+                    const vType = vehicleType?.toUpperCase();
+                    const dType = driverType?.toUpperCase();
 
-                        case "SEDAN":
-                            decision = (
-                                driverType === "SEDAN" ||
-                                ((driverType === "SUV" || driverType === "XL" || driverType === "SUV/XL") &&
-                                    prefs.OlyoxAcceptSedanRides?.enabled)
-                            );
-                            break;
-
-                        case "SUV":
-                        case "SUV/XL":
-
-                        case "XL":
-                            decision = driverType === "SUV/XL" || driverType === "XL" || driverType === "SUV";
-                            break;
-
-                        default:
-                            decision = false;
+                    if (vType === "MINI") {
+                        decision = (
+                            dType === "MINI" ||
+                            (dType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
+                            ((dType === "SUV" || dType === "XL" || dType === "SUV/XL") &&
+                                prefs.OlyoxAcceptMiniRides?.enabled)
+                        );
+                    } else if (vType === "SEDAN") {
+                        decision = (
+                            dType === "SEDAN" ||
+                            ((dType === "SUV" || dType === "XL" || dType === "SUV/XL") &&
+                                prefs.OlyoxAcceptSedanRides?.enabled)
+                        );
+                    } else if (vType === "SUV" || vType === "SUV/XL" || vType === "XL") {
+                        decision = dType === "SUV/XL" || dType === "XL" || dType === "SUV";
+                    } else {
+                        decision = false;
                     }
+
 
                     console.info(`✅ Decision: ${decision ? "ACCEPTED ✅" : "REJECTED ❌"}`);
                     console.info("--------------------------------------------------");
