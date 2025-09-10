@@ -715,7 +715,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
 
                         case "SUV":
                         case "SUV/XL":
-                        case "SUV/XL ":
+
                         case "XL":
                             decision = driverType === "SUV/XL" || driverType === "XL" || driverType === "SUV";
                             break;
@@ -1242,7 +1242,7 @@ const isRideAllowedByPreferences = (rideVehicleType, rider) => {
 
         case "SUV":
         case "SUV/XL":
-        case "SUV/XL ":
+
         case "XL":
             decision = driverType === "SUV/XL" || driverType === "XL" || driverType === "SUV";
             break;
@@ -1417,7 +1417,6 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
                     break;
                 case "SUV":
                 case "SUV/XL":
-                case "SUV/XL ":
                 case "XL":
                     decision = driverType === "SUV/XL" || driverType === "XL" || driverType === "SUV";
                     break;
@@ -2761,7 +2760,7 @@ exports.collectPayment = async (req, res) => {
     // Main transaction logic wrapped in a function for retry
     const executePaymentTransaction = async (attempt = 1) => {
         const session = await mongoose.startSession();
-        
+
         // State variables
         let paidAmount = 0;
         let discountUsed = 0;
@@ -2807,7 +2806,7 @@ exports.collectPayment = async (req, res) => {
             }
 
             const { user, driver, pricing } = foundRide;
-            
+
             // Get rider with session
             const foundRider = await RiderModel.findById(driver?._id).session(session);
 
@@ -2826,7 +2825,7 @@ exports.collectPayment = async (req, res) => {
             if (foundRide?.pricing?.discount > 0 && user) {
                 discountUsed = foundRide.pricing.discount;
                 const newCashback = Math.max(0, (user.cashback || 0) - discountUsed);
-                
+
                 const cashbackHistoryEntry = {
                     rideId: foundRide._id,
                     amount: discountUsed,
@@ -2859,45 +2858,45 @@ exports.collectPayment = async (req, res) => {
                 };
 
                 // Call external wallet API before updating database
-             let walletApiSuccess = false;
+                let walletApiSuccess = false;
 
-try {
-    console.log(`[Wallet API] Initiating request to add amount on wallet`);
-    console.log(`[Wallet API] Request Payload:`, {
-        BhId: foundRider?.BH,
-        amount: discountAmount
-    });
+                try {
+                    console.log(`[Wallet API] Initiating request to add amount on wallet`);
+                    console.log(`[Wallet API] Request Payload:`, {
+                        BhId: foundRider?.BH,
+                        amount: discountAmount
+                    });
 
-    const response = await axios.post('https://webapi.olyox.com/api/v1/add-amount-on-wallet', {
-        BhId: foundRider?.BH,
-        amount: discountAmount
-    });
+                    const response = await axios.post('https://webapi.olyox.com/api/v1/add-amount-on-wallet', {
+                        BhId: foundRider?.BH,
+                        amount: discountAmount
+                    });
 
-    console.log(`[Wallet API] Response Status: ${response.status}`);
-    console.log(`[Wallet API] Response Data:`, response.data);
+                    console.log(`[Wallet API] Response Status: ${response.status}`);
+                    console.log(`[Wallet API] Response Data:`, response.data);
 
-    if (response.data.success) {
-        walletApiSuccess = true;
-        console.log(`[Wallet API Success] BH: ${foundRider?.BH}, Amount: ₹${discountAmount}`);
-    } else {
-        console.warn(`[Wallet API Warning] API responded with success = false`);
-    }
+                    if (response.data.success) {
+                        walletApiSuccess = true;
+                        console.log(`[Wallet API Success] BH: ${foundRider?.BH}, Amount: ₹${discountAmount}`);
+                    } else {
+                        console.warn(`[Wallet API Warning] API responded with success = false`);
+                    }
 
-} catch (apiError) {
-    console.error(`[Wallet API Error] Request failed`);
-    if (apiError.response) {
-        // Server responded with a non-2xx status
-        console.error(`[Wallet API Error] Status: ${apiError.response.status}`);
-        console.error(`[Wallet API Error] Data:`, apiError.response.data);
-    } else if (apiError.request) {
-        // Request was made but no response received
-        console.error(`[Wallet API Error] No response received from server.`);
-        console.error(`[Wallet API Error] Request:`, apiError.request);
-    } else {
-        // Something happened in setting up the request
-        console.error(`[Wallet API Error] Message:`, apiError.message);
-    }
-}
+                } catch (apiError) {
+                    console.error(`[Wallet API Error] Request failed`);
+                    if (apiError.response) {
+                        // Server responded with a non-2xx status
+                        console.error(`[Wallet API Error] Status: ${apiError.response.status}`);
+                        console.error(`[Wallet API Error] Data:`, apiError.response.data);
+                    } else if (apiError.request) {
+                        // Request was made but no response received
+                        console.error(`[Wallet API Error] No response received from server.`);
+                        console.error(`[Wallet API Error] Request:`, apiError.request);
+                    } else {
+                        // Something happened in setting up the request
+                        console.error(`[Wallet API Error] Message:`, apiError.message);
+                    }
+                }
 
 
                 if (!walletApiSuccess) {
@@ -2908,7 +2907,7 @@ try {
                     model: RiderModel,
                     filter: { _id: foundRider._id },
                     update: {
-                        $set: { 
+                        $set: {
                             Wallet: newWalletAmount,
                             TotalRides: (foundRider.TotalRides || 0) + 1,
                             points: (foundRider.points || 0) + Math.floor(Math.random() * 5) + 1,
@@ -2941,16 +2940,16 @@ try {
                         bonusAmount = Math.floor(Math.random() * (30 - 10 + 1)) + 10;
                         userGetCashback = true;
                         cashbackGet = bonusAmount;
-                        
+
                         console.log(`[First Ride Bonus] Giving ₹${bonusAmount} to user ${user._id}`);
 
-                        const currentUserUpdate = updates.find(u => 
+                        const currentUserUpdate = updates.find(u =>
                             u.model === User && u.filter._id.toString() === user._id.toString()
                         );
 
                         if (currentUserUpdate) {
                             // Merge with existing user update
-                            currentUserUpdate.update.$set.cashback = 
+                            currentUserUpdate.update.$set.cashback =
                                 (currentUserUpdate.update.$set.cashback || user.cashback || 0) + bonusAmount;
                             currentUserUpdate.update.$set.firstRideCompleted = true;
                             currentUserUpdate.update.$set.isFirstRideBonusRecived = true;
@@ -2972,8 +2971,8 @@ try {
 
                         // ---------------- REFERRAL BONUS ----------------
                         if (user.appliedReferralCode && bonusAmount > 0) {
-                            const referrer = await User.findOne({ 
-                                referralCode: user.appliedReferralCode 
+                            const referrer = await User.findOne({
+                                referralCode: user.appliedReferralCode
                             }).session(session);
 
                             if (referrer) {
@@ -2999,9 +2998,9 @@ try {
                         }
                     } else {
                         console.log(`[First Ride Bonus] Skipped. Fare ₹${totalFare} ≤ 100.`);
-                        
+
                         // Still need to update user status
-                        const currentUserUpdate = updates.find(u => 
+                        const currentUserUpdate = updates.find(u =>
                             u.model === User && u.filter._id.toString() === user._id.toString()
                         );
 
@@ -3028,7 +3027,7 @@ try {
                 }
             } else if (user) {
                 // Clear current ride for existing users
-                const currentUserUpdate = updates.find(u => 
+                const currentUserUpdate = updates.find(u =>
                     u.model === User && u.filter._id.toString() === user._id.toString()
                 );
 
@@ -3091,7 +3090,7 @@ try {
             }
 
             // Check if it's a transient transaction error that can be retried
-            const isRetriableError = 
+            const isRetriableError =
                 error.code === 112 || // WriteConflict
                 error.code === 11000 || // DuplicateKey
                 (error.errorLabels && error.errorLabels.includes('TransientTransactionError'));
@@ -3234,69 +3233,69 @@ exports.cancelRideByPoll = async (req, res) => {
 
 
 exports.RateYourRider = async (req, res) => {
-  try {
-    const { rideId } = req.params;
-    const { rating, feedback } = req.body;
+    try {
+        const { rideId } = req.params;
+        const { rating, feedback } = req.body;
 
-    if (!rideId || !rating) {
-      return res.status(400).json({ message: "Ride ID and rating are required." });
+        if (!rideId || !rating) {
+            return res.status(400).json({ message: "Ride ID and rating are required." });
+        }
+
+        const rideData = await RideBooking.findById(rideId)
+            .populate("user")
+            .populate("driver");
+
+        if (!rideData) {
+            return res.status(404).json({ message: "Ride not found." });
+        }
+
+        if (rideData.ride_status !== "completed") {
+            return res.status(400).json({ message: "Ride has not been completed." });
+        }
+
+        // Save rating in ride document
+        rideData.driver_rating = {
+            rating,
+            feedback: feedback || "",
+            created_at: new Date(),
+        };
+        await rideData.save();
+
+        // --- Update Driver Average Rating ---
+        const driver = rideData.driver;
+        if (!driver) {
+            return res.status(404).json({ message: "Driver not found." });
+        }
+
+        // ensure fields exist
+        if (!driver.TotalRatingsCount) driver.TotalRatingsCount = 0;
+        if (!driver.Ratings) driver.Ratings = 0;
+
+        let newAverage;
+        if (driver.TotalRatingsCount === 0 || driver.Ratings === 0) {
+            // first rating — just set directly
+            newAverage = rating;
+        } else {
+            // weighted average formula
+            newAverage = ((driver.Ratings * driver.TotalRatingsCount) + rating) / (driver.TotalRatingsCount + 1);
+        }
+
+        driver.Ratings = Math.max(1, Math.min(5, newAverage)); // clamp between 1–5
+        driver.TotalRatingsCount = driver.TotalRatingsCount + 1;
+
+        await driver.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Rating submitted successfully.",
+            rideRating: rideData.driver_rating,
+            driverAverageRating: driver.Ratings.toFixed(2),
+            totalRatings: driver.TotalRatingsCount,
+        });
+    } catch (error) {
+        console.error("❌ Error rating rider:", error);
+        return res.status(500).json({ message: "Internal Server Error." });
     }
-
-    const rideData = await RideBooking.findById(rideId)
-      .populate("user")
-      .populate("driver");
-
-    if (!rideData) {
-      return res.status(404).json({ message: "Ride not found." });
-    }
-
-    if (rideData.ride_status !== "completed") {
-      return res.status(400).json({ message: "Ride has not been completed." });
-    }
-
-    // Save rating in ride document
-    rideData.driver_rating = {
-      rating,
-      feedback: feedback || "",
-      created_at: new Date(),
-    };
-    await rideData.save();
-
-    // --- Update Driver Average Rating ---
-    const driver = rideData.driver;
-    if (!driver) {
-      return res.status(404).json({ message: "Driver not found." });
-    }
-
-    // ensure fields exist
-    if (!driver.TotalRatingsCount) driver.TotalRatingsCount = 0;
-    if (!driver.Ratings) driver.Ratings = 0;
-
-    let newAverage;
-    if (driver.TotalRatingsCount === 0 || driver.Ratings === 0) {
-      // first rating — just set directly
-      newAverage = rating;
-    } else {
-      // weighted average formula
-      newAverage = ((driver.Ratings * driver.TotalRatingsCount) + rating) / (driver.TotalRatingsCount + 1);
-    }
-
-    driver.Ratings = Math.max(1, Math.min(5, newAverage)); // clamp between 1–5
-    driver.TotalRatingsCount = driver.TotalRatingsCount + 1;
-
-    await driver.save();
-
-    return res.status(200).json({
-      success: true,
-      message: "Rating submitted successfully.",
-      rideRating: rideData.driver_rating,
-      driverAverageRating: driver.Ratings.toFixed(2),
-      totalRatings: driver.TotalRatingsCount,
-    });
-  } catch (error) {
-    console.error("❌ Error rating rider:", error);
-    return res.status(500).json({ message: "Internal Server Error." });
-  }
 };
 
 
@@ -3324,12 +3323,19 @@ exports.FindRiderNearByUser = async (req, res) => {
             {
                 $match: {
                     isAvailable: true,
-                    "rideVehicleInfo.vehicleType": vehicleType,
+                    $expr: {
+                        $regexMatch: {
+                            input: { $trim: { input: "$rideVehicleInfo.vehicleType" } }, // trims spaces
+                            regex: vehicleType, // your regex string
+                            options: "i"        // case-insensitive
+                        }
+                    },
                     $or: [
                         { on_ride_id: null },
                         { on_ride_id: "" }
-                    ],
-                },
+                    ]
+                }
+
             },
             {
                 $project: {

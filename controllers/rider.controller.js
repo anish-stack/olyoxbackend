@@ -1902,7 +1902,8 @@ exports.parcelDashboardData = async (req, res) => {
 
 exports.assignFreeRechargeToRider = async (req, res) => {
   try {
-    console.log("📩 Incoming request for free recharge:", req.body);
+    console.log("📩 Incoming request for free recharge, rider number:", req.body.number);
+
     const { number, rechargeData } = req.body;
 
     if (!number || !rechargeData) {
@@ -1925,12 +1926,12 @@ exports.assignFreeRechargeToRider = async (req, res) => {
 
     console.log("✅ Rider found:", rider._id);
 
-    // Expiry handling
+    // Current expiry
     const currentExpire = rider.RechargeData?.expireData
       ? new Date(rider.RechargeData.expireData)
       : new Date();
 
-    // If API sends end_date as Date string, ensure it's a Date
+    // Parse new expiry from API
     const newExpireDate = rechargeData?.end_date
       ? new Date(rechargeData.end_date)
       : new Date(new Date().setFullYear(new Date().getFullYear() + 1));
@@ -1942,10 +1943,12 @@ exports.assignFreeRechargeToRider = async (req, res) => {
     const finalExpire =
       currentExpire > newExpireDate ? currentExpire : newExpireDate;
 
+    // 🔄 Overwrite RechargeData
     rider.RechargeData = {
-      onHowManyEarning: rechargeData?.plan?.HowManyMoneyEarnThisPlan || 0,
+      onHowManyEarning: Number(rechargeData.HowManyMoneyEarnThisPlan) || 50000,
       whichDateRecharge: new Date(),
-      rechargePlan: rechargeData?.plan?.title || "Free Tier",
+      rechargePlan:
+        rechargeData?.plan?.title || rechargeData?.trn_no || "Free Tier",
       expireData: finalExpire,
       approveRecharge: true,
     };
@@ -1956,29 +1959,7 @@ exports.assignFreeRechargeToRider = async (req, res) => {
 
     // Save rider
     const result = await rider.save();
-    console.log("💾 Rider updated successfully:", result);
-
-    // Notification (only if FCM token exists)
-    if (rider.fcmToken) {
-      const title = "🎉 Congratulations! Free Recharge Activated 🚀";
-      const body = `Your plan "${rider.RechargeData.rechargePlan
-        }" is now active. Enjoy your benefits until ${rider.RechargeData.expireData.toDateString()}!`;
-
-      try {
-        await sendNotification.sendNotification(
-          rider.fcmToken,
-          title,
-          body,
-          {},
-          true
-        );
-        console.log("📲 Notification sent to rider:", rider._id);
-      } catch (notifError) {
-        console.error("❌ Failed to send notification:", notifError.message);
-      }
-    } else {
-      console.warn("⚠️ Rider has no FCM token, skipping notification");
-    }
+    console.log("💾 Rider updated successfully:", result._id);
 
     return res.status(200).json({
       success: true,
@@ -1986,11 +1967,7 @@ exports.assignFreeRechargeToRider = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    console.error(
-      "🔥 Error in assignFreeRechargeToRider:",
-      error.message,
-      error.stack
-    );
+    console.error("🔥 Error in assignFreeRechargeToRider:", error.message, error.stack);
     return res.status(500).json({
       success: false,
       message: "Internal server error while assigning free recharge",
@@ -1998,6 +1975,7 @@ exports.assignFreeRechargeToRider = async (req, res) => {
     });
   }
 };
+
 
 exports.addOnVehicle = async (req, res) => {
   try {

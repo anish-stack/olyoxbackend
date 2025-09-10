@@ -235,7 +235,7 @@ app.post('/directions', async (req, res) => {
     try {
         const data = req.body || {};
 
-        console.log(data)
+   
 
         if (!data?.pickup?.latitude || !data?.pickup?.longitude || !data?.dropoff?.latitude || !data?.dropoff?.longitude) {
             return res.status(400).json({ error: 'Invalid pickup or dropoff location data' });
