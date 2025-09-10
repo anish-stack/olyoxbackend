@@ -2,6 +2,14 @@ const mongoose = require('mongoose');
 
 const Schema = mongoose.Schema;
 
+const UpdateLogSchema = new Schema({
+    field: { type: String, required: true }, // e.g. 'location', 'fcmToken'
+    oldValue: { type: Schema.Types.Mixed },
+    newValue: { type: Schema.Types.Mixed },
+    changedAt: { type: Date, default: Date.now },
+    changedBy: { type: String, default: 'system' } // system, rider, admin
+}, { _id: false });
+
 const PreferenceHistorySchema = new Schema({
     enabled: {
         type: Boolean,
@@ -260,7 +268,7 @@ const RiderSchema = new Schema({
         type: Boolean,
         default: false
     },
-    IntercityRideComplete:{
+    IntercityRideComplete: {
         type: Number,
 
     },
@@ -379,6 +387,9 @@ const RiderSchema = new Schema({
             }
         }
     },
+
+    updateLogs: [UpdateLogSchema],
+
     activityLog: [
         {
             action: { type: String, required: true },
@@ -397,8 +408,28 @@ RiderSchema.index({ 'preferences.OlyoxPriority.enabled': 1 });
 // Middleware to update lastUpdated on save
 RiderSchema.pre('save', function (next) {
     this.lastUpdated = new Date();
+
+    // Track specific field updates
+    const fieldsToTrack = ['location', 'fcmToken'];
+    fieldsToTrack.forEach((field) => {
+        if (this.isModified(field)) {
+            this.updateLogs.push({
+                field,
+                oldValue: this.get(field, null, { getters: false, virtuals: false, defaults: false, alias: false }), // old value
+                newValue: this[field], // new value
+                changedBy: 'system'
+            });
+        }
+    });
+
+    // Keep only last 100 logs
+    if (this.updateLogs.length > 100) {
+        this.updateLogs = this.updateLogs.slice(-100);
+    }
+
     next();
 });
+
 
 RiderSchema.methods.updatePreference = function (preferenceName, enabled, changedBy = 'rider', reason = '') {
     if (!this.preferences[preferenceName]) {
