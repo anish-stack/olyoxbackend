@@ -117,6 +117,64 @@ app.post('/directions', async (req, res) => {
     }
 }); 
 
+const ANDROID_STORE = "https://play.google.com/store/apps/details?id=com.happy_coding.olyox&hl=en_IN";
+const IOS_STORE = "https://apps.apple.com/in/app/olyox-book-cab-hotel-food/id6744582670";
+
+
+const rides = {
+  "64a83f42": {
+    id: "64a83f42",
+    pickup: "Sector 99A",
+    drop: "Sector 29",
+    fare: 119.18
+  }
+};
+
+
+// Endpoint to share ride
+app.get("/share-ride/:rideId", (req, res) => {
+  const { rideId } = req.params;
+  const ride = rides[rideId];
+
+  if (!ride) return res.status(404).send("Ride not found");
+
+  // Deep link to open app ride page
+  const deepLink = `https://www.appv2.olyox.com/share-ride-to-loveone/${rideId}`;
+
+  const userAgent = req.headers["user-agent"] || "";
+
+  // Redirect logic
+  if (/android/i.test(userAgent)) {
+    // Android: open app if installed, otherwise Play Store
+    res.send(`
+      <script>
+        window.location = "${deepLink}";
+        setTimeout(() => { window.location = "${ANDROID_STORE}"; }, 2000);
+      </script>
+    `);
+  } else if (/iphone|ipad|ipod/i.test(userAgent)) {
+    // iOS: open app if installed, otherwise App Store
+    res.send(`
+      <script>
+        window.location = "${deepLink}";
+        setTimeout(() => { window.location = "${IOS_STORE}"; }, 2000);
+      </script>
+    `);
+  } else {
+    // Fallback web page
+    res.send(`
+      <h2>Ride from ${ride.pickup} to ${ride.drop}</h2>
+      <p>Fare: ₹${ride.fare}</p>
+      <p>Download the app to see full ride details:</p>
+      <ul>
+        <li><a href="${IOS_STORE}">iOS</a></li>
+        <li><a href="${ANDROID_STORE}">Android</a></li>
+      </ul>
+    `);
+  }
+});
+
+
 // Location webhook for cab drivers
 app.post(
   "/webhook/cab-receive-location",

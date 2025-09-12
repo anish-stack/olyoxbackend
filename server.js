@@ -154,9 +154,9 @@ async function sendPushNotification(expoPushTokens, title, body) {
 }
 
 // sendNotification.sendTestNotification("cTVlPvzWqE6WhQPcL87uQT:APA91bF-TV2a1TtNtrIJg_7iWtnb9kUfX8BhyHypQ-ZeAfMa3Dw_FtONXwCXnNnP-OcxxzNx4nRpIIP2G5OkXNA1ZRyBSSGerJ60lWUTIrhK0eQhB7oBFFw", "ios");
-debugIOSNotification("cTVlPvzWqE6WhQPcL87uQT:APA91bF-TV2a1TtNtrIJg_7iWtnb9kUfX8BhyHypQ-ZeAfMa3Dw_FtONXwCXnNnP-OcxxzNx4nRpIIP2G5OkXNA1ZRyBSSGerJ60lWUTIrhK0eQhB7oBFFw", "Test", "Debug test")
-  .then(() => console.log("Success!"))
-  .catch(console.error);
+// sendNotification.sendNotification("dbRY9fE1K0VIvE23QS8qYK:APA91bF_WAKSnkSYri3LFBX7VBegYzxhmRWJCqAOFEYRlO3Z7hNh-_ynFEX2BKVJur9d-vjyszJ5Cdt-zCy5uhFc6TU4ZI1wKVN_Iz9tdAmyja_DKTQCQe4", "Hey Buddy i am Your Ios Notification code", "This is not for test")
+//   .then(() => console.log("Success ios notification!"))
+//   .catch(console.error);
 // Example usage:
 // const expoPushTokens = ['ExponentPushToken[yBRBtTIa6xCmtrO8igmTz0]'];
 

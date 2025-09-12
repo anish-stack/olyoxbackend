@@ -67,10 +67,7 @@ const initializeFirebase = () => {
 const debugIOSNotification = async (token, title, body, eventData = {}) => {
   try {
     console.log("🔍 Starting iOS notification debug...");
-    
-         initializeFirebase();
-   
-
+    initializeFirebase();
     // Validate token format (iOS tokens are 64 hex characters)
     if (!token || token.length !== 64) {
       console.warn("⚠️ Invalid iOS token format. Should be 64 hex characters.");
@@ -79,7 +76,7 @@ const debugIOSNotification = async (token, title, body, eventData = {}) => {
     // Simplified message for testing APNs authentication
     const testMessage = {
       token: token,
-      
+
       notification: {
         title: title || "Test iOS Notification",
         body: body || "Testing APNs authentication",
@@ -114,7 +111,7 @@ const debugIOSNotification = async (token, title, body, eventData = {}) => {
     console.log("📤 Sending test message:", JSON.stringify(testMessage, null, 2));
 
     const response = await admin.messaging().send(testMessage);
-    
+
     console.log("✅ iOS notification sent successfully!");
     console.log("📊 Response:", response);
     return response;
@@ -123,7 +120,7 @@ const debugIOSNotification = async (token, title, body, eventData = {}) => {
     console.error("❌ iOS Notification Debug Failed:");
     console.error("Error Code:", error.code);
     console.error("Error Message:", error.message);
-    
+
     // Specific APNs error handling
     if (error.code === 'messaging/third-party-auth-error') {
       console.error("🔐 APNs Authentication Error - Check your APNs credentials in Firebase Console");
@@ -133,7 +130,7 @@ const debugIOSNotification = async (token, title, body, eventData = {}) => {
       console.error("3. Ensure Bundle ID matches exactly");
       console.error("4. Confirm APNs key has Push Notifications enabled");
     }
-    
+
     throw error;
   }
 };

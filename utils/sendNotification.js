@@ -65,23 +65,25 @@ const initializeFirebase = () => {
   }
 };
 
-
-
-// Rest of the code remains the same...
-const sendNotification = async (token, title, body, eventData = {}, channel) => {
+const sendNotification = async (token, title, body, eventData = null, channel) => {
   console.log("🔔 sendNotification() called with args:", {
     token: token ? token.substring(0, 15) + "..." : null,
     title,
     body,
-    channel
+    channel,
   });
 
-  console.log("ˇEvent",eventData.rideDetails)
+  if (eventData) {
+    console.log("📌 EventData detected:", eventData.rideDetails || {});
+  } else {
+    console.log("📌 No eventData provided — sending notification-only message.");
+  }
+
   try {
     // Validate input
     if (!token) {
       console.error("❌ No FCM token provided");
-      throw new NotificationError('No FCM token provided', 'INVALID_TOKEN');
+      throw new NotificationError("No FCM token provided", "INVALID_TOKEN");
     }
 
     console.log("✅ Token looks valid, proceeding...");
@@ -93,38 +95,39 @@ const sendNotification = async (token, title, body, eventData = {}, channel) => 
       console.log("✅ Firebase initialized successfully");
     } catch (initError) {
       console.error("❌ Firebase init failed:", initError.message);
-      throw new NotificationError('Failed to initialize Firebase', 'INIT_FAILED');
+      throw new NotificationError("Failed to initialize Firebase", "INIT_FAILED");
     }
-
-    // Default notification content
-    const defaultTitle = "👑 Royal Proclamation!";
-    const defaultBody = "Hear ye, hear ye! Anish and Manish have ascended the throne. All hail the kings who rule with wisdom, strength, and unstoppable swag! 👑🔥🦁";
 
     console.log("ℹ️ Preparing notification payload...");
 
     const message = {
-      token: token,
+      token,
       notification: {
         title: title || "New Ride by server",
         body: body || "₹119.18 - Sector 99A to Sector 29",
       },
       android: {
-        priority: "high", // ✅ Important for heads-up
+        priority: "high",
         notification: {
-          channelId: channel ? channel : "ride_channel",
+          channelId: channel || "ride_channel",
           clickAction: "ACCEPT_RIDE_ACTION",
-          imageUrl: "https://olyox.in/wp-content/uploads/2025/04/cropped-cropped-logo-CWkwXYQ_-removebg-preview.png",
+          imageUrl:
+            "https://olyox.in/wp-content/uploads/2025/04/cropped-cropped-logo-CWkwXYQ_-removebg-preview.png",
         },
       },
-      data: {
-        event: eventData.event || "DEFAULT_EVENT",
-        vehicleType:String(eventData?.rideDetails?.vehicleType || ""),
-        rideId: String(eventData?.rideDetails.rideId || ""),
-        pickup: String(eventData.rideDetails.pickup?.formatted_address || ""),
-        drop: String(eventData.rideDetails.drop?.formatted_address || ""),
-        price: String(eventData?.rideDetails.pricing?.total_fare || ""),
-      },
     };
+
+    // ✅ Only add data if eventData is provided
+    if (eventData && Object.keys(eventData).length > 0) {
+      message.data = {
+        event: eventData.event || "DEFAULT_EVENT",
+        vehicleType: String(eventData?.rideDetails?.vehicleType || ""),
+        rideId: String(eventData?.rideDetails?.rideId || ""),
+        pickup: String(eventData?.rideDetails?.pickup?.formatted_address || ""),
+        drop: String(eventData?.rideDetails?.drop?.formatted_address || ""),
+        price: String(eventData?.rideDetails?.pricing?.total_fare || ""),
+      };
+    }
 
     console.log("📦 Final payload:", JSON.stringify(message, null, 2));
 
@@ -134,25 +137,25 @@ const sendNotification = async (token, title, body, eventData = {}, channel) => 
     console.log("✅ Notification sent successfully. FCM Response:", response);
 
     return response;
-
   } catch (error) {
     console.error("❌ Error while sending notification:", error);
 
-    // Detailed error handling
     switch (error.code) {
-      case 'messaging/invalid-argument':
+      case "messaging/invalid-argument":
         console.warn(`⚠️ Invalid FCM message argument: ${error.message}`);
         break;
-      case 'messaging/invalid-recipient':
-        console.warn(`⚠️ Invalid FCM token (${token ? token.substring(0, 10) + "..." : "NULL"})`);
+      case "messaging/invalid-recipient":
+        console.warn(
+          `⚠️ Invalid FCM token (${token ? token.substring(0, 10) + "..." : "NULL"})`
+        );
         break;
-      case 'app/invalid-credential':
+      case "app/invalid-credential":
         console.error("❌ Firebase credential error. Check service account.");
         break;
-      case 'INIT_FAILED':
+      case "INIT_FAILED":
         console.error("❌ Firebase initialization failed");
         break;
-      case 'INVALID_TOKEN':
+      case "INVALID_TOKEN":
         console.warn("⚠️ No FCM token provided");
         break;
       default:
