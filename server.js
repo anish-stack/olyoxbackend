@@ -762,7 +762,7 @@ const ANDROID_STORE = "https://play.google.com/store/apps/details?id=com.happy_c
 const IOS_STORE = "https://apps.apple.com/in/app/olyox-book-cab-hotel-food/id6744582670";
 
 
-const rides = {
+const ridesTest = {
   "64a83f42": {
     id: "64a83f42",
     pickup: "Sector 99A",
@@ -775,7 +775,7 @@ const rides = {
 // Endpoint to share ride
 app.get("/share-ride-to-loveone/:rideId", (req, res) => {
   const { rideId } = req.params;
-  const ride = rides[rideId];
+  const ride = ridesTest[rideId];
 
   if (!ride) return res.status(404).send("Ride not found");
 
