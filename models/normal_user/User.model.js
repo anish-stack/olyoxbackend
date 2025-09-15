@@ -20,6 +20,9 @@ const userSchema = new mongoose.Schema({
     otp: {
         type: String,
     },
+    platform: {
+        type: String,
+    },
     otpExpiresAt: {
         type: Date,
     },
@@ -37,7 +40,7 @@ const userSchema = new mongoose.Schema({
     },
     cashback: {
         type: Number,
-        default:0
+        default: 0
     },
     cashbackHistory: [
         {

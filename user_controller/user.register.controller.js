@@ -14,7 +14,7 @@ const NewRideModelModel = require("../src/New-Rides-Controller/NewRideModel.mode
 
 exports.createUser = async (req, res) => {
     try {
-        const { number, email, name, referral } = req.body;
+        const { number, email, name, referral ,platform } = req.body;
         let otp = generateOtp(); // Default OTP
         const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -31,7 +31,7 @@ exports.createUser = async (req, res) => {
             user.otpExpiresAt = otpExpiresAt;
             user.tryLogin = true;
             user.isOtpVerify = user.isOtpVerify || false;
-
+            user.platform=platform || 'android'
             // Save applied referral code if provided
             if (referral && !user.appliedReferralCode) {
                 user.appliedReferralCode = referral;
@@ -65,6 +65,7 @@ If you have any questions, feel free to reach out.`;
             email,
             name,
             otp,
+            platform:platform || 'android',
             otpExpiresAt,
         });
 
@@ -185,7 +186,7 @@ exports.addFcm = async (req, res) => {
     try {
         console.log("Request Body:", req.body); // Log the incoming request body for debugging
 
-        const { fcm, id } = req.body;
+        const { fcm, id, platform } = req.body;
 
         // Find the user by ID
         const user = await User.findById(id);
@@ -208,6 +209,7 @@ exports.addFcm = async (req, res) => {
 
         // Update or add the new FCM token
         user.fcmToken = fcm;
+        user.platform = platform
         await user.save();
 
         return res.status(200).json({ message: "FCM token added/updated successfully", user });
