@@ -695,11 +695,14 @@ const initiateDriverSearch = async (rideId, req, res) => {
 
                     let decision = false;
 
-                    // Normalize input to uppercase to handle any case variations
+                    // Normalize to uppercase
                     const vType = vehicleType?.toUpperCase();
                     const dType = driverType?.toUpperCase();
 
-                    if (vType === "MINI") {
+                    // ✅ Special case: Bike → always accept, ignore prefs
+                    if (vType === "BIKE" && dType === "BIKE") {
+                        decision = true;
+                    } else if (vType === "MINI") {
                         decision = (
                             dType === "MINI" ||
                             (dType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
@@ -718,12 +721,12 @@ const initiateDriverSearch = async (rideId, req, res) => {
                         decision = false;
                     }
 
-
                     console.info(`✅ Decision: ${decision ? "ACCEPTED ✅" : "REJECTED ❌"}`);
                     console.info("--------------------------------------------------");
 
                     return decision;
                 });
+
 
                 console.info(`Matched ${preferenceFilteredRiders.length} riders after preference filter ✅`);
 
