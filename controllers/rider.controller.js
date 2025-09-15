@@ -632,7 +632,7 @@ exports.getAllRiders = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching riders:", error);
-    res.status(500).json({ error: "Failed to fetch riders" });
+    res.status(500).json({ error: error});
   }
 };
 
