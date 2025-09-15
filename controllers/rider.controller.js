@@ -615,7 +615,7 @@ exports.getAllRiders = async (req, res) => {
     const [riders, total] = await Promise.all([
       Rider.find()
         .skip(skip)
-        .select('-preferences -updateLogs -activityLog -howManyTimesHitResend -her_referenced ,-rides')
+        .select('-preferences -updateLogs -activityLog -howManyTimesHitResend -her_referenced -rides')
         .limit(limit)
         .sort({ createdAt: -1 })
        
