@@ -1397,30 +1397,39 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
                 OlyoxAcceptSedanRides: prefs?.OlyoxAcceptSedanRides?.enabled
             });
 
-            switch (rideVehicleType?.toUpperCase()) {
-                case "MINI":
-                    decision = (
-                        driverType === "MINI" ||
-                        (driverType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
-                        ((driverType === "SUV" || driverType === "XL" || driverType === "SUV/XL") &&
-                            prefs.OlyoxAcceptMiniRides?.enabled)
-                    );
-                    break;
-                case "SEDAN":
-                    decision = (
-                        driverType === "SEDAN" ||
-                        ((driverType === "SUV" || driverType === "XL" || driverType === "SUV/XL") &&
-                            prefs.OlyoxAcceptSedanRides?.enabled)
-                    );
-                    break;
-                case "SUV":
-                case "SUV/XL":
-                case "XL":
-                    decision = driverType === "SUV/XL" || driverType === "XL" || driverType === "SUV";
-                    break;
-                default:
-                    decision = false;
-            }
+        switch (rideVehicleType?.toUpperCase()) {
+    case "BIKE":
+        // ✅ Special case: Bike → always accept, ignore preferences
+        decision = driverType === "BIKE";
+        break;
+
+    case "MINI":
+        decision = (
+            driverType === "MINI" ||
+            (driverType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
+            ((driverType === "SUV" || driverType === "XL" || driverType === "SUV/XL") &&
+                prefs.OlyoxAcceptMiniRides?.enabled)
+        );
+        break;
+
+    case "SEDAN":
+        decision = (
+            driverType === "SEDAN" ||
+            ((driverType === "SUV" || driverType === "XL" || driverType === "SUV/XL") &&
+                prefs.OlyoxAcceptSedanRides?.enabled)
+        );
+        break;
+
+    case "SUV":
+    case "SUV/XL":
+    case "XL":
+        decision = driverType === "SUV/XL" || driverType === "XL" || driverType === "SUV";
+        break;
+
+    default:
+        decision = false;
+}
+
             console.info(`✅ Preference Decision: ${decision ? "ACCEPTED ✅" : "REJECTED ❌"}`);
             console.info("--------------------------------------------------");
             return decision;
