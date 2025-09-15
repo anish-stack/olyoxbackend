@@ -1613,22 +1613,68 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
 };
 
 exports.FetchAllBookedRides = async (req, res) => {
-    try {
-        const Bookings = await RideBooking.find()
-            .populate('user') // Populate user details
-            .populate('driver', 'name rideVehicleInfo phone isAvailable BH fcmToken RechargeData') // Populate specific driver fields
-            .populate({
-                path: 'rejected_by_drivers.driver', // Populate driver inside rejected_by_drivers array
-                model: 'Rider',
-                select: 'name phone rideVehicleInfo isAvailable' // Select fields you want from the Rider model
-            }).sort({ requested_at: -1 }); // Sort by requested_at in descending order
+  try {
+    const page = parseInt(req.query.page) || 1;   // default page = 1
+    const limit = parseInt(req.query.limit) || 20; // default 20 per page
+    const skip = (page - 1) * limit;
 
-        res.status(200).json({ success: true, Bookings });
-    } catch (error) {
-        console.error("Error fetching booked rides:", error);
-        res.status(500).json({ success: false, message: 'Internal server error' });
+    const { status, search } = req.query;
+
+    // ✅ Build query object
+    const query = {};
+
+    // Filter by ride status if provided
+    if (status) {
+      query.ride_status = status;
     }
+
+    // Search across multiple fields if search term provided
+    if (search && search.trim()) {
+      const regex = new RegExp(search.trim(), "i"); // case-insensitive regex
+      query.$or = [
+        { "user.name": regex },
+        { "user.number": regex },
+        { "driver.name": regex },
+        { "driver.phone": regex },
+        { "pickup_address.formatted_address": regex },
+        { "drop_address.formatted_address": regex },
+        { vehicle_type: regex },
+        { payment_method: regex },
+      ];
+    }
+
+    const [Bookings, total] = await Promise.all([
+      RideBooking.find(query)
+        .select(
+          "pickup_location pickup_address drop_location drop_address vehicle_type ride_status requested_at pricing payment_method payment_status cancellation_reason cancelled_by created_at updated_at route_info"
+        )
+        .populate("user", "name number") // ✅ Only basic user details
+        .populate(
+          "driver",
+          "name phone rideVehicleInfo.VehicleNumber rideVehicleInfo.vehicleType"
+        ) // ✅ Only driver basics
+        .sort({ requested_at: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      RideBooking.countDocuments(query), // ✅ Only count matching docs
+    ]);
+
+    res.status(200).json({
+      success: true,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      Bookings,
+    });
+  } catch (error) {
+    console.error("Error fetching booked rides:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 };
+
+
 
 
 exports.BookingDetailsAdmin = async (req, res) => {
