@@ -1080,38 +1080,38 @@ exports.cancelRideRequest = async (req, res) => {
         if (!foundRide) {
             return res.status(404).json({ message: "Ride not found." });
         }
-if ([
-  'driver_assigned',
-  'driver_arrived',
-  'in_progress',
-  'completed',
-  'cancelled'
-].includes(foundRide.ride_status)) {
-  
-  let message = '';
+        if ([
+            'driver_assigned',
+            'driver_arrived',
+            'in_progress',
+            'completed',
+            'cancelled'
+        ].includes(foundRide.ride_status)) {
 
-  switch (foundRide.ride_status) {
-    case 'driver_assigned':
-      message = "Driver has already been assigned to this ride.";
-      break;
-    case 'driver_arrived':
-      message = "Driver has already arrived at the pickup location.";
-      break;
-    case 'in_progress':
-      message = "Ride is already in progress.";
-      break;
-    case 'completed':
-      message = "Ride has already been completed.";
-      break;
-    case 'cancelled':
-      message = "Ride has already been cancelled.";
-      break;
-    default:
-      message = "Ride status not valid.";
-  }
+            let message = '';
 
-  return res.status(400).json({ message });
-}
+            switch (foundRide.ride_status) {
+                case 'driver_assigned':
+                    message = "Driver has already been assigned to this ride.";
+                    break;
+                case 'driver_arrived':
+                    message = "Driver has already arrived at the pickup location.";
+                    break;
+                case 'in_progress':
+                    message = "Ride is already in progress.";
+                    break;
+                case 'completed':
+                    message = "Ride has already been completed.";
+                    break;
+                case 'cancelled':
+                    message = "Ride has already been cancelled.";
+                    break;
+                default:
+                    message = "Ride status not valid.";
+            }
+
+            return res.status(400).json({ message });
+        }
 
 
         // Cancel the ride

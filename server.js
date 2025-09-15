@@ -8,7 +8,7 @@ const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const axios = require('axios');
 require('dotenv').config();
-
+const compression = require("compression")
 // Database and Models
 const connectDb = require('./database/db');
 const { connectwebDb } = require('./PaymentWithWebDb/db');
@@ -301,6 +301,7 @@ app.post('/directions', async (req, res) => {
 // List Available Riders
 app.get('/rider', async (req, res) => {
     try {
+        console.log("iamht")
         const riders = await RiderModel.find({ isAvailable: true });
         res.json({ success: true, riders });
     } catch (err) {
@@ -745,7 +746,11 @@ app.use('/api/v1/parcel', parcel);
 app.use('/api/v1/heavy', Heavy);
 app.use('/api/v1/admin', admin);
 app.use('/api/v1/new', NewRoutes);
-
+app.use(
+  compression({
+    threshold: 0, // compress everything, even small responses
+  })
+);
 // 404 Handler
 app.use('*', (req, res) => {
     res.status(404).json({

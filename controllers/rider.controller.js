@@ -606,16 +606,37 @@ exports.verifyOtp = async (req, res) => {
   }
 };
 
-// Get all riders
 exports.getAllRiders = async (req, res) => {
   try {
-    const riders = await Rider.find();
-    res.status(200).json(riders);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    const [riders, total] = await Promise.all([
+      Rider.find()
+        .skip(skip)
+        .select('-preferences -updateLogs -activityLog -howManyTimesHitResend -her_referenced ,-rides')
+        .limit(limit)
+        .sort({ createdAt: -1 })
+       
+        .lean(),
+      Rider.estimatedDocumentCount(),
+    ]);
+
+    res.status(200).json({
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      riders,
+    });
   } catch (error) {
     console.error("Error fetching riders:", error);
     res.status(500).json({ error: "Failed to fetch riders" });
   }
 };
+
+
 
 exports.riderDocumentsVerify = async (req, res) => {
   try {
