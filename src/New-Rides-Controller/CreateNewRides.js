@@ -1068,100 +1068,105 @@ const processRiders = async (redisClient, rideId, riders, rideDetails = {}) => {
 
 
 exports.cancelRideRequest = async (req, res) => {
-  try {
-    const rideId = req.params.rideId;
-
-    if (!rideId) {
-      return res.status(400).json({ message: "Ride ID is required." });
-    }
-
-    const foundRide = await RideBooking.findById(rideId)
-      .populate("user")
-      .populate("notified_riders");
-
-    if (!foundRide) {
-      return res.status(404).json({ message: "Ride not found." });
-    }
-
-    // ✅ केवल pending या searching में ही cancel करना allow
-    if (!["pending", "searching","driver_assigned"].includes(foundRide.ride_status)) {
-      let message = "";
-      switch (foundRide.ride_status) {
-        case "driver_arrived":
-          message = "Driver has already arrived at the pickup location.";
-          break;
-        case "in_progress":
-          message = "Ride is already in progress.";
-          break;
-        case "completed":
-          message = "Ride has already been completed.";
-          break;
-        case "cancelled":
-          message = "Ride has already been cancelled.";
-          break;
-        default:
-          message = "Ride cannot be cancelled at this stage.";
-      }
-      return res.status(400).json({ success: false, message });
-    }
-
-    // 👉 अब ride cancel कर सकते हैं
     try {
-      console.log("notified_riders length:", foundRide?.notified_riders?.length || 0);
+        const rideId = req.params.rideId;
 
-      if (Array.isArray(foundRide?.notified_riders)) {
-        for (let index = 0; index < foundRide.notified_riders.length; index++) {
-          const element = foundRide.notified_riders[index];
-          console.log(`Sending notification to rider ${index + 1}:`, element?._id || element);
-
-          try {
-            await sendNotification.sendNotification(
-              element?.fcmToken,
-              "Ride Has Been Cancelled From The User. Sorry!",
-              "We Will Deliver More Rides Near You",
-              {},
-              "ride_cancel_channel"
-            );
-            console.log(`Notification sent successfully to rider ${element?.name || "unknown"} ${index + 1}`);
-          } catch (err) {
-            console.error(`Failed to send notification to rider ${index + 1}:`, err.message);
-          }
+        if (!rideId) {
+            return res.status(400).json({ message: "Ride ID is required." });
         }
-      } else {
-        console.warn("notified_riders is not a valid array");
-      }
+
+        const foundRide = await RideBooking.findById(rideId)
+            .populate("user")
+            .populate("driver")
+            .populate("notified_riders");
+
+        if (!foundRide) {
+            return res.status(404).json({ message: "Ride not found." });
+        }
+
+        // ✅ केवल pending या searching में ही cancel करना allow
+        if (!["pending", "searching", "driver_assigned"].includes(foundRide.ride_status)) {
+            let message = "";
+            switch (foundRide.ride_status) {
+                case "driver_arrived":
+                    message = "Driver has already arrived at the pickup location.";
+                    break;
+                case "in_progress":
+                    message = "Ride is already in progress.";
+                    break;
+                case "completed":
+                    message = "Ride has already been completed.";
+                    break;
+                case "cancelled":
+                    message = "Ride has already been cancelled.";
+                    break;
+                default:
+                    message = "Ride cannot be cancelled at this stage.";
+            }
+            return res.status(400).json({ success: false, message });
+        }
+
+        // 👉 अब ride cancel कर सकते हैं
+        try {
+            console.log("notified_riders length:", foundRide?.notified_riders?.length || 0);
+
+            if (Array.isArray(foundRide?.notified_riders)) {
+                for (let index = 0; index < foundRide.notified_riders.length; index++) {
+                    const element = foundRide.notified_riders[index];
+                    console.log(`Sending notification to rider ${index + 1}:`, element?._id || element);
+
+                    try {
+                        await sendNotification.sendNotification(
+                            element?.fcmToken,
+                            "Ride Has Been Cancelled From The User. Sorry!",
+                            "We Will Deliver More Rides Near You",
+                            {},
+                            "ride_cancel_channel"
+                        );
+                        console.log(`Notification sent successfully to rider ${element?.name || "unknown"} ${index + 1}`);
+                    } catch (err) {
+                        console.error(`Failed to send notification to rider ${index + 1}:`, err.message);
+                    }
+                }
+            } else {
+                console.warn("notified_riders is not a valid array");
+            }
+        } catch (error) {
+            console.error("Unexpected error while sending notifications:", error.message);
+        }
+
+        // Cancel the ride
+        foundRide.ride_status = "cancelled";
+        foundRide.cancellation_reason = "User cancelled the ride request";
+        foundRide.cancelled_by = "user";
+        foundRide.cancelled_at = new Date();
+        await foundRide.save();
+
+        // Clear user's current ride
+        if (foundRide.user) {
+            foundRide.user.currentRide = null;
+            await foundRide.user.save();
+        }
+        if (foundRide.driver) {
+            foundRide.driver.on_ride_id = null;
+            await foundRide.driver.save();
+        }
+
+        // Update Redis cache
+        const redisClient = getRedisClient(req);
+        if (redisClient) {
+            try {
+                await redisClient.del(`ride:${rideId}`);
+            } catch (redisErr) {
+                console.error("Redis cache error:", redisErr.message);
+            }
+        }
+
+        return res.status(200).json({ success: true, message: "Ride cancelled successfully." });
     } catch (error) {
-      console.error("Unexpected error while sending notifications:", error.message);
+        console.error("Error cancelling ride request:", error);
+        return res.status(500).json({ message: "Server error while cancelling ride request." });
     }
-
-    // Cancel the ride
-    foundRide.ride_status = "cancelled";
-    foundRide.cancellation_reason = "User cancelled the ride request";
-    foundRide.cancelled_by = "user";
-    foundRide.cancelled_at = new Date();
-    await foundRide.save();
-
-    // Clear user's current ride
-    if (foundRide.user) {
-      foundRide.user.currentRide = null;
-      await foundRide.user.save();
-    }
-
-    // Update Redis cache
-    const redisClient = getRedisClient(req);
-    if (redisClient) {
-      try {
-        await redisClient.del(`ride:${rideId}`);
-      } catch (redisErr) {
-        console.error("Redis cache error:", redisErr.message);
-      }
-    }
-
-    return res.status(200).json({ success: true, message: "Ride cancelled successfully." });
-  } catch (error) {
-    console.error("Error cancelling ride request:", error);
-    return res.status(500).json({ message: "Server error while cancelling ride request." });
-  }
 };
 
 
@@ -2202,7 +2207,7 @@ const handleRideAcceptance = async (req, res, ride, rider, riderObjectId, rideOb
                 });
 
                 console.log("Other riders to notify:", otherRiders.length);
-                console.log("Other riders:",otherRiders)
+                console.log("Other riders:", otherRiders)
 
                 // Notify other riders
                 for (const otherRider of otherRiders) {
@@ -3243,7 +3248,6 @@ class RetryableError extends Error {
     }
 }
 
-
 exports.cancelRideByPoll = async (req, res) => {
     const session = await mongoose.startSession();
 
@@ -3260,17 +3264,37 @@ exports.cancelRideByPoll = async (req, res) => {
 
         await session.withTransaction(async () => {
             const rideData = await RideBooking.findById(ride)
-                .populate('driver user')
+                .populate("driver user")
                 .session(session);
 
             if (!rideData) {
-                throw new Error("Ride not found");
+                throw new Error("Ride not found.");
             }
 
-            if (rideData.ride_status === "cancelled" || rideData.ride_status === "completed" || rideData?.ride_status ==="driver_arrived" ||rideData?.ride_status ==="in_progress") {
-                throw new Error(`Ride is already ${rideData.ride_status}`);
+            // ❌ If ride is already in these states, stop cancellation
+            const blockedStatuses = ["cancelled", "completed", "driver_arrived", "in_progress"];
+            if (blockedStatuses.includes(rideData.ride_status)) {
+                let msg = "";
+                switch (rideData.ride_status) {
+                    case "cancelled":
+                        msg = "Ride has already been cancelled.";
+                        break;
+                    case "completed":
+                        msg = "Ride has already been completed.";
+                        break;
+                    case "driver_arrived":
+                        msg = "Driver has already arrived. Ride cannot be cancelled now.";
+                        break;
+                    case "in_progress":
+                        msg = "Ride is already in progress. Cancellation not allowed.";
+                        break;
+                    default:
+                        msg = "Ride cannot be cancelled at this stage.";
+                }
+                throw new Error(msg);
             }
 
+            // ✅ Allowed statuses for cancellation: pending, searching, driver_assigned
             console.log("🚨 Cancelling ride...");
             rideData.ride_status = "cancelled";
             rideData.payment_status = "cancelled";
@@ -3278,28 +3302,33 @@ exports.cancelRideByPoll = async (req, res) => {
             rideData.cancelled_at = new Date();
             rideData.cancellation_reason = reason || null;
 
+            // 🔹 Free driver if assigned
             if (rideData?.driver) {
                 const driver = await RiderModel.findById(rideData.driver._id).session(session);
-                driver.on_ride_id = null;
-                driver.isAvailable = true;
-                await driver.save({ session });
+                if (driver) {
+                    driver.on_ride_id = null;
+                    driver.isAvailable = true;
+                    await driver.save({ session });
+                }
 
-                if (cancelBy === 'user' && driver?.fcmToken) {
+                // Notify driver if user cancelled
+                if (cancelBy === "user" && driver?.fcmToken) {
                     await sendNotification.sendNotification(
                         driver.fcmToken,
                         "Ride Cancelled by User",
                         "The user has cancelled the ride request.",
                         {
-                            event: 'RIDE_CANCELLED',
+                            event: "RIDE_CANCELLED",
                             rideId: rideData._id,
-                            message: 'The user has cancelled the ride request.',
-                            screen: 'DriverHome',
+                            message: "The user has cancelled the ride request.",
+                            screen: "DriverHome",
                         },
                         "ride_cancel_channel"
                     );
                 }
             }
 
+            // 🔹 Clear user's current ride
             if (rideData?.user) {
                 rideData.user.currentRide = null;
                 await rideData.user.save({ session });
@@ -3307,16 +3336,17 @@ exports.cancelRideByPoll = async (req, res) => {
 
             await rideData.save({ session });
 
-            if (cancelBy === 'driver' && rideData?.user?.fcmToken) {
+            // Notify user if driver cancelled
+            if (cancelBy === "driver" && rideData?.user?.fcmToken) {
                 await sendNotification.sendNotification(
                     rideData.user.fcmToken,
                     "Ride Cancelled by Driver",
                     "The driver has cancelled your ride.",
                     {
-                        event: 'RIDE_CANCELLED',
+                        event: "RIDE_CANCELLED",
                         rideId: rideData._id,
-                        message: 'The driver has cancelled your ride.',
-                        screen: 'RideHistory',
+                        message: "The driver has cancelled your ride.",
+                        screen: "RideHistory",
                     }
                 );
             }
@@ -3326,10 +3356,9 @@ exports.cancelRideByPoll = async (req, res) => {
             success: true,
             message: "Ride has been cancelled successfully.",
         });
-
     } catch (error) {
         console.error("❌ Error cancelling ride:", error.message || error);
-        return res.status(500).json({
+        return res.status(400).json({
             success: false,
             message: error.message || "Internal server error.",
         });
