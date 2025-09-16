@@ -3272,7 +3272,10 @@ exports.cancelRideByPoll = async (req, res) => {
             }
 
             // ❌ If ride is already in these states, stop cancellation
-            const blockedStatuses = ["cancelled", "completed", "driver_arrived", "in_progress"];
+            if(cancelBy ==="driver"){
+
+            }else{
+     const blockedStatuses = ["cancelled", "completed", "driver_arrived", "in_progress"];
             if (blockedStatuses.includes(rideData.ride_status)) {
                 let msg = "";
                 switch (rideData.ride_status) {
@@ -3293,9 +3296,9 @@ exports.cancelRideByPoll = async (req, res) => {
                 }
                 throw new Error(msg);
             }
+            }
+       
 
-            // ✅ Allowed statuses for cancellation: pending, searching, driver_assigned
-            console.log("🚨 Cancelling ride...");
             rideData.ride_status = "cancelled";
             rideData.payment_status = "cancelled";
             rideData.cancelled_by = cancelBy;
