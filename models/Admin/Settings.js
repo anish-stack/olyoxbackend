@@ -88,8 +88,18 @@ const SettingsSchema = new mongoose.Schema({
         type: String,
         default: "1234567890"
     },
-    adminBh:{
+    adminBh: {
         type: String
+    },
+    appVersionOnIos: {
+        type: String
+    },
+    appVersionOnAndroid: {
+        type: String
+    },
+    appVersionOnAndroidDriver: {
+        type: String
+
     }
 }, { timestamps: true });
 

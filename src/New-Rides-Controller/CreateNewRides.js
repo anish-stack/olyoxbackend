@@ -2208,6 +2208,7 @@ const handleRideAcceptance = async (req, res, ride, rider, riderObjectId, rideOb
                 });
 
                 console.log("Other riders to notify:", otherRiders.length);
+                console.log("Other riders:",otherRiders)
 
                 // Notify other riders
                 for (const otherRider of otherRiders) {
@@ -2225,8 +2226,7 @@ const handleRideAcceptance = async (req, res, ride, rider, riderObjectId, rideOb
                                     message: "The ride you were considering is no longer available.",
                                     screen: "RiderDashboard"
                                 },
-                                {},
-                                "app_notification_channel"
+                                "another_driver_accept"
                             );
                             console.log("Notification sent to other rider");
                         } catch (notificationError) {
