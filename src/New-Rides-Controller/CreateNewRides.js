@@ -142,7 +142,7 @@ exports.NewcreateRequest = async (req, res) => {
         }
 
         // Find and update user
-        const findUser = await User.findById(user);
+        const findUser = await User.findById(user).populate('currentRide');
         if (!findUser) {
             console.error("User not found", { userId: user });
             return res.status(404).json({ error: "User not found" });
@@ -156,7 +156,7 @@ exports.NewcreateRequest = async (req, res) => {
         }
         const ONE_MINUTE_AGO = new Date(Date.now() - 60 * 1000);
         // Check for existing active rides
-        if (findUser.currentRide) {
+        if (findUser.currentRide && ['driver_assigned', 'driver_arrived', 'in_progress', 'completed', 'cancelled'].includes(findUser.currentRide.ride_status)) {
             console.log("You already have an active ride")
             return res.status(409).json({
                 error: "You already have an active ride request",
@@ -1076,7 +1076,7 @@ exports.cancelRideRequest = async (req, res) => {
             return res.status(400).json({ message: "Ride ID is required." });
         }
 
-        const foundRide = await RideBooking.findById(rideId).populate('user');
+        const foundRide = await RideBooking.findById(rideId).populate('user').populate('notified_riders');
         if (!foundRide) {
             return res.status(404).json({ message: "Ride not found." });
         }
@@ -1113,6 +1113,33 @@ exports.cancelRideRequest = async (req, res) => {
             return res.status(400).json({ message });
         }
 
+        try {
+            console.log("notified_riders length:", foundRide?.notified_riders?.length || 0);
+
+            if (Array.isArray(foundRide?.notified_riders)) {
+                for (let index = 0; index < foundRide.notified_riders.length; index++) {
+                    const element = foundRide.notified_riders[index];
+                    console.log(`Sending notification to rider ${index + 1}:`, element?._id || element);
+
+                    try {
+                        await sendNotification.sendNotification(
+                            element?.fcmToken,
+                            "Ride Has Been Cancelled From The User. Sorry!",
+                            "We Will Deliver More Rides Near You",
+                            {},
+                            "ride_cancel_channel"
+                        );
+                        console.log(`Notification sent successfully to rider ${element?.name} ${index + 1}`);
+                    } catch (err) {
+                        console.error(`Failed to send notification to rider ${index + 1}:`, err.message);
+                    }
+                }
+            } else {
+                console.warn("notified_riders is not a valid array");
+            }
+        } catch (error) {
+            console.error("Unexpected error while sending notifications:", error.message);
+        }
 
         // Cancel the ride
         foundRide.ride_status = "cancelled";
@@ -1613,65 +1640,65 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
 };
 
 exports.FetchAllBookedRides = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;   // default page = 1
-    const limit = parseInt(req.query.limit) || 20; // default 20 per page
-    const skip = (page - 1) * limit;
+    try {
+        const page = parseInt(req.query.page) || 1;   // default page = 1
+        const limit = parseInt(req.query.limit) || 20; // default 20 per page
+        const skip = (page - 1) * limit;
 
-    const { status, search } = req.query;
+        const { status, search } = req.query;
 
-    // ✅ Build query object
-    const query = {};
+        // ✅ Build query object
+        const query = {};
 
-    // Filter by ride status if provided
-    if (status) {
-      query.ride_status = status;
+        // Filter by ride status if provided
+        if (status) {
+            query.ride_status = status;
+        }
+
+        // Search across multiple fields if search term provided
+        if (search && search.trim()) {
+            const regex = new RegExp(search.trim(), "i"); // case-insensitive regex
+            query.$or = [
+                { "user.name": regex },
+                { "user.number": regex },
+                { "driver.name": regex },
+                { "driver.phone": regex },
+                { "pickup_address.formatted_address": regex },
+                { "drop_address.formatted_address": regex },
+                { vehicle_type: regex },
+                { payment_method: regex },
+            ];
+        }
+
+        const [Bookings, total] = await Promise.all([
+            RideBooking.find(query)
+                .select(
+                    "pickup_location pickup_address drop_location drop_address vehicle_type ride_status requested_at pricing payment_method payment_status cancellation_reason cancelled_by created_at updated_at route_info"
+                )
+                .populate("user", "name number") // ✅ Only basic user details
+                .populate(
+                    "driver",
+                    "name phone rideVehicleInfo.VehicleNumber rideVehicleInfo.vehicleType"
+                ) // ✅ Only driver basics
+                .sort({ requested_at: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            RideBooking.countDocuments(query), // ✅ Only count matching docs
+        ]);
+
+        res.status(200).json({
+            success: true,
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+            Bookings,
+        });
+    } catch (error) {
+        console.error("Error fetching booked rides:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
     }
-
-    // Search across multiple fields if search term provided
-    if (search && search.trim()) {
-      const regex = new RegExp(search.trim(), "i"); // case-insensitive regex
-      query.$or = [
-        { "user.name": regex },
-        { "user.number": regex },
-        { "driver.name": regex },
-        { "driver.phone": regex },
-        { "pickup_address.formatted_address": regex },
-        { "drop_address.formatted_address": regex },
-        { vehicle_type: regex },
-        { payment_method: regex },
-      ];
-    }
-
-    const [Bookings, total] = await Promise.all([
-      RideBooking.find(query)
-        .select(
-          "pickup_location pickup_address drop_location drop_address vehicle_type ride_status requested_at pricing payment_method payment_status cancellation_reason cancelled_by created_at updated_at route_info"
-        )
-        .populate("user", "name number") // ✅ Only basic user details
-        .populate(
-          "driver",
-          "name phone rideVehicleInfo.VehicleNumber rideVehicleInfo.vehicleType"
-        ) // ✅ Only driver basics
-        .sort({ requested_at: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      RideBooking.countDocuments(query), // ✅ Only count matching docs
-    ]);
-
-    res.status(200).json({
-      success: true,
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-      Bookings,
-    });
-  } catch (error) {
-    console.error("Error fetching booked rides:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
-  }
 };
 
 
@@ -2197,7 +2224,9 @@ const handleRideAcceptance = async (req, res, ride, rider, riderObjectId, rideOb
                                     rideId: rideId,
                                     message: "The ride you were considering is no longer available.",
                                     screen: "RiderDashboard"
-                                }
+                                },
+                                {},
+                                "app_notification_channel"
                             );
                             console.log("Notification sent to other rider");
                         } catch (notificationError) {

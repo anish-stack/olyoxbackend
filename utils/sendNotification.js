@@ -117,7 +117,6 @@ const sendNotification = async (token, title, body, eventData = null, channel) =
       },
     };
 
-    // ✅ Only add data if eventData is provided
     if (eventData && Object.keys(eventData).length > 0) {
       message.data = {
         event: eventData.event || "DEFAULT_EVENT",
