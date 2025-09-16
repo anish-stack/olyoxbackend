@@ -3267,7 +3267,7 @@ exports.cancelRideByPoll = async (req, res) => {
                 throw new Error("Ride not found");
             }
 
-            if (rideData.ride_status === "cancelled" || rideData.ride_status === "completed") {
+            if (rideData.ride_status === "cancelled" || rideData.ride_status === "completed" || rideData?.ride_status ==="driver_arrived" ||rideData?.ride_status ==="in_progress") {
                 throw new Error(`Ride is already ${rideData.ride_status}`);
             }
 
