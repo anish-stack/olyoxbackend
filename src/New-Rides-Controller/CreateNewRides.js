@@ -1084,12 +1084,9 @@ exports.cancelRideRequest = async (req, res) => {
     }
 
     // ✅ केवल pending या searching में ही cancel करना allow
-    if (!["pending", "searching"].includes(foundRide.ride_status)) {
+    if (!["pending", "searching","driver_assigned"].includes(foundRide.ride_status)) {
       let message = "";
       switch (foundRide.ride_status) {
-        case "driver_assigned":
-          message = "Driver has already been assigned to this ride.";
-          break;
         case "driver_arrived":
           message = "Driver has already arrived at the pickup location.";
           break;
