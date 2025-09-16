@@ -1067,109 +1067,106 @@ const processRiders = async (redisClient, rideId, riders, rideDetails = {}) => {
 };
 
 
-
 exports.cancelRideRequest = async (req, res) => {
-    try {
-        const rideId = req.params.rideId;
+  try {
+    const rideId = req.params.rideId;
 
-        if (!rideId) {
-            return res.status(400).json({ message: "Ride ID is required." });
-        }
-
-        const foundRide = await RideBooking.findById(rideId).populate('user').populate('notified_riders');
-        if (!foundRide) {
-            return res.status(404).json({ message: "Ride not found." });
-        }
-        if ([
-            'driver_assigned',
-            'driver_arrived',
-            'in_progress',
-            'completed',
-            'cancelled'
-        ].includes(foundRide.ride_status)) {
-
-            let message = '';
-
-            switch (foundRide.ride_status) {
-                case 'driver_assigned':
-                    message = "Driver has already been assigned to this ride.";
-                    break;
-                case 'driver_arrived':
-                    message = "Driver has already arrived at the pickup location.";
-                    break;
-                case 'in_progress':
-                    message = "Ride is already in progress.";
-                    break;
-                case 'completed':
-                    message = "Ride has already been completed.";
-                    break;
-                case 'cancelled':
-                    message = "Ride has already been cancelled.";
-                    break;
-                default:
-                    message = "Ride status not valid.";
-            }
-
-            return res.status(400).json({ message });
-        }
-
-        try {
-            console.log("notified_riders length:", foundRide?.notified_riders?.length || 0);
-
-            if (Array.isArray(foundRide?.notified_riders)) {
-                for (let index = 0; index < foundRide.notified_riders.length; index++) {
-                    const element = foundRide.notified_riders[index];
-                    console.log(`Sending notification to rider ${index + 1}:`, element?._id || element);
-
-                    try {
-                        await sendNotification.sendNotification(
-                            element?.fcmToken,
-                            "Ride Has Been Cancelled From The User. Sorry!",
-                            "We Will Deliver More Rides Near You",
-                            {},
-                            "ride_cancel_channel"
-                        );
-                        console.log(`Notification sent successfully to rider ${element?.name} ${index + 1}`);
-                    } catch (err) {
-                        console.error(`Failed to send notification to rider ${index + 1}:`, err.message);
-                    }
-                }
-            } else {
-                console.warn("notified_riders is not a valid array");
-            }
-        } catch (error) {
-            console.error("Unexpected error while sending notifications:", error.message);
-        }
-
-        // Cancel the ride
-        foundRide.ride_status = "cancelled";
-        foundRide.cancellation_reason = "User cancelled the ride request";
-        foundRide.cancelled_by = "user";
-        foundRide.cancelled_at = new Date();
-        await foundRide.save();
-
-        // Clear user's current ride if populated
-        if (foundRide.user) {
-            foundRide.user.currentRide = null;
-            await foundRide.user.save();
-        }
-
-        // Update Redis cache
-        const redisClient = getRedisClient(req);
-        if (redisClient) {
-            try {
-                await redisClient.del(`ride:${rideId}`); // avoid flushAll() which removes all keys!
-            } catch (redisErr) {
-                console.error("Redis cache error:", redisErr.message);
-            }
-        }
-
-        return res.status(200).json({ success: true, message: "Ride cancelled successfully." });
-    } catch (error) {
-        console.error("Error cancelling ride request:", error);
-        return res.status(500).json({ message: "Server error while cancelling ride request." });
+    if (!rideId) {
+      return res.status(400).json({ message: "Ride ID is required." });
     }
+
+    const foundRide = await RideBooking.findById(rideId)
+      .populate("user")
+      .populate("notified_riders");
+
+    if (!foundRide) {
+      return res.status(404).json({ message: "Ride not found." });
+    }
+
+    // ✅ केवल pending या searching में ही cancel करना allow
+    if (!["pending", "searching"].includes(foundRide.ride_status)) {
+      let message = "";
+      switch (foundRide.ride_status) {
+        case "driver_assigned":
+          message = "Driver has already been assigned to this ride.";
+          break;
+        case "driver_arrived":
+          message = "Driver has already arrived at the pickup location.";
+          break;
+        case "in_progress":
+          message = "Ride is already in progress.";
+          break;
+        case "completed":
+          message = "Ride has already been completed.";
+          break;
+        case "cancelled":
+          message = "Ride has already been cancelled.";
+          break;
+        default:
+          message = "Ride cannot be cancelled at this stage.";
+      }
+      return res.status(400).json({ success: false, message });
+    }
+
+    // 👉 अब ride cancel कर सकते हैं
+    try {
+      console.log("notified_riders length:", foundRide?.notified_riders?.length || 0);
+
+      if (Array.isArray(foundRide?.notified_riders)) {
+        for (let index = 0; index < foundRide.notified_riders.length; index++) {
+          const element = foundRide.notified_riders[index];
+          console.log(`Sending notification to rider ${index + 1}:`, element?._id || element);
+
+          try {
+            await sendNotification.sendNotification(
+              element?.fcmToken,
+              "Ride Has Been Cancelled From The User. Sorry!",
+              "We Will Deliver More Rides Near You",
+              {},
+              "ride_cancel_channel"
+            );
+            console.log(`Notification sent successfully to rider ${element?.name || "unknown"} ${index + 1}`);
+          } catch (err) {
+            console.error(`Failed to send notification to rider ${index + 1}:`, err.message);
+          }
+        }
+      } else {
+        console.warn("notified_riders is not a valid array");
+      }
+    } catch (error) {
+      console.error("Unexpected error while sending notifications:", error.message);
+    }
+
+    // Cancel the ride
+    foundRide.ride_status = "cancelled";
+    foundRide.cancellation_reason = "User cancelled the ride request";
+    foundRide.cancelled_by = "user";
+    foundRide.cancelled_at = new Date();
+    await foundRide.save();
+
+    // Clear user's current ride
+    if (foundRide.user) {
+      foundRide.user.currentRide = null;
+      await foundRide.user.save();
+    }
+
+    // Update Redis cache
+    const redisClient = getRedisClient(req);
+    if (redisClient) {
+      try {
+        await redisClient.del(`ride:${rideId}`);
+      } catch (redisErr) {
+        console.error("Redis cache error:", redisErr.message);
+      }
+    }
+
+    return res.status(200).json({ success: true, message: "Ride cancelled successfully." });
+  } catch (error) {
+    console.error("Error cancelling ride request:", error);
+    return res.status(500).json({ message: "Server error while cancelling ride request." });
+  }
 };
+
 
 exports.ride_status_after_booking = async (req, res) => {
     try {
