@@ -1708,15 +1708,15 @@ exports.BookingDetailsAdmin = async (req, res) => {
         const Bookings = await RideBooking.findById(req.params.id)
             .populate('user') // Populate user details
             .populate('driver', 'name rideVehicleInfo phone isAvailable BH fcmToken RechargeData') 
-             .populate({
-                path: 'notified_ridersr', // Populate driver inside rejected_by_drivers array
+            .populate({
+                path: 'notified_riders',  // ✅ fixed here
                 model: 'Rider',
-                select: 'name phone rideVehicleInfo isAvailable' // Select fields you want from the Rider model
+                select: 'name phone rideVehicleInfo isAvailable'
             })
             .populate({
-                path: 'rejected_by_drivers.driver', // Populate driver inside rejected_by_drivers array
+                path: 'rejected_by_drivers.driver',
                 model: 'Rider',
-                select: 'name phone rideVehicleInfo isAvailable' // Select fields you want from the Rider model
+                select: 'name phone rideVehicleInfo isAvailable'
             });
 
         res.status(200).json({ success: true, Bookings });
@@ -1724,7 +1724,7 @@ exports.BookingDetailsAdmin = async (req, res) => {
         console.error("Error fetching booked rides:", error);
         res.status(500).json({ success: false, message: 'Internal server error' });
     }
-}
+};
 
 // Helper function to clean up Redis cache (can be called periodically)
 exports.cleanupRedisRideCache = async (req, res) => {
