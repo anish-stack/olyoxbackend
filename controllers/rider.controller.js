@@ -611,16 +611,38 @@ exports.getAllRiders = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
+    const search = req.query.search?.trim();
+
+    let filter = {};
+    if (search) {
+      const regex = new RegExp(search, "i"); // case-insensitive
+
+      filter = {
+        $or: [
+          // Only match _id if it's a valid ObjectId
+          search.match(/^[0-9a-fA-F]{24}$/) ? { _id: search } : null,
+          { name: regex },
+          { phone: regex },
+          { aadharNumber: regex },
+          { "rideVehicleInfo.vehicleName": regex },
+          { "rideVehicleInfo.vehicleType": regex },
+          { "rideVehicleInfo.VehicleNumber": regex },
+          { BH: regex },
+          { category: regex },
+        ].filter(Boolean), // remove null if _id is not valid
+      };
+    }
 
     const [riders, total] = await Promise.all([
-      Rider.find()
+      Rider.find(filter)
         .skip(skip)
-        .select('-preferences -updateLogs -activityLog -howManyTimesHitResend -her_referenced -rides')
         .limit(limit)
         .sort({ createdAt: -1 })
-       
+        .select(
+          "-preferences -updateLogs -activityLog -howManyTimesHitResend -her_referenced -rides"
+        )
         .lean(),
-      Rider.estimatedDocumentCount(),
+      Rider.countDocuments(filter),
     ]);
 
     res.status(200).json({
@@ -632,7 +654,7 @@ exports.getAllRiders = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching riders:", error);
-    res.status(500).json({ error: error});
+    res.status(500).json({ error: error.message });
   }
 };
 

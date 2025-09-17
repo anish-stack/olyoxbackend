@@ -1895,9 +1895,7 @@ exports.riderActionAcceptOrRejectRide = async (req, res) => {
 exports.riderActionAcceptOrRejectRideVia = async (req, res) => {
     try {
         const { rideId, action, token } = req.params;
-        console.log("📩 Incoming params:", req.params);
 
-        // Verify token
         let decoded;
         try {
             decoded = jwt.verify(
@@ -3271,34 +3269,32 @@ exports.cancelRideByPoll = async (req, res) => {
                 throw new Error("Ride not found.");
             }
 
-            // ❌ If ride is already in these states, stop cancellation
-            if(cancelBy ==="driver"){
-
-            }else{
-     const blockedStatuses = ["cancelled", "completed", "driver_arrived", "in_progress"];
-            if (blockedStatuses.includes(rideData.ride_status)) {
-                let msg = "";
-                switch (rideData.ride_status) {
-                    case "cancelled":
-                        msg = "Ride has already been cancelled.";
-                        break;
-                    case "completed":
-                        msg = "Ride has already been completed.";
-                        break;
-                    case "driver_arrived":
-                        msg = "Driver has already arrived. Ride cannot be cancelled now.";
-                        break;
-                    case "in_progress":
-                        msg = "Ride is already in progress. Cancellation not allowed.";
-                        break;
-                    default:
-                        msg = "Ride cannot be cancelled at this stage.";
+            // ✅ Only check statuses if cancelled by user
+            if (cancelBy !== "driver") {
+                const blockedStatuses = ["cancelled", "completed", "driver_arrived", "in_progress"];
+                if (blockedStatuses.includes(rideData.ride_status)) {
+                    let msg = "";
+                    switch (rideData.ride_status) {
+                        case "cancelled":
+                            msg = "Ride has already been cancelled.";
+                            break;
+                        case "completed":
+                            msg = "Ride has already been completed.";
+                            break;
+                        case "driver_arrived":
+                            msg = "Driver has already arrived. Ride cannot be cancelled now.";
+                            break;
+                        case "in_progress":
+                            msg = "Ride is already in progress. Cancellation not allowed.";
+                            break;
+                        default:
+                            msg = "Ride cannot be cancelled at this stage.";
+                    }
+                    throw new Error(msg);
                 }
-                throw new Error(msg);
             }
-            }
-       
 
+            // ✅ Always allow cancellation here
             rideData.ride_status = "cancelled";
             rideData.payment_status = "cancelled";
             rideData.cancelled_by = cancelBy;
@@ -3369,6 +3365,7 @@ exports.cancelRideByPoll = async (req, res) => {
         await session.endSession();
     }
 };
+
 
 
 exports.RateYourRider = async (req, res) => {
