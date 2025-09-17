@@ -1711,7 +1711,7 @@ exports.BookingDetailsAdmin = async (req, res) => {
             .populate({
                 path: 'notified_riders',  // ✅ fixed here
                 model: 'Rider',
-                select: 'name phone rideVehicleInfo isAvailable'
+                select: 'name phone rideVehicleInfo isAvailable createdAt lastUpdated'
             })
             .populate({
                 path: 'rejected_by_drivers.driver',
