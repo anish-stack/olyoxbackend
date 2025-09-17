@@ -1712,8 +1712,7 @@ exports.BookingDetailsAdmin = async (req, res) => {
                 path: 'notified_ridersr', // Populate driver inside rejected_by_drivers array
                 model: 'Rider',
                 select: 'name phone rideVehicleInfo isAvailable' // Select fields you want from the Rider model
-            });
-            // Populate specific driver fields
+            })
             .populate({
                 path: 'rejected_by_drivers.driver', // Populate driver inside rejected_by_drivers array
                 model: 'Rider',
