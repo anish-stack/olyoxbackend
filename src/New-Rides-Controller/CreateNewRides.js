@@ -573,7 +573,7 @@ const updateRideStatus = async (redisClient, rideId, status, additionalData = {}
 const initiateDriverSearch = async (rideId, req, res) => {
     const MAX_RETRIES = 5;
     const RETRY_DELAY_MS = 10000;
-    const INITIAL_RADIUS = 2500;
+    const INITIAL_RADIUS = 1500;
     const RADIUS_INCREMENT = 500;
 
     let retryCount = 0;
@@ -644,6 +644,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
                     {
                         $match: {
                             isAvailable: true,
+                             createdAt: { $gt: new Date("2025-09-01T00:00:00.000Z") },
                             _id: { $nin: currentRide.rejected_by_drivers || [] }
                         },
                     },
@@ -2501,7 +2502,7 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
 
                 console.log("📍 Distance from drop:", distance, "meters");
 
-                if (distance <= 200) {
+                if (distance <= 1000) {
                     foundRide.ride_status = 'completed';
                     foundRide.ride_ended_at = new Date();
 
@@ -3457,13 +3458,15 @@ exports.FindRiderNearByUser = async (req, res) => {
                         coordinates: [lng, lat], // ⚠️ Correct order: [longitude, latitude]
                     },
                     distanceField: "distance",
-                    maxDistance: 5000,
+                    maxDistance: 3000,
                     spherical: true,
                 },
             },
             {
                 $match: {
                     isAvailable: true,
+                    createdAt: { $gt: new Date("2025-09-01T00:00:00.000Z") },
+
                     $expr: {
                         $regexMatch: {
                             input: { $trim: { input: "$rideVehicleInfo.vehicleType" } }, // trims spaces

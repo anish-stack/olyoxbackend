@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.happy_coding.olyox",
+      "sha256_cert_fingerprints": [
+        "1A:57:D9:FB:FC:4C:39:FC:A0:56:E2:98:9C:46:B0:33:24:33:C9:EE:D1:89:CF:79:8E:9A:F1:71:F6:74:0C:7E"
+      ]
+    }
+  }
+]

@@ -141,7 +141,7 @@ exports.webhookExotelApi = async (req, res) => {
             }
             
             console.log(`❌ No active services found for user ID ${checkThisWithOurUser._id}`);
-            return res.status(200).type('text/plain').send('No active ride or delivery');
+            return res.status(200).type('text/plain').send('No active ride or delivery from user');
         }
         
         // Handle rider-to-user calls
@@ -219,7 +219,7 @@ exports.webhookExotelApi = async (req, res) => {
             }
             
             console.log(`❌ No active services found for rider ID ${checkThisWithOurUser._id}`);
-            return res.status(200).type('text/plain').send('No active ride or delivery');
+            return res.status(200).type('text/plain').send('No active ride or delivery from rider');
         }
         
         console.log('⚠️ Warning: Reached end of function without processing call type');
