@@ -4,7 +4,8 @@ const { NewcreateRequest, BookingDetailsAdmin, ride_status_after_booking, riderF
 const Protect = require('../../middleware/Auth');
 const { calculateRidePriceForUser } = require('../../src/New-Rides-Controller/FindPrice');
 const { updateRiderPreferences, getRiderPreferences } = require('../../src/New-Rides-Controller/V3/RIderPrefrencesUpdate');
-const { bookIntercityRide, getBookingDetailsById, getAvailableRides, acceptRide, RejectRide, getBookingDetails, verifyRideOTPIntercity, startRide, completeRide, paymentCollect, cancelRide, rateYourInterCity } = require('../../src/v3/IntercityRides');
+const { bookIntercityRide, getBookingDetailsById, getAvailableRides, acceptRide, RejectRide, getBookingDetails, verifyRideOTPIntercity, startRide, completeRide, paymentCollect, cancelRide, rateYourInterCity, IntercityRideAll, getDriversForRide } = require('../../src/v3/IntercityRides');
+const { getAllRides } = require('../../controllers/ride.request');
 const NewRoutes = express.Router()
 
 NewRoutes.post('/new-ride', Protect, NewcreateRequest)
@@ -42,6 +43,7 @@ NewRoutes.get('/get-prefrences/:riderId', getRiderPreferences)
 NewRoutes.post('/book-intercity-ride', bookIntercityRide);
 NewRoutes.get('/get-intercity-booking-details/:rideId',getBookingDetailsById)
 NewRoutes.get('/get-available-ride-for-driver',getAvailableRides)
+NewRoutes.get('/driver-found-for-ride',getDriversForRide)
 NewRoutes.post('/accepet-intercity-ride/:rideId',acceptRide)
 NewRoutes.post('/reject-intercity-ride/:rideId',RejectRide)
 NewRoutes.get('/get-ride-details/:rideId',getBookingDetails)
@@ -51,4 +53,7 @@ NewRoutes.post('/complete-ride-intercity',completeRide)
 NewRoutes.post('/collect-payment-intercity',paymentCollect)
 NewRoutes.post('/cancel-ride-intercity',cancelRide)
 NewRoutes.post('/rate-your-ride-intercity',rateYourInterCity)
+
+
+NewRoutes.get('/get-all-intercity-rides',IntercityRideAll)
 module.exports = NewRoutes;

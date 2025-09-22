@@ -1374,7 +1374,7 @@ exports.RejectRide = async (req, res) => {
 
 // ===== ADMIN/GENERAL FUNCTIONS =====
 
-exports.getAllRides = async (req, res) => {
+exports.IntercityRideAll = async (req, res) => {
     try {
         const {
             originCity,
@@ -1426,7 +1426,7 @@ exports.getAllRides = async (req, res) => {
 
         const rides = await IntercityRide.find(query)
             .populate('driverId', 'name phone email rating vehicle')
-            .populate('passengerId', 'name phone email')
+            .populate('passengerId', 'name number email createdAt platform')
             .sort({ 'schedule.departureTime': -1 })
             .skip(skip)
             .limit(parseInt(limit))
@@ -1914,7 +1914,7 @@ cron.schedule("*/2 * * * *", async () => {
                 // ✅ Prepare WhatsApp message
                 const msg = `🚖 *New Intercity Ride Available* 🚖\n\n📍 *Pickup*: ${ride.route.origin.address}\n📍 *Drop*: ${ride.route.destination.address}\n\n📏 *Distance*: ${ride.route.distance} km\n💰 *Price*: ₹${ride.pricing.totalPrice}\n🕒 *Departure*: ${new Date(ride.schedule.departureTime).toLocaleString()}\n\n👉 Open *Olyox Driver App* for more details.\n*Please check the Reservation rides section to accept this ride.*`;
                 try {
-                    //   await SendWhatsAppMessageNormal( msg,d.phone);
+                    // await SendWhatsAppMessageNormal(msg, d.phone);
                     console.log(`✅ Message sent to ${d.name} (${d.phone})`);
 
                     // Log in ride.messageSendToDriver
@@ -1939,3 +1939,136 @@ cron.schedule("*/2 * * * *", async () => {
         console.error("Error in intercity ride cron:", error);
     }
 });
+
+
+exports.getDriversForRide = async (req, res) => {
+  try {
+    const { rideId } = req.query;
+    const now = new Date();
+
+    console.log("🟢 getDriversForRide rideId:", rideId);
+
+    if (!rideId || !mongoose.Types.ObjectId.isValid(rideId)) {
+      return res.status(400).json({ success: false, message: "Invalid or missing rideId" });
+    }
+
+    // 1. Fetch ride
+    const ride = await IntercityRide.findById(rideId);
+    if (!ride) {
+      return res.status(404).json({ success: false, message: "Ride not found" });
+    }
+
+    const originLat = ride.route.origin.location.coordinates[1];
+    const originLng = ride.route.origin.location.coordinates[0];
+    const vehicleType = ride.vehicle.type;
+    const rejectedByDrivers = ride.rejectedByDrivers || [];
+
+    console.log("📍 Ride Origin:", { originLat, originLng, vehicleType });
+
+    // 2. Fetch drivers within 20km using aggregation
+    let riders = await driver.aggregate([
+      {
+        $geoNear: {
+          near: { type: "Point", coordinates: [originLng, originLat] },
+          distanceField: "distance",
+          maxDistance: 10000, // 20 km
+          spherical: true,
+        },
+      },
+      {
+        $match: {
+          _id: { $nin: rejectedByDrivers },
+          "RechargeData.approveRecharge": true,
+          "RechargeData.expireData": { $gte: now },
+          "preferences.OlyoxIntercity.enabled": true,
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          name: 1,
+          number: 1,
+          rideVehicleInfo: 1,
+          isAvailable: 1,
+          location: 1,
+          RechargeData: 1,
+          distance: 1,
+        },
+      },
+    ]);
+
+    console.log(`🔹 Total drivers nearby: ${riders.length}`);
+
+    // 3. Apply vehicle & preference logic
+    const stats = {
+      totalNearby: riders.length,
+      actualMatch: 0,
+      preferenceMatch: 0,
+      excluded: 0,
+      byVehicleType: {},
+    };
+
+    const eligibleDrivers = riders.filter((rider) => {
+      const driverType = rider?.rideVehicleInfo?.vehicleType?.trim();
+      const prefs = rider.preferences || {};
+
+      let decision = false;
+      let matchType = null;
+
+      const vType = vehicleType?.toUpperCase();
+      const dType = driverType?.toUpperCase();
+
+      // Special case: Bike
+      if (vType === "BIKE" && dType === "BIKE") {
+        decision = true;
+        matchType = "actualMatch";
+      } else if (vType === "MINI") {
+        decision = (
+          dType === "MINI" ||
+          (dType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
+          ((dType === "SUV" || dType === "XL" || dType === "SUV/XL") &&
+            prefs.OlyoxAcceptMiniRides?.enabled)
+        );
+        matchType = dType === "MINI" ? "actualMatch" : "preferenceMatch";
+      } else if (vType === "SEDAN") {
+        decision = (
+          dType === "SEDAN" ||
+          ((dType === "SUV" || dType === "XL" || dType === "SUV/XL") &&
+            prefs.OlyoxAcceptSedanRides?.enabled)
+        );
+        matchType = dType === "SEDAN" ? "actualMatch" : "preferenceMatch";
+      } else if (vType === "SUV" || vType === "SUV/XL" || vType === "XL") {
+        decision = ["SUV", "XL", "SUV/XL", "SEDAN", "MINI"].includes(dType);
+        matchType = "actualMatch";
+      }
+
+      // Update stats
+      if (decision) {
+        if (matchType === "actualMatch") stats.actualMatch++;
+        else if (matchType === "preferenceMatch") stats.preferenceMatch++;
+        stats.byVehicleType[dType] = (stats.byVehicleType[dType] || 0) + 1;
+      } else {
+        stats.excluded++;
+        stats.byVehicleType[dType] = (stats.byVehicleType[dType] || 0) + 1;
+      }
+
+      return decision;
+    });
+
+
+
+    if (!eligibleDrivers.length) {
+      return res.status(404).json({ success: false, message: "No eligible drivers found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      rideId: ride._id,
+      stats,
+      drivers: eligibleDrivers,
+    });
+  } catch (error) {
+    console.error("🔥 Error in getDriversForRide:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};

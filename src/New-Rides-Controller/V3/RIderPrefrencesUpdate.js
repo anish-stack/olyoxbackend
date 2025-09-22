@@ -6,21 +6,24 @@ const sendNotification = require("../../../utils/sendNotification");
 // Get available preferences based on vehicle type
 const getAvailablePreferences = (vehicleType) => {
     const basePreferences = ["OlyoxPriority"];
-    
+
     switch (vehicleType?.toLowerCase()) {
+        case 'auto':
+            return basePreferences;
+
         case 'bike':
             return basePreferences;
-            
+
         case 'mini':
             return [...basePreferences, "OlyoxIntercity"];
-            
+
         case 'sedan':
             return [...basePreferences, "OlyoxIntercity", "OlyoxAcceptMiniRides"];
-            
+
         case 'suv':
         case 'xl':
             return [...basePreferences, "OlyoxIntercity", "OlyoxAcceptMiniRides", "OlyoxAcceptSedanRides"];
-            
+
         default:
             return [...basePreferences, "OlyoxIntercity", "OlyoxAcceptMiniRides", "OlyoxAcceptSedanRides"];
     }
@@ -30,13 +33,13 @@ const getAvailablePreferences = (vehicleType) => {
 const validatePreferencesForVehicle = (preferences, vehicleType) => {
     const availablePreferences = getAvailablePreferences(vehicleType);
     const invalidPreferences = [];
-    
+
     Object.keys(preferences).forEach(pref => {
         if (!availablePreferences.includes(pref)) {
             invalidPreferences.push(pref);
         }
     });
-    
+
     return {
         isValid: invalidPreferences.length === 0,
         invalidPreferences,
@@ -49,7 +52,7 @@ exports.updateRiderPreferences = async (req, res) => {
     try {
         const { riderId, preferences, changedBy = 'rider', reason = '' } = req.body;
         console.log("Body have", req.body)
-        
+
         // Validate required fields
         if (!riderId || !preferences) {
             return res.status(400).json({
@@ -116,7 +119,7 @@ exports.updateRiderPreferences = async (req, res) => {
             if (currentState !== enabled) {
                 try {
                     await rider.updatePreference(prefName, enabled, changedBy, reason);
-                    
+
                     changesLog.push({
                         preference: prefName,
                         previousState: currentState,
@@ -156,7 +159,7 @@ exports.updateRiderPreferences = async (req, res) => {
                 // Send push notification
                 console.log('Sending notification to rider:', rider.fcmToken);
                 const notificationMessage = `Your ride preferences have been updated successfully.`;
-                await sendNotification.sendNotification(rider.fcmToken, 'Preferences Updated', notificationMessage,{},'app_notification_channel');
+                await sendNotification.sendNotification(rider.fcmToken, 'Preferences Updated', notificationMessage, {}, 'app_notification_channel');
 
                 // Send WhatsApp notification if enabled
                 if (rider.notificationSettings?.smsNotifications) {
@@ -228,7 +231,7 @@ exports.getRiderPreferences = async (req, res) => {
 
         // Get available preferences for vehicle type
         const availablePreferences = getAvailablePreferences(vehicleType);
-        
+
         // Build response with current preference states
         const currentPreferences = {};
         const preferencesAnalytics = {};
@@ -240,7 +243,7 @@ exports.getRiderPreferences = async (req, res) => {
                 lastChanged: preference?.lastChanged,
                 totalChanges: (preference?.enabledCount || 0) + (preference?.disabledCount || 0)
             };
-            
+
             // Get analytics if preference exists
             if (preference) {
                 preferencesAnalytics[pref] = rider.getPreferenceAnalytics(pref);
@@ -255,7 +258,7 @@ exports.getRiderPreferences = async (req, res) => {
                 vehicleType: vehicleType,
                 availablePreferences: availablePreferences,
                 currentPreferences: currentPreferences,
-              
+
                 vehicleTypeRules: {
                     bike: ["OlyoxPriority"],
                     mini: ["OlyoxPriority", "OlyoxIntercity"],
