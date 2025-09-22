@@ -1529,26 +1529,27 @@ exports.updateRiderDocumentVerify = async (req, res) => {
       rider.isFreeMember = true;
       rider.isPaid = true;
 
-      const oneYearLater = new Date();
-      oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
-      rider.freeTierEndData = oneYearLater;
+      const oneMonthLater = new Date();
+      oneMonthLater.setMonth(oneMonthLater.getMonth() + 1); // Add 1 month
+      rider.freeTierEndData = oneMonthLater;
 
       rider.RechargeData = {
         rechargePlan: "Free Tier",
-        expireData: oneYearLater,
+        expireData: oneMonthLater,
         approveRecharge: true,
       };
 
       await SendWhatsAppMessage(
-        `🎉 Dear ${rider.name
-        }, your documents have been successfully verified, and you've been granted 1 year of Free Tier membership! 🗓️
-    
-    ✅ Plan: Free Tier  
-    ✅ Valid Till: ${oneYearLater.toDateString()}  
-    ✅ Recharge Status: Approved
-    
-    We’re excited to have you on board. Let’s make your journey productive and rewarding. Stay safe and deliver with pride! 🚀  
-    — Team Support`,
+        `🎉 Dear ${
+          rider.name
+        }, your documents have been successfully verified, and you've been granted 1 month of Free Tier membership! 🗓️
+
+✅ Plan: Free Tier  
+✅ Valid Till: ${oneMonthLater.toDateString()}  
+✅ Recharge Status: Approved
+
+We’re excited to have you on board. Let’s make your journey productive and rewarding. Stay safe and deliver with pride! 🚀  
+— Team Support`,
         rider.phone
       );
     }
