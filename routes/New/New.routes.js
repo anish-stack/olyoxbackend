@@ -41,19 +41,19 @@ NewRoutes.get('/get-prefrences/:riderId', getRiderPreferences)
 
 //Book intercity Ride
 NewRoutes.post('/book-intercity-ride', bookIntercityRide);
-NewRoutes.get('/get-intercity-booking-details/:rideId',getBookingDetailsById)
-NewRoutes.get('/get-available-ride-for-driver',getAvailableRides)
-NewRoutes.get('/driver-found-for-ride',getDriversForRide)
-NewRoutes.post('/accepet-intercity-ride/:rideId',acceptRide)
-NewRoutes.post('/reject-intercity-ride/:rideId',RejectRide)
-NewRoutes.get('/get-ride-details/:rideId',getBookingDetails)
-NewRoutes.post('/verify-ride-otp-intercity',verifyRideOTPIntercity)
-NewRoutes.post('/start-intercity-ride',startRide)
-NewRoutes.post('/complete-ride-intercity',completeRide)
-NewRoutes.post('/collect-payment-intercity',paymentCollect)
-NewRoutes.post('/cancel-ride-intercity',cancelRide)
-NewRoutes.post('/rate-your-ride-intercity',rateYourInterCity)
+NewRoutes.get('/get-intercity-booking-details/:rideId', getBookingDetailsById)
+NewRoutes.get('/get-available-ride-for-driver', getAvailableRides)
+NewRoutes.get('/driver-found-for-ride', getDriversForRide)
+NewRoutes.post('/accepet-intercity-ride/:rideId', acceptRide)
+NewRoutes.post('/reject-intercity-ride/:rideId', RejectRide)
+NewRoutes.get('/get-ride-details/:rideId', getBookingDetails)
+NewRoutes.post('/verify-ride-otp-intercity', verifyRideOTPIntercity)
+NewRoutes.post('/start-intercity-ride', startRide)
+NewRoutes.post('/complete-ride-intercity', completeRide)
+NewRoutes.post('/collect-payment-intercity', paymentCollect)
+NewRoutes.post('/cancel-ride-intercity', cancelRide)
+NewRoutes.post('/rate-your-ride-intercity', rateYourInterCity)
 
 
-NewRoutes.get('/get-all-intercity-rides',IntercityRideAll)
+NewRoutes.get('/get-all-intercity-rides', IntercityRideAll)
 module.exports = NewRoutes;
