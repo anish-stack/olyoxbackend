@@ -65,6 +65,7 @@ const { getActiveCoupons, createPCoupon, getActivePCoupons, getCouponPById, upda
 const { createAppVersion, deleteAppVersion, getLatestAppVersionByType, getAllAppVersions } = require('../../Admin Controllers/AppVersion');
 const { webhookExotelApi } = require('../../controllers/ExotelApi');
 const { DriverSendNotification } = require('../../Admin Controllers/notification/notificationController');
+const { getUserDashboardStatics, getRiders, getRidersAvaiable } = require('../../Admin Controllers/dashboard');
 
 const admin = express.Router();
 
@@ -200,4 +201,9 @@ admin.get('/app-version/all', getAllAppVersions);
 
 admin.get('/webhook-exotel-api',webhookExotelApi)
 
+
+//stats
+admin.get('/user-dashboard-stats',getUserDashboardStatics);
+admin.get('/rider-dashboard-stats',getRiders);
+admin.get('/get-riders-available',getRidersAvaiable);
 module.exports = admin;
