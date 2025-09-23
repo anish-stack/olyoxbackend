@@ -107,6 +107,7 @@ exports.registerRider = async (req, res) => {
           },\n\nYour OTP for registering as ${role} rider is: ${otp}\n\nPlease use this to complete your registration.\n\n- Team Olyox`,
           phone
         );
+          await sendDltMessage(otp, phone);
 
         return res.status(200).json({
           success: true,
@@ -173,6 +174,8 @@ exports.registerRider = async (req, res) => {
     // Send OTP via WhatsApp
     const message = `Hi ${name},\n\nWelcome to Olyox!\nYour OTP for registering as a ${role} rider is: ${otp}.\n\nPlease verify your OTP to complete your registration.\n\nThank you for choosing us!\n- Team Olyox`;
     await SendWhatsAppMessage(message, phone);
+              await sendDltMessage(otp, phone);
+
     console.log("OTP message sent to:", phone);
 
     return res.status(201).json({
@@ -493,6 +496,7 @@ exports.resendOtp = async (req, res) => {
 
     const otpMessage = `Your OTP for cab registration is: ${otp}`;
     const data = await SendWhatsAppMessage(otpMessage, number);
+    const dlt = await sendDltMessage(otp, number);
     console.log(data);
     res.status(200).json({
       success: true,
