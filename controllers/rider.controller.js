@@ -1514,70 +1514,97 @@ exports.updateRiderDocumentVerify = async (req, res) => {
     const { id } = req.params;
     const { DocumentVerify } = req.body || req.query;
 
+    console.log("Incoming Request 👉", {
+      riderId: id,
+      DocumentVerify: DocumentVerify,
+    });
+
     const rider = await Rider.findById(id);
     if (!rider) {
+      console.log("❌ Rider not found with ID:", id);
       return res.status(404).json({
         success: false,
         message: "Rider not found",
       });
     }
 
+    console.log("✅ Rider found:", {
+      name: rider.name,
+      phone: rider.phone,
+      category: rider.category,
+      vehicleInfo: rider.rideVehicleInfo,
+    });
+
     // Update document verification status
     rider.DocumentVerify = DocumentVerify;
+    console.log("📌 DocumentVerify updated to:", DocumentVerify);
 
     async function grantFreeTier(rider) {
+      console.log("🎁 Granting Free Tier membership to rider:", rider._id);
+
       rider.isFreeMember = true;
       rider.isPaid = true;
 
       const oneMonthLater = new Date();
       oneMonthLater.setMonth(oneMonthLater.getMonth() + 1); // Add 1 month
+      
+      console.log("📅 Free Tier valid until:", oneMonthLater.toDateString());
       rider.freeTierEndData = oneMonthLater;
 
       rider.RechargeData = {
         rechargePlan: "Free Tier",
         expireData: oneMonthLater,
-        onHowManyEarning:50000,
+        onHowManyEarning: 50000,
         approveRecharge: true,
       };
 
+      console.log("📌 Free Tier details set:", rider.RechargeData);
+
       await SendWhatsAppMessage(
-        `🎉 Dear ${rider.name
-        }, your documents have been successfully verified, and you've been granted 1 month of Free Tier membership! 🗓️
+        `🎉 Dear ${rider.name}, your documents have been successfully verified, and you've been granted 1 month of Free Tier membership! 🗓️
 
-✅ Plan: Free Tier  
-✅ Valid Till: ${oneMonthLater.toDateString()}  
-✅ Recharge Status: Approved
+        ✅ Plan: Free Tier  
+        ✅ Valid Till: ${oneMonthLater.toDateString()}  
+        ✅ Recharge Status: Approved
 
-We’re excited to have you on board. Let’s make your journey productive and rewarding. Stay safe and deliver with pride! 🚀  
-— Team Support`,
+        We’re excited to have you on board. Let’s make your journey productive and rewarding. Stay safe and deliver with pride! 🚀  
+        — Team Support`,
         rider.phone
       );
+
+      console.log("📨 WhatsApp Free Tier message sent to:", rider.phone);
     }
 
     const vehicleName = rider.rideVehicleInfo?.vehicleName?.toLowerCase();
     const vehicleType = rider.rideVehicleInfo?.vehicleType?.toLowerCase();
 
+    console.log("🚘 Vehicle Info:", { vehicleName, vehicleType });
+
     if (rider.category === "parcel") {
-      grantFreeTier(rider);
+      console.log("📦 Rider category is parcel → Grant Free Tier");
+      await grantFreeTier(rider);
     } else if (
       rider.category === "cab" &&
       (vehicleName === "bike" || vehicleType === "bike")
     ) {
-      grantFreeTier(rider);
+      console.log("🏍️ Rider category is cab with bike → Grant Free Tier");
+      await grantFreeTier(rider);
     } else {
-      // All other cases
+      console.log("🚖 Rider category is other → Normal approval message");
       await SendWhatsAppMessage(
         `✅ Hello ${rider.name}, your documents have been successfully verified! 🎉
     
-    You are now fully approved to continue providing your services on our platform.
+        You are now fully approved to continue providing your services on our platform.
     
-    Thank you for your patience and welcome to the community! 😊  
-    — Team Support`,
+        Thank you for your patience and welcome to the community! 😊  
+        — Team Support`,
         rider.phone
       );
+      console.log("📨 Normal approval WhatsApp message sent to:", rider.phone);
     }
 
     const result = await rider.save();
+    console.log("💾 Rider saved successfully:", result._id);
 
     return res.status(200).json({
       success: true,
@@ -1585,13 +1612,14 @@ We’re excited to have you on board. Let’s make your journey productive and r
       data: result,
     });
   } catch (error) {
-    console.error("Internal server error:", error);
+    console.error("🔥 Internal server error in updateRiderDocumentVerify:", error);
     return res.status(500).json({
       success: false,
       message: "Something went wrong while verifying the documents.",
     });
   }
 };
+
 
 exports.updateRiderDetails = async (req, res) => {
   try {
