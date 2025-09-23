@@ -1821,13 +1821,9 @@ exports.rateYourInterCity = async (req, res) => {
     }
 };
 
-
-// Run every 2 minutes
-
 cron.schedule("*/2 * * * *", async () => {
     try {
         const now = new Date();
-        // Exclude rides that are completed/cancelled/etc.
         const invalidStatuses = [
             "driver_assigned",
             "driver_reached",
@@ -1840,19 +1836,26 @@ cron.schedule("*/2 * * * *", async () => {
 
         const rides = await IntercityRide.find({
             status: { $nin: invalidStatuses },
-            // rideCategory: "leave-now",
         });
 
-        if (!rides.length) return;
+        if (!rides.length) {
+            console.log("✅ No rides to cancel. All clean.");
+            return;
+        }
 
         for (const ride of rides) {
-            const originLat = ride.route.origin.location.coordinates[1];
-            const originLng = ride.route.origin.location.coordinates[0];
-            const vehicleType = ride.vehicle.type;
+            // ✅ Origin safe check
+            const origin = getLatLngSafe(ride.route?.origin);
+            if (!origin) {
+                console.log(`⚠️ Skipping ride ${ride._id} - Invalid origin coords`);
+                continue;
+            }
+
+            const vehicleType = ride.vehicle?.type;
             const rejectedByDrivers = ride.rejectedByDrivers || [];
             const messageLog = ride.messageSendToDriver || [];
 
-            // Find eligible drivers
+            // Eligible drivers
             const drivers = await driver
                 .find({
                     "preferences.OlyoxIntercity.enabled": true,
@@ -1860,7 +1863,7 @@ cron.schedule("*/2 * * * *", async () => {
                 })
                 .select("-activityLog");
 
-            // Filter drivers with active recharge
+            // Active recharge filter
             const driversAfterRecharge = drivers.filter((d) => {
                 const expireDate = d?.RechargeData?.expireData;
                 return expireDate && new Date(expireDate) >= now;
@@ -1869,11 +1872,15 @@ cron.schedule("*/2 * * * *", async () => {
             let validDrivers = [];
 
             for (const d of driversAfterRecharge) {
-                const driverLat = d.location?.coordinates[1];
-                const driverLng = d.location?.coordinates[0];
-                if (!driverLat || !driverLng) continue;
+                // ✅ Driver safe check
+                const driver = getLatLngSafe(d);
+                if (!driver) {
+                    console.log(`⚠️ Skipping driver ${d._id} - Invalid driver coords`);
+                    continue;
+                }
 
-                const distance = calculateDistance(originLat, originLng, driverLat, driverLng);
+                // Distance filter
+                const distance = calculateDistance(origin.lat, origin.lng, driver.lat, driver.lng);
                 if (distance > 5) continue;
 
                 // Vehicle compatibility check
@@ -1898,21 +1905,25 @@ cron.schedule("*/2 * * * *", async () => {
 
                 if (!vehicleOk) continue;
 
-                // ✅ Prevent duplicate message within 5 minutes
+                // ✅ Duplicate message prevention
                 const lastMessage = messageLog.find(
                     (m) => m.driver_id.toString() === d._id.toString()
                 );
-
                 if (lastMessage) {
                     const diffMinutes = (now - new Date(lastMessage.at_time)) / (1000 * 60);
                     if (diffMinutes < 5) {
-                        console.log(`Skipping message to ${d.name} (sent ${diffMinutes.toFixed(1)} min ago)`);
+                        console.log(
+                            `⏳ Skipping message to ${d.name} (sent ${diffMinutes.toFixed(1)} min ago)`
+                        );
                         continue;
                     }
                 }
 
                 // ✅ Prepare WhatsApp message
-                const msg = `🚖 *New Intercity Ride Available* 🚖\n\n📍 *Pickup*: ${ride.route.origin.address}\n📍 *Drop*: ${ride.route.destination.address}\n\n📏 *Distance*: ${ride.route.distance} km\n💰 *Price*: ₹${ride.pricing.totalPrice}\n🕒 *Departure*: ${new Date(ride.schedule.departureTime).toLocaleString()}\n\n👉 Open *Olyox Driver App* for more details.\n*Please check the Reservation rides section to accept this ride.*`;
+                const msg = `🚖 *New Intercity Ride Available* 🚖\n\n📍 *Pickup*: ${ride.route.origin.address}\n📍 *Drop*: ${ride.route.destination.address}\n\n📏 *Distance*: ${ride.route.distance} km\n💰 *Price*: ₹${ride.pricing.totalPrice}\n🕒 *Departure*: ${new Date(
+                    ride.schedule.departureTime
+                ).toLocaleString()}\n\n👉 Open *Olyox Driver App* for more details.\n*Please check the Reservation rides section to accept this ride.*`;
+
                 try {
                     // await SendWhatsAppMessageNormal(msg, d.phone);
                     console.log(`✅ Message sent to ${d.name} (${d.phone})`);
@@ -1932,13 +1943,20 @@ cron.schedule("*/2 * * * *", async () => {
             }
 
             if (validDrivers.length > 0) {
-                console.log(`Ride ${ride._id} matched with ${validDrivers.length} drivers`);
+                console.log(`🚀 Ride ${ride._id} matched with ${validDrivers.length} drivers`);
             }
         }
     } catch (error) {
-        console.error("Error in intercity ride cron:", error);
+        console.error("❌ Error in intercity ride cron:", error);
     }
 });
+
+// 🔧 Helper
+function getLatLngSafe(obj) {
+    const coords = obj?.location?.coordinates;
+    if (!coords || coords.length < 2) return null;
+    return { lat: coords[1], lng: coords[0] };
+}
 
 
 exports.getDriversForRide = async (req, res) => {

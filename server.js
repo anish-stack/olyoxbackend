@@ -5,21 +5,25 @@ const { createClient } = require('redis');
 const mongoose = require('mongoose');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
-const multer = require('multer');
 const axios = require('axios');
 require('dotenv').config();
-const compression = require("compression")
-// Database and Models
+const compression = require("compression");
+const cron = require('node-cron');
+const path = require('path');
+const fs = require('fs');
+// Import Socket.IO manager
+const { initSocket, getIO, getStats, sendNotificationToUser, broadcastToUserType, sendToRide } = require('./socket/socketManager');
+
 const connectDb = require('./database/db');
 const { connectwebDb } = require('./PaymentWithWebDb/db');
-const rideRequestModel = require('./models/ride.request.model');
 const RiderModel = require('./models/Rider.model');
-const User = require('./models/normal_user/User.model');
-const ParcelBoyLocation = require('./models/Parcel_Models/Parcel_Boys_Location');
+const userModel = require('./models/normal_user/User.model');
+
+
 const Settings = require('./models/Admin/Settings');
-const tempRideDetailsSchema = require('./models/tempRideDetailsSchema');
-const NewRideModel = require('./src/New-Rides-Controller/NewRideModel.model')
+const NewRideModel = require('./src/New-Rides-Controller/NewRideModel.model');
 const setupBullBoard = require('./bullboard');
+
 // Routes
 const router = require('./routes/routes');
 const rides = require('./routes/rides.routes');
@@ -32,28 +36,8 @@ const Heavy = require('./routes/Heavy_vehicle/Heavy.routes');
 const NewRoutes = require('./routes/New/New.routes');
 const sendNotification = require('./utils/sendNotification');
 
-// Controllers and Middleware
-const {
-    ChangeRideRequestByRider,
-    findRider,
-    rideStart,
-    rideEnd,
-    collectCash,
-    AddRating,
-    cancelRideByAnyOne,
-    cancelRideForOtherDrivers,
-    updateRideRejectionStatus,
-    findNextAvailableDriver
-} = require('./controllers/ride.request');
-const {
-    update_parcel_request,
-    mark_reached,
-    mark_pick,
-    mark_deliver,
-    mark_cancel
-} = require('./driver');
 const Protect = require('./middleware/Auth');
-const { debugIOSNotification } = require('./utils/DebugNotifications');
+const SentLog = require('./models/log/sendLogs.model');
 
 // Initialize Express and Server
 const app = express();
@@ -77,9 +61,6 @@ const redisOptions = {
     },
     password: process.env.REDIS_PASSWORD || undefined
 };
-
-
-
 
 // Global Redis client
 let pubClient;
@@ -136,42 +117,35 @@ async function connectDatabases() {
     }
 }
 
+// Socket.IO initialization
+async function initializeSocket() {
+    try {
+        const io = await initSocket(server, pubClient);
 
-async function sendPushNotification(expoPushTokens, title, body) {
- try {
-  const response = await sendNotification.sendNotification(
-    'f_tdIVaMTJyvTYwxrNtD8m:APA91bEyIBblc-oy_YdseEKWbXNor-kA_GYdniMi2BluhBkkvvjlg_QM-vXIJZdpcwh8j6L0yKWa_dNNygctLD1i9fCsPJbkLYVHGtFIMpe8DNseoHfA_ec',
-    '🚖 Ride Request',
-    'A new rider has booked a cab. Tap to view details.',
-    { rideId: '12345', type: 'newBooking' }, // extra data
-    true // Android flag if your fn supports it
-  );
+        // Make Socket.IO available globally in the app
+        app.set('io', io);
+        app.set('getIO', getIO);
+        app.set('sendNotificationToUser', sendNotificationToUser);
+        app.set('broadcastToUserType', broadcastToUserType);
+        app.set('sendToRide', sendToRide);
 
-  console.log("✅ Notification sent successfully:", response);
-} catch (error) {
-  console.error("❌ Failed to send notification:", error);
+        console.log(`[${new Date().toISOString()}] Socket.IO initialized successfully`);
+        return io;
+    } catch (error) {
+        console.error(`[${new Date().toISOString()}] Socket.IO initialization failed:`, error.message);
+        throw error;
+    }
 }
-}
-
-// sendNotification.sendTestNotification("cTVlPvzWqE6WhQPcL87uQT:APA91bF-TV2a1TtNtrIJg_7iWtnb9kUfX8BhyHypQ-ZeAfMa3Dw_FtONXwCXnNnP-OcxxzNx4nRpIIP2G5OkXNA1ZRyBSSGerJ60lWUTIrhK0eQhB7oBFFw", "ios");
-// sendNotification.sendNotification("dbRY9fE1K0VIvE23QS8qYK:APA91bF_WAKSnkSYri3LFBX7VBegYzxhmRWJCqAOFEYRlO3Z7hNh-_ynFEX2BKVJur9d-vjyszJ5Cdt-zCy5uhFc6TU4ZI1wKVN_Iz9tdAmyja_DKTQCQe4", "Hey Buddy i am Your Ios Notification code", "This is not for test")
-//   .then(() => console.log("Success ios notification!"))
-//   .catch(console.error);
-// Example usage:
-// const expoPushTokens = ['ExponentPushToken[yBRBtTIa6xCmtrO8igmTz0]'];
 
 
-
-
-
-
-// Multer for File Uploads
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
-
-// Middleware
+// Enhanced Middleware
 app.use(cors({ origin: '*', credentials: true }));
+app.use(compression({
+    threshold: 0, // compress everything, even small responses
+}));
+
 setupBullBoard(app);
+
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 300000,
@@ -186,15 +160,23 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Middleware to check Redis connection
+// Enhanced middleware to check Redis connection and make Socket.IO available
 app.use((req, res, next) => {
     if (!pubClient || !pubClient.isOpen) {
         console.warn(`[${new Date().toISOString()}] Redis client not available for request: ${req.path}`);
     }
+
+    // Make Socket.IO functions available in all routes
+    req.io = app.get('io');
+    req.getIO = app.get('getIO');
+    req.sendNotificationToUser = app.get('sendNotificationToUser');
+    req.broadcastToUserType = app.get('broadcastToUserType');
+    req.sendToRide = app.get('sendToRide');
+
     next();
 });
-// ia am ams
-// Long Polling Updates Endpoint
+
+// Enhanced Long Polling Updates Endpoint with Socket.IO integration
 app.get('/updates/:userId/:userType', async (req, res) => {
     const { userId, userType } = req.params;
     const validTypes = ['user', 'driver', 'tiffin_partner'];
@@ -215,27 +197,49 @@ app.get('/updates/:userId/:userType', async (req, res) => {
         // Register client as active
         await pubClient.set(`active:${userType}:${userId}`, '1', { EX: 3600 });
 
+        // Check if user is connected via Socket.IO
+        const socketStats = getStats();
+        const isConnectedViaSocket = userType === 'driver'
+            ? socketStats.connectedDrivers > 0
+            : socketStats.connectedUsers > 0;
+
         while (Date.now() - startTime < timeoutMs) {
             const updates = await pubClient.lPop(key);
             if (updates) {
                 const data = JSON.parse(updates);
-                return res.json({ success: true, updates: data });
+
+                // Also send via Socket.IO if connected
+                if (isConnectedViaSocket && req.sendNotificationToUser) {
+                    req.sendNotificationToUser(userId, userType, {
+                        type: 'long_polling_update',
+                        data: data
+                    });
+                }
+
+                return res.json({
+                    success: true,
+                    updates: data,
+                    socketConnected: isConnectedViaSocket
+                });
             }
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
-        res.json({ success: true, updates: null });
+
+        res.json({
+            success: true,
+            updates: null,
+            socketConnected: isConnectedViaSocket
+        });
     } catch (err) {
         console.error(`[${new Date().toISOString()}] Polling error for ${userType}:${userId}:`, err.message);
         res.status(500).json({ success: false, message: 'Polling failed' });
     }
 });
 
-
+// Enhanced directions endpoint with real-time updates
 app.post('/directions', async (req, res) => {
     try {
         const data = req.body || {};
-
-   
 
         if (!data?.pickup?.latitude || !data?.pickup?.longitude || !data?.dropoff?.latitude || !data?.dropoff?.longitude) {
             return res.status(400).json({ error: 'Invalid pickup or dropoff location data' });
@@ -243,7 +247,6 @@ app.post('/directions', async (req, res) => {
 
         // Create a unique cache key based on coordinates
         const cacheKey = `directions:${data.pickup.latitude},${data.pickup.longitude}:${data.dropoff.latitude},${data.dropoff.longitude}`;
-
         const startTime = Date.now();
 
         // Try fetching from Redis cache
@@ -253,6 +256,14 @@ app.post('/directions', async (req, res) => {
             const result = JSON.parse(cachedData);
 
             console.log(`[${new Date().toISOString()}] Successfully fetched directions from cache for key: ${cacheKey} (took ${timeTakenMs} ms)`);
+
+            // Broadcast to Socket.IO if ride ID is provided
+            if (data.rideId && req.sendToRide) {
+                req.sendToRide(data.rideId, 'directions_updated', {
+                    ...result,
+                    source: 'cache'
+                });
+            }
 
             return res.json({
                 ...result,
@@ -281,7 +292,14 @@ app.post('/directions', async (req, res) => {
             await pubClient.setEx(cacheKey, 3600, JSON.stringify(result));
 
             console.log(`[${new Date().toISOString()}] Successfully fetched directions from Google API for key: ${cacheKey} (took ${apiTimeTakenMs} ms)`);
-            console.log('Passing API result to client:', result);
+
+            // Broadcast to Socket.IO if ride ID is provided
+            if (data.rideId && req.sendToRide) {
+                req.sendToRide(data.rideId, 'directions_updated', {
+                    ...result,
+                    source: 'google-api'
+                });
+            }
 
             return res.json({
                 ...result,
@@ -298,18 +316,40 @@ app.post('/directions', async (req, res) => {
     }
 });
 
-// List Available Riders
+// Enhanced rider listing with real-time updates
 app.get('/rider', async (req, res) => {
     try {
-        console.log("iamht")
+        console.log("Fetching available riders...");
         const riders = await RiderModel.find({ isAvailable: true });
-        res.json({ success: true, riders });
+
+        // Get Socket.IO connection stats
+        const socketStats = getStats();
+
+        // Enhance rider data with online status
+        const enhancedRiders = await Promise.all(riders.map(async (rider) => {
+            const onlineStatus = await pubClient.get(`user_online_driver_${rider._id}`);
+            return {
+                ...rider.toObject(),
+                isOnline: !!onlineStatus,
+                lastSeen: onlineStatus ? JSON.parse(onlineStatus).timestamp : null
+            };
+        }));
+
+        res.json({
+            success: true,
+            riders: enhancedRiders,
+            socketStats: {
+                connectedDrivers: socketStats.connectedDrivers,
+                totalConnections: socketStats.totalSockets
+            }
+        });
     } catch (err) {
         console.error(`[${new Date().toISOString()}] List riders error:`, err.message);
         res.status(500).json({ success: false, error: 'Failed to list riders' });
     }
 });
 
+// Enhanced ride tracking endpoint
 app.get('/rider/:tempRide', async (req, res) => {
     const { tempRide } = req.params;
     console.log(`[STEP 1] Received tempRide param: ${tempRide}`);
@@ -328,10 +368,31 @@ app.get('/rider/:tempRide', async (req, res) => {
             return res.status(404).json({ error: 'Ride not found' });
         }
 
+        // Get real-time driver location if available
+        let driverLocation = null;
+        if (ride.driver) {
+            const locationData = await pubClient.get(`location_driver_${ride.driver._id}`);
+            if (locationData) {
+                driverLocation = JSON.parse(locationData);
+            }
+        }
+
+        // Check Socket.IO connection status
+        const socketStats = getStats();
+        const isDriverOnline = ride.driver ?
+            await pubClient.get(`user_online_driver_${ride.driver._id}`) : null;
 
         return res.status(200).json({
             success: true,
-            data: ride
+            data: {
+                ...ride.toObject(),
+                realTimeDriverLocation: driverLocation,
+                driverOnlineStatus: !!isDriverOnline,
+                socketStats: {
+                    activeRides: socketStats.activeRides,
+                    connectedDrivers: socketStats.connectedDrivers
+                }
+            }
         });
 
     } catch (error) {
@@ -340,6 +401,7 @@ app.get('/rider/:tempRide', async (req, res) => {
     }
 });
 
+// Enhanced location update endpoint with real-time broadcasting
 app.post('/webhook/cab-receive-location', async (req, res, next) => {
     console.log('--- Incoming request to /webhook/cab-receive-location ---');
     console.log('Request Body:', req.body);
@@ -350,14 +412,14 @@ app.post('/webhook/cab-receive-location', async (req, res, next) => {
     }
 
     console.log('riderId found, skipping Protect middleware');
-    next(); // Proceed to the handler if riderId is provided
+    next();
 
 }, async (req, res) => {
     try {
         console.log('--- Entering location update handler ---');
 
-        const { latitude, longitude, riderId } = req.body;
-        console.log('Received Data:', { latitude, longitude, riderId });
+        const { latitude, longitude, riderId, heading, speed } = req.body;
+        console.log('Received Data:', { latitude, longitude, riderId, heading, speed });
 
         let userId;
         if (riderId) {
@@ -365,7 +427,6 @@ app.post('/webhook/cab-receive-location', async (req, res, next) => {
             console.log('Using riderId from request body:', userId);
         } else {
             userId = req.user?.userId;
-            // console.log('Using authenticated userId:', userId);
         }
 
         if (!userId) {
@@ -391,7 +452,47 @@ app.post('/webhook/cab-receive-location', async (req, res, next) => {
 
         console.log('Rider location updated:', data?.name);
 
-        res.status(200).json({ message: 'Location updated successfully' });
+        // Broadcast real-time location update via Socket.IO
+        if (req.getIO) {
+            const io = req.getIO();
+            const locationUpdate = {
+                userId,
+                userType: 'driver',
+                latitude,
+                longitude,
+                heading: heading || null,
+                speed: speed || null,
+                timestamp: new Date().toISOString()
+            };
+
+            // Emit to all users tracking this driver
+            io.to(`tracking_driver_${userId}`).emit('driver_location', locationUpdate);
+
+            // Emit to admin dashboard
+            io.to('admins').emit('driver_location_updated', locationUpdate);
+        }
+
+        // Store in Redis for quick access
+        const locationData = {
+            userId,
+            userType: 'driver',
+            latitude,
+            longitude,
+            heading: heading || null,
+            speed: speed || null,
+            timestamp: new Date().toISOString()
+        };
+
+        await pubClient.setEx(
+            `location_driver_${userId}`,
+            300,
+            JSON.stringify(locationData)
+        );
+
+        res.status(200).json({
+            message: 'Location updated successfully',
+            realTimeBroadcast: !!req.getIO
+        });
 
     } catch (error) {
         console.error('Error updating location:', error);
@@ -399,11 +500,11 @@ app.post('/webhook/cab-receive-location', async (req, res, next) => {
     }
 });
 
-
+// Enhanced parcel boy location update
 app.post('/webhook/receive-location', Protect, async (req, res) => {
     try {
-        console.log("user hits", req.user)
-        const { latitude, longitude } = req.body;
+        console.log("User hits", req.user);
+        const { latitude, longitude, heading, speed } = req.body;
         const userId = req.user.userId;
 
         const data = await Parcel_boy_Location.findOneAndUpdate(
@@ -417,7 +518,23 @@ app.post('/webhook/receive-location', Protect, async (req, res) => {
             },
             { upsert: true, new: true }
         );
-        // console.log("data", data)
+
+        // Broadcast via Socket.IO
+        if (req.getIO) {
+            const locationUpdate = {
+                userId,
+                userType: 'parcel_boy',
+                latitude,
+                longitude,
+                heading: heading || null,
+                speed: speed || null,
+                timestamp: new Date().toISOString()
+            };
+
+            const io = req.getIO();
+            io.to(`tracking_parcel_boy_${userId}`).emit('parcel_boy_location', locationUpdate);
+            io.to('admins').emit('parcel_boy_location_updated', locationUpdate);
+        }
 
         res.status(200).json({ message: 'Location updated successfully' });
     } catch (error) {
@@ -428,15 +545,18 @@ app.post('/webhook/receive-location', Protect, async (req, res) => {
 
 // Root Endpoint
 app.get('/', (req, res) => {
+    const socketStats = getStats();
     res.status(200).json({
-        message: 'Welcome to the API',
+        message: 'Welcome to the Olyox API',
         timestamp: new Date().toISOString(),
-        version: '1.0.0'
+        version: '1.0.0',
+        socketStats: socketStats
     });
 });
 
-// Health Check
+// Enhanced Health Check with Socket.IO status
 app.get('/health', async (req, res) => {
+    const socketStats = getStats();
     const health = {
         status: 'UP',
         timestamp: new Date().toISOString(),
@@ -448,6 +568,11 @@ app.get('/health', async (req, res) => {
             mongodb: {
                 connected: mongoose.connection.readyState === 1,
                 status: mongoose.connection.readyState === 1 ? 'UP' : 'DOWN'
+            },
+            socketio: {
+                initialized: !!req.getIO,
+                status: !!req.getIO ? 'UP' : 'DOWN',
+                stats: socketStats
             }
         }
     };
@@ -469,9 +594,19 @@ app.get('/health', async (req, res) => {
     res.status(statusCode).json(health);
 });
 
-// Fetch Current Location
+// Socket.IO statistics endpoint
+app.get('/socket-stats', (req, res) => {
+    const stats = getStats();
+    res.json({
+        success: true,
+        stats: stats,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Enhanced location fetch with real-time capabilities
 app.post('/Fetch-Current-Location', async (req, res) => {
-    const { lat, lng } = req.body;
+    const { lat, lng, userId, userType } = req.body;
 
     if (!lat || !lng) {
         return res.status(400).json({ success: false, message: 'Latitude and longitude required' });
@@ -486,9 +621,20 @@ app.post('/Fetch-Current-Location', async (req, res) => {
             try {
                 cachedData = await pubClient.get(cacheKey);
                 if (cachedData) {
+                    const result = JSON.parse(cachedData);
+
+                    // Broadcast location update if user info provided
+                    if (userId && userType && req.sendNotificationToUser) {
+                        req.sendNotificationToUser(userId, userType, {
+                            type: 'location_fetched',
+                            data: result,
+                            source: 'cache'
+                        });
+                    }
+
                     return res.status(200).json({
                         success: true,
-                        data: JSON.parse(cachedData),
+                        data: result,
                         message: 'Location fetched from cache'
                     });
                 }
@@ -528,6 +674,15 @@ app.post('/Fetch-Current-Location', async (req, res) => {
             }
         }
 
+        // Broadcast location update if user info provided
+        if (userId && userType && req.sendNotificationToUser) {
+            req.sendNotificationToUser(userId, userType, {
+                type: 'location_fetched',
+                data: result,
+                source: 'google-api'
+            });
+        }
+
         res.status(200).json({ success: true, data: result, message: 'Location fetched' });
     } catch (err) {
         console.error(`[${new Date().toISOString()}] Location fetch error:`, err.message);
@@ -535,7 +690,7 @@ app.post('/Fetch-Current-Location', async (req, res) => {
     }
 });
 
-
+// Enhanced driver location endpoint with real-time tracking
 app.get('/driver/:id/location', async (req, res) => {
     try {
         const { id } = req.params;
@@ -549,23 +704,46 @@ app.get('/driver/:id/location', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Driver not found' });
         }
 
-        if (!driver.location || !driver.location.coordinates || driver.location.coordinates.length < 2) {
+        // Get real-time location from Redis
+        let realtimeLocation = null;
+        try {
+            const locationData = await pubClient.get(`location_driver_${id}`);
+            if (locationData) {
+                realtimeLocation = JSON.parse(locationData);
+            }
+        } catch (error) {
+            console.warn('Error fetching realtime location:', error.message);
+        }
+
+        // Use realtime location if available, otherwise use database location
+        const location = realtimeLocation || driver.location;
+
+        if (!location || !location.coordinates || location.coordinates.length < 2) {
             return res.status(404).json({ success: false, message: 'Driver location not available' });
         }
 
-        const lastUpdated = driver.location?.lastUpdated;
+        const lastUpdated = realtimeLocation ?
+            new Date(realtimeLocation.timestamp) :
+            driver.location?.lastUpdated;
         const timeAgo = lastUpdated ? getTimeAgo(new Date(lastUpdated)) : null;
+
+        // Check online status
+        const isOnline = await pubClient.get(`user_online_driver_${id}`);
 
         const riders = {
             id: driver._id,
             name: driver.name,
             phone: driver.phone,
             location: {
-                lat: driver.location.coordinates[1],
-                lng: driver.location.coordinates[0],
+                lat: location.coordinates ? location.coordinates[1] : location.latitude,
+                lng: location.coordinates ? location.coordinates[0] : location.longitude,
             },
+            heading: realtimeLocation?.heading || null,
+            speed: realtimeLocation?.speed || null,
             howOldUpdated: timeAgo,
             lastUpdated,
+            isOnline: !!isOnline,
+            hasRealtimeData: !!realtimeLocation
         };
 
         console.log(`[${new Date().toISOString()}] Fetched driver location for ID: ${id}`);
@@ -592,11 +770,10 @@ function getTimeAgo(date) {
     return `${days} days ago`;
 }
 
-
-// Geo-code Distance
+// Enhanced geo-code distance with real-time updates
 app.post('/geo-code-distance', async (req, res) => {
     try {
-        const { pickup, dropOff } = req.body;
+        const { pickup, dropOff, rideId } = req.body;
 
         if (!pickup || !dropOff) {
             return res.status(400).json({ success: false, message: 'Pickup and dropoff addresses required' });
@@ -609,7 +786,21 @@ app.post('/geo-code-distance', async (req, res) => {
             try {
                 const cachedData = await pubClient.get(cacheKey);
                 if (cachedData) {
-                    return res.status(200).json({ success: true, ...JSON.parse(cachedData), fromCache: true });
+                    const result = JSON.parse(cachedData);
+
+                    // Broadcast to ride room if rideId provided
+                    if (rideId && req.sendToRide) {
+                        req.sendToRide(rideId, 'distance_calculated', {
+                            ...result,
+                            source: 'cache'
+                        });
+                    }
+
+                    return res.status(200).json({
+                        success: true,
+                        ...result,
+                        fromCache: true
+                    });
                 }
             } catch (cacheError) {
                 console.warn(`[${new Date().toISOString()}] Cache read error:`, cacheError.message);
@@ -671,6 +862,14 @@ app.post('/geo-code-distance', async (req, res) => {
             }
         }
 
+        // Broadcast to ride room if rideId provided
+        if (rideId && req.sendToRide) {
+            req.sendToRide(rideId, 'distance_calculated', {
+                ...result,
+                source: 'google-api'
+            });
+        }
+
         res.status(200).json({ success: true, ...result });
     } catch (err) {
         console.error(`[${new Date().toISOString()}] Geo-code distance error:`, err.message);
@@ -678,63 +877,61 @@ app.post('/geo-code-distance', async (req, res) => {
     }
 });
 
-const ANDROID_STORE = "https://play.google.com/store/apps/details?id=com.happy_coding.olyox&hl=en_IN";
-const IOS_STORE = "https://apps.apple.com/in/app/olyox-book-cab-hotel-food/id6744582670";
+// New Socket.IO testing endpoints
+app.post('/test-socket-notification', async (req, res) => {
+    const { userId, userType, message } = req.body;
 
+    if (!userId || !userType || !message) {
+        return res.status(400).json({ error: 'userId, userType, and message are required' });
+    }
 
-const ridesTest = {
-  "64a83f42": {
-    id: "64a83f42",
-    pickup: "Sector 99A",
-    drop: "Sector 29",
-    fare: 119.18
-  }
-};
+    try {
+        if (req.sendNotificationToUser) {
+            req.sendNotificationToUser(userId, userType, {
+                type: 'test_notification',
+                message: message,
+                timestamp: new Date().toISOString()
+            });
 
-
-// Endpoint to share ride
-app.get("/share-ride-to-loveone/:rideId", (req, res) => {
-  const { rideId } = req.params;
-  const ride = ridesTest[rideId];
-
-  if (!ride) return res.status(404).send("Ride not found");
-
-  // Deep link to open app ride page
-  const deepLink = `https://appv2.olyox.com/share-ride-to-loveone/${rideId}`;
-
-  const userAgent = req.headers["user-agent"] || "";
-
-  // Redirect logic
-  if (/android/i.test(userAgent)) {
-    // Android: open app if installed, otherwise Play Store
-    res.send(`
-      <script>
-        window.location = "${deepLink}";
-        setTimeout(() => { window.location = "${ANDROID_STORE}"; }, 2000);
-      </script>
-    `);
-  } else if (/iphone|ipad|ipod/i.test(userAgent)) {
-    // iOS: open app if installed, otherwise App Store
-    res.send(`
-      <script>
-        window.location = "${deepLink}";
-        setTimeout(() => { window.location = "${IOS_STORE}"; }, 2000);
-      </script>
-    `);
-  } else {
-    // Fallback web page
-    res.send(`
-      <h2>Ride from ${ride.pickup} to ${ride.drop}</h2>
-      <p>Fare: ₹${ride.fare}</p>
-      <p>Download the app to see full ride details:</p>
-      <ul>
-        <li><a href="${IOS_STORE}">iOS</a></li>
-        <li><a href="${ANDROID_STORE}">Android</a></li>
-      </ul>
-    `);
-  }
+            res.json({
+                success: true,
+                message: 'Notification sent via Socket.IO'
+            });
+        } else {
+            res.status(503).json({ error: 'Socket.IO not available' });
+        }
+    } catch (error) {
+        console.error('Error sending test notification:', error);
+        res.status(500).json({ error: 'Failed to send notification' });
+    }
 });
 
+app.post('/test-broadcast', async (req, res) => {
+    const { userType, event, message } = req.body;
+
+    if (!userType || !event || !message) {
+        return res.status(400).json({ error: 'userType, event, and message are required' });
+    }
+
+    try {
+        if (req.broadcastToUserType) {
+            req.broadcastToUserType(userType, event, {
+                message: message,
+                timestamp: new Date().toISOString()
+            });
+
+            res.json({
+                success: true,
+                message: `Broadcasted ${event} to all ${userType}s`
+            });
+        } else {
+            res.status(503).json({ error: 'Socket.IO not available' });
+        }
+    } catch (error) {
+        console.error('Error broadcasting message:', error);
+        res.status(500).json({ error: 'Failed to broadcast message' });
+    }
+});
 
 // API Routes
 app.use('/api/v1/rider', router);
@@ -746,11 +943,7 @@ app.use('/api/v1/parcel', parcel);
 app.use('/api/v1/heavy', Heavy);
 app.use('/api/v1/admin', admin);
 app.use('/api/v1/new', NewRoutes);
-app.use(
-  compression({
-    threshold: 0, // compress everything, even small responses
-  })
-);
+
 // 404 Handler
 app.use('*', (req, res) => {
     res.status(404).json({
@@ -778,6 +971,10 @@ process.on('SIGTERM', async () => {
 
     server.close(async () => {
         console.log(`[${new Date().toISOString()}] HTTP server closed`);
+
+        // Close Socket.IO connections
+        const { cleanup } = require('./socket/socketManager');
+        await cleanup();
 
         // Close Redis connection
         if (pubClient) {
@@ -821,7 +1018,111 @@ process.on('uncaughtException', (error) => {
 });
 
 
+let notifications = [];
+let notifArray = [];
+let todayDate = "";
+let currentDay = 2;
 
+
+
+const dayMap = {
+    "2025-09-23": "day2.json",
+    "2025-09-24": "day3.json",
+    "2025-09-25": "day3.json",
+    "2025-09-26": "day4.json",
+    "2025-09-27": "day5.json",
+    "2025-09-28": "day6.json",
+    "2025-09-29": "day7.json",
+    "2025-09-30": "day8.json",
+    "2025-10-01": "day9.json",
+    "2025-10-02": "day10.json",
+};
+
+// 📌 Load notifications for current date
+async function loadDayNotifications() {
+    todayDate = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+    const fileName = dayMap[todayDate];
+    if (!fileName) {
+        console.log(`⚠️ No notification mapping for ${todayDate}`);
+        notifications = [];
+        notifArray = [];
+        return;
+    }
+
+    const filePath = path.join(__dirname, "Notifications", fileName);
+    if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath);
+        notifications = JSON.parse(data);
+        notifArray = Object.values(notifications)[0];
+        console.log(`✅ Loaded notifications from ${fileName}`);
+    } else {
+        notifications = [];
+        notifArray = [];
+        console.log(`⚠️ File not found: ${filePath}`);
+    }
+
+    // create log doc if not exist
+    let log = await SentLog.findOne({ date: todayDate });
+    if (!log) {
+        await SentLog.create({ date: todayDate, sentIndexes: [] });
+    }
+}
+
+// 📌 Har ghante ek notification
+cron.schedule(
+    "0 * * * *",
+    async () => {
+        try {
+            let log = await SentLog.findOne({ date: todayDate });
+            if (!log) return;
+
+            // next unsent notification
+            let idx = notifArray.findIndex((_, i) => !log.sentIndexes.includes(i));
+            if (idx === -1) {
+                console.log("✅ All notifications sent for today!");
+                return;
+            }
+
+            let { title, message } = notifArray[idx];
+
+            // ✅ mark as sent before sending
+            log.sentIndexes.push(idx);
+            await log.save();
+
+            // send to all users
+            const users = await userModel.find({}, "fcmToken");
+            for (let user of users) {
+                if (user.fcmToken) {
+                    try {
+                        await sendNotification.sendNotification(user.fcmToken, title, message);
+                        console.log(`📤 Sent to ${user._id || "user"} => ${title}`);
+                    } catch (sendErr) {
+                        console.error(`❌ Failed for ${user._id || "user"}:`, sendErr.message);
+                    }
+                }
+            }
+
+            console.log(`✅ Notification #${idx + 1} sent: ${title}`);
+        } catch (err) {
+            console.error("❌ Error in cron job:", err);
+        }
+    },
+    { timezone: "Asia/Kolkata" }
+);
+
+// 📌 Midnight → reload next day's JSON
+cron.schedule(
+    "0 0 * * *",
+    async () => {
+        await loadDayNotifications();
+    },
+    { timezone: "Asia/Kolkata" }
+);
+
+// 📌 Initial load
+(async () => {
+    await loadDayNotifications();
+})();
 // Server Startup Function
 async function startServer() {
     const PORT = process.env.PORT || 3100;
@@ -831,15 +1132,26 @@ async function startServer() {
 
         // Connect to Redis first
         await connectRedis();
+
         // Connect to databases
         await connectDatabases();
+
+        // Initialize Socket.IO
+        await initializeSocket();
 
         // Start the server
         server.listen(PORT, () => {
             console.log(`[${new Date().toISOString()}] 🚀 Server running on port ${PORT}`);
             console.log(`Bull Board available at http://localhost:${PORT}/admin/queues`);
+            console.log(`Socket.IO Stats available at http://localhost:${PORT}/socket-stats`);
+            console.log(`Health Check available at http://localhost:${PORT}/health`);
             console.log(`[${new Date().toISOString()}] 🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
             console.log(`[${new Date().toISOString()}] ✅ All services connected successfully`);
+
+            // Log Socket.IO statistics
+            const stats = getStats();
+            console.log(`[${new Date().toISOString()}] 📊 Socket.IO initialized with Redis adapter`);
+            console.log(`[${new Date().toISOString()}] 👥 Ready to handle real-time connections`);
         });
 
     } catch (error) {
@@ -847,6 +1159,8 @@ async function startServer() {
         process.exit(1);
     }
 }
+
+
 
 // Start the server
 startServer();
