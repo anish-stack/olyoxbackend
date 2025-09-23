@@ -1821,7 +1821,7 @@ exports.rateYourInterCity = async (req, res) => {
     }
 };
 
-cron.schedule("*/2 * * * *", async () => {
+cron.schedule("*/9 * * * *", async () => {
     try {
         const now = new Date();
         const invalidStatuses = [
@@ -1839,7 +1839,7 @@ cron.schedule("*/2 * * * *", async () => {
         });
 
         if (!rides.length) {
-            console.log("✅ No rides to cancel. All clean.");
+            // console.log("✅ No rides to cancel. All clean.");
             return;
         }
 
@@ -1875,7 +1875,7 @@ cron.schedule("*/2 * * * *", async () => {
                 // ✅ Driver safe check
                 const driver = getLatLngSafe(d);
                 if (!driver) {
-                    console.log(`⚠️ Skipping driver ${d._id} - Invalid driver coords`);
+                    // console.log(`⚠️ Skipping driver ${d._id} - Invalid driver coords`);
                     continue;
                 }
 
@@ -1926,7 +1926,7 @@ cron.schedule("*/2 * * * *", async () => {
 
                 try {
                     // await SendWhatsAppMessageNormal(msg, d.phone);
-                    console.log(`✅ Message sent to ${d.name} (${d.phone})`);
+                    // console.log(`✅ Message sent to ${d.name} (${d.phone})`);
 
                     // Log in ride.messageSendToDriver
                     ride.messageSendToDriver.push({
@@ -1943,7 +1943,7 @@ cron.schedule("*/2 * * * *", async () => {
             }
 
             if (validDrivers.length > 0) {
-                console.log(`🚀 Ride ${ride._id} matched with ${validDrivers.length} drivers`);
+                // console.log(`🚀 Ride ${ride._id} matched with ${validDrivers.length} drivers`);
             }
         }
     } catch (error) {

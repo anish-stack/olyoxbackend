@@ -1,230 +1,150 @@
 const Parcel_Request = require("../../models/Parcel_Models/Parcel_Request");
 const Rider = require("../../models/Rider.model");
+const { getAllConnectedParcelDrivers, getAllConnectedUsers, getIO } = require("../../socket/socketManager");
 
-exports.notifyDriverService = async (data, req, res) => {
+exports.notifyDriverService = async (parcelId) => {
     try {
-        // Validate input
-        if (!data) {
-            throw new Error("❌ Invalid request: missing parcel ID");
-        }
+        console.log("🚀 notifyDriverService called with parcelId:", parcelId);
 
-        // Check if socket.io is initialized
-        const io = req.app.get("socketio");
-        if (!io) {
-            throw new Error("❌ Socket.io is not initialized");
-        }
+        if (!parcelId) throw new Error("❌ Invalid request: missing parcel ID");
 
-        // Get socket maps
-        const driverSocketMap = req.app.get("driverSocketMap") || new Map();
-        const userSocketMap = req.app.get("userSocketMap") || new Map();
+        // Get connected sockets
+        const connectedDrivers = getAllConnectedParcelDrivers();
+        const connectedUsers = getAllConnectedUsers();
+        console.log("🟢 Connected Parcel Drivers:", JSON.stringify(connectedDrivers, null, 2));
+        console.log("🟢 Connected Users:", JSON.stringify(connectedUsers, null, 2));
 
-        // Find parcel request
-        let parcelRequest;
-        try {
-            parcelRequest = await Parcel_Request.findById(data).populate('vehicle_id');
-        } catch (error) {
-            throw new Error(`❌ Invalid parcel ID format: ${error.message}`);
-        }
+        // Fetch parcel request
+        const parcelRequest = await Parcel_Request.findById(parcelId).populate("vehicle_id");
+        // console.log("📦 Parcel request fetched:", parcelRequest);
 
-        console.log("Parcel Request:", parcelRequest);
+        if (!parcelRequest) throw new Error("❌ Parcel Request not found");
 
-        if (!parcelRequest) {
-            throw new Error("❌ Parcel Request not found");
-        }
-
-        // Validate pickup location
         const pickup = parcelRequest?.locations?.pickup;
-        if (!pickup || !pickup.location) {
-            throw new Error("❌ Pickup location not found in request");
-        }
+        if (!pickup?.location?.coordinates) throw new Error("❌ Invalid pickup location");
+        const pickupCoordinates = pickup.location.coordinates;
+        console.log("📍 Pickup coordinates:", pickupCoordinates);
 
-        const pickupCoordinates = pickup?.location?.coordinates;
-        if (!Array.isArray(pickupCoordinates) || pickupCoordinates.length !== 2 ||
-            !Number.isFinite(pickupCoordinates[0]) || !Number.isFinite(pickupCoordinates[1])) {
-            throw new Error("❌ Invalid pickup coordinates");
-        }
-
-        // Configuration for driver search
+        // Rider search config
         const searchRadii = [2000, 4000, 6000];
         const maxAttempts = 4;
         let attempt = 0;
         let riderNotified = false;
-        let notifiedRider = null;
-        let customerSocketId = null;
+        let notifiedDriver = null;
 
-        // Get customer socket ID
-        if (!parcelRequest.customerId) {
-            throw new Error("❌ Customer ID not found in parcel request");
-        }
+        // Customer socket
+        const customerId = parcelRequest.customerId?.toString();
+        const customerSocket = connectedUsers.users.find(u => u.userId === customerId)?.socketId;
+        console.log("🧑 Customer ID:", customerId, "Customer socketId:", customerSocket);
 
-        const customerId = parcelRequest.customerId.toString();
-        if (userSocketMap instanceof Map) {
-            customerSocketId = userSocketMap.get(customerId);
-            if (!customerSocketId) {
-                // Try to find partial match
-                for (const [key, value] of userSocketMap.entries()) {
-                    if (key.includes(customerId) || customerId.includes(key)) {
-                        customerSocketId = value;
-                        break;
-                    }
-                }
-            }
-        } else if (typeof userSocketMap === 'object') {
-            customerSocketId = userSocketMap[customerId];
-        }
-
-        // Wait 4 seconds before starting the first attempt
-        console.log("Waiting 4 seconds before starting rider search...");
+        console.log("⏳ Waiting 4 seconds before searching drivers...");
         await new Promise(resolve => setTimeout(resolve, 4000));
 
-        // Search for available drivers with increasing radius
-        while (attempt < maxAttempts && !riderNotified) {
-            // Ensure we have a valid radius even if attempt exceeds searchRadii length
-            const radiusIndex = Math.min(attempt, searchRadii.length - 1);
-            let radius = searchRadii[radiusIndex];
+        const io = getIO();
 
-            if (!Number.isFinite(radius)) {
-                console.warn(`⚠️ Invalid radius at attempt ${attempt}, using default 6000m`);
-                radius = 6000; // Default to 6km if invalid
+        while (attempt < maxAttempts && !riderNotified) {
+            const radiusIndex = Math.min(attempt, searchRadii.length - 1);
+            const radius = searchRadii[radiusIndex];
+            console.log(`🔍 Attempt ${attempt + 1}/${maxAttempts} with radius ${radius} meters`);
+
+            let availableDrivers = await Rider.find({
+                isAvailable: true,
+                isPaid: true,
+                category: "parcel",
+                location: {
+                    $near: {
+                        $geometry: { type: "Point", coordinates: pickupCoordinates },
+                        $maxDistance: radius
+                    }
+                }
+            }).lean();
+            console.log(`🔎 Drivers found in radius ${radius}m:`, availableDrivers.map(d => d._id));
+
+            // Filter by vehicle type
+            availableDrivers = availableDrivers.filter(d =>
+                d.rideVehicleInfo?.vehicleType === parcelRequest.vehicle_id?.info
+            );
+            console.log(`🚗 Drivers matching vehicle "${parcelRequest.vehicle_id?.title}":`, availableDrivers.map(d => d._id));
+
+            // Filter only connected drivers
+            availableDrivers = availableDrivers.filter(d =>
+                connectedDrivers.parcelDrivers.some(cd => cd.parcelDriverId === d._id.toString())
+            );
+            console.log("✅ Connected drivers after filters:", availableDrivers.map(d => d._id));
+
+            if (!availableDrivers.length) {
+                console.log("⚠️ No drivers available for this attempt.");
+                attempt++;
+                if (attempt < maxAttempts) {
+                    console.log("⏳ Waiting 20s before next attempt...");
+                    await new Promise(resolve => setTimeout(resolve, 20000));
+                }
+                continue;
             }
 
-            console.log(`Starting attempt ${attempt + 1}/${maxAttempts} with radius ${radius}m`);
-
-            try {
-                let availableCouriers = await Rider.find({
-                    isAvailable: true,
-                    isPaid: true,
-                    category: "parcel",
-                    location: {
-                        $near: {
-                            $geometry: {
-                                type: "Point",
-                                coordinates: pickupCoordinates,
-                            },
-                            $maxDistance: radius,
-                        },
-                    },
-                }).lean().exec();
-                
-                console.log("Available Couriers:", availableCouriers.length);
-
-                availableCouriers = availableCouriers.filter((driver) => 
-                    driver.rideVehicleInfo.vehicleName === parcelRequest?.vehicle_id?.title
-                );
-                
-                console.log("Available Couriers after vehicle filter:", availableCouriers.length);
-
-                if (!availableCouriers || availableCouriers.length === 0) {
-                    console.log(`No couriers found within ${radius}m radius. Attempt ${attempt + 1}/${maxAttempts}`);
-                    attempt++;
-                    
-                    // Only wait if there are more attempts to go
-                    if (attempt < maxAttempts) {
-                        console.log("Waiting 20 seconds before next attempt...");
-                        await new Promise(resolve => setTimeout(resolve, 20000)); // wait 20s between attempts
-                    }
+            for (const driver of availableDrivers) {
+                const connectedDriver = connectedDrivers.parcelDrivers.find(cd => cd.parcelDriverId === driver._id.toString());
+                if (!connectedDriver) {
+                    console.log(`⚠️ Driver ${driver._id} not connected`);
                     continue;
                 }
 
-                // Try to notify each driver until one is successfully notified
-                for (const driver of availableCouriers) {
-                    if (!driver || !driver._id) {
-                        console.warn("⚠️ Driver without ID found, skipping");
-                        continue;
+                console.log(`📨 Notifying driver ${driver._id} at socket ${connectedDriver.socketId}...`);
+                try {
+                    // Notify driver
+                    io.to(connectedDriver.socketId).emit("new_parcel_come", {
+                        parcel: parcelRequest._id,
+                        pickup,
+                        message: "📦 New parcel request available near you!"
+                    });
+
+                    riderNotified = true;
+                    notifiedDriver = driver;
+                    console.log(`🔔 Driver notified successfully: ${driver._id}`);
+
+                    // Notify customer
+                    if (customerSocket) {
+                        console.log(`📨 Notifying customer ${customerId} at socket ${customerSocket}...`);
+                        io.to(customerSocket).emit("parcel_confirmed", {
+                            parcel: parcelRequest._id,
+                            rider: driver._id,
+                            message: "🎉 A rider has been assigned to your parcel request!"
+                        });
+                        console.log("✅ Customer notified successfully");
                     }
 
-                    const driverId = driver._id.toString();
-                    let socketId = null;
-
-                    // Get driver socket ID
-                    if (driverSocketMap instanceof Map) {
-                        socketId = driverSocketMap.get(driverId);
-                        if (!socketId) {
-                            // Try to find partial match
-                            for (const [key, value] of driverSocketMap.entries()) {
-                                if ((key && key.includes(driverId)) || (driverId && driverId.includes(key))) {
-                                    socketId = value;
-                                    break;
-                                }
-                            }
-                        }
-                    } else if (typeof driverSocketMap === 'object') {
-                        socketId = driverSocketMap[driverId];
-                    }
-
-                    if (socketId) {
-                        try {
-                            io.to(socketId).emit("new_parcel_come", {
-                                parcel: parcelRequest._id,
-                                pickup,
-                                message: "📦 New parcel request available near you!",
-                            });
-
-                            riderNotified = true;
-                            notifiedRider = driver;
-                            console.log(`🔔 Notified driver ${driverId}`);
-
-                            if (customerSocketId) {
-                                io.to(customerSocketId).emit("parcel_confirmed", {
-                                    parcel: parcelRequest._id,
-                                    rider: driver._id,
-                                    message: "🎉 A rider has been assigned to your parcel request!"
-                                });
-                            }
-                            
-                            // Exit the loop once a rider is notified
-                            break;
-                        } catch (emitError) {
-                            console.error(`Error emitting to socket ${socketId}:`, emitError);
-                            // Continue with other drivers if this emit fails
-                        }
-                    } else {
-                        console.log(`⚠️ No active socket connection for driver ${driverId}`);
-                    }
+                    break; // Stop notifying once one driver is notified
+                } catch (err) {
+                    console.error(`❌ Emit failed for driver ${driver._id}:`, err);
                 }
+            }
 
-                // If a rider was notified, break out of retry loop
-                if (riderNotified) break;
-
+            if (!riderNotified) {
+                console.log("⚠️ No driver notified in this attempt");
                 attempt++;
-                
-                // Only wait if there are more attempts to go
                 if (attempt < maxAttempts) {
-                    console.log("Waiting 20 seconds before next attempt...");
-                    await new Promise(resolve => setTimeout(resolve, 20000)); // wait 20s before next attempt
-                }
-            } catch (queryError) {
-                console.error(`❌ Error in courier search (attempt ${attempt}):`, queryError);
-                attempt++;
-                
-                // Only wait if there are more attempts to go
-                if (attempt < maxAttempts) {
-                    console.log("Waiting 20 seconds before next attempt...");
-                    await new Promise(resolve => setTimeout(resolve, 20000)); // wait 20s before next attempt
+                    console.log("⏳ Waiting 20s before next attempt...");
+                    await new Promise(resolve => setTimeout(resolve, 20000));
                 }
             }
         }
 
-        // Notify customer about no available riders only after all attempts are completed
-        if (!riderNotified) {
-            if (io && customerSocketId) {
-                io.to(customerSocketId).emit("parcel_error", {
-                    parcel: data,
-                    message: "Sorry, we couldn't find a rider at the moment. But your order has been successfully created — we'll assign a rider to you as soon as possible. Thank you for your patience!"
-                });
-            }
-            throw new Error("🚫 No available drivers with active socket connection after all attempts");
+        if (!riderNotified && customerSocket) {
+            console.log("❌ No drivers found after all attempts, notifying customer...");
+            io.to(customerSocket).emit("parcel_error", {
+                parcel: parcelId,
+                message: "Sorry, no rider found right now. Your order is created — a rider will be assigned soon!"
+            });
+            throw new Error("🚫 No available drivers with active socket connection");
         }
 
+        console.log("✅ notifyDriverService finished successfully");
         return {
             success: true,
-            message: `✅ Driver notified successfully`,
-            notifiedDriver: notifiedRider?._id,
-            searchRadius: searchRadii[Math.min(attempt, searchRadii.length - 1)] / 1000,
-            customerNotified: !!customerSocketId,
-            totalAttempts: attempt + 1,
+            message: "✅ Driver notified successfully",
+            notifiedDriver: notifiedDriver?._id,
+            totalAttempts: attempt
         };
-
     } catch (error) {
         console.error("❌ Error in notifyDriverService:", error);
         throw new Error(`❌ notifyDriverService failed: ${error.message}`);

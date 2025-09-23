@@ -3545,7 +3545,7 @@ exports.FindRiderNearByUser = async (req, res) => {
 
 cron.schedule('*/10 * * * * *', async () => {
     try {
-        console.log('🕒 Running scheduled ride cleanup job...');
+        // console.log('🕒 Running scheduled ride cleanup job...');
 
         const currentTime = new Date();
         const oneMinuteAgo = new Date(currentTime.getTime() - 1 * 60 * 1000);
@@ -3557,14 +3557,14 @@ cron.schedule('*/10 * * * * *', async () => {
         }).populate('user').populate('driver');
 
         if (allRides.length === 0) {
-            console.log('✅ No rides to cancel. All clean.');
+            // console.log('✅ No rides to cancel. All clean.');
             return;
         }
 
-        console.log(`🔍 Found ${allRides.length} outdated rides. Cleaning up...`);
+        // console.log(`🔍 Found ${allRides.length} outdated rides. Cleaning up...`);
 
         for (const ride of allRides) {
-            console.log(`⛔ Cancelling ride ${ride._id} requested at ${ride.requested_at}`);
+            // console.log(`⛔ Cancelling ride ${ride._id} requested at ${ride.requested_at}`);
 
             ride.ride_status = 'cancelled';
             ride.cancelled_at = new Date();
@@ -3578,10 +3578,10 @@ cron.schedule('*/10 * * * * *', async () => {
             }
 
             await ride.save();
-            console.log(`✅ Ride ${ride._id} cancelled successfully`);
+            // console.log(`✅ Ride ${ride._id} cancelled successfully`);
         }
 
-        console.log('🎯 Ride cleanup job completed.');
+        // console.log('🎯 Ride cleanup job completed.');
     } catch (error) {
         console.error('❌ Error in ride cleanup cron job:', error.message);
     }

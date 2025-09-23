@@ -1493,7 +1493,7 @@ exports.findNextAvailableDriver = async (io, rideId) => {
 
         // Don't look for new drivers if ride is already accepted or cancelled
         if (rideRequest.rideStatus !== 'pending') {
-            console.log(`[${new Date().toISOString()}] Ride ${rideId} is not pending (status: ${rideRequest.rideStatus}). Skipping driver search.`);
+            // console.log(`[${new Date().toISOString()}] Ride ${rideId} is not pending (status: ${rideRequest.rideStatus}). Skipping driver search.`);
             return false;
         }
 

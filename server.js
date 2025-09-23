@@ -403,34 +403,34 @@ app.get('/rider/:tempRide', async (req, res) => {
 
 // Enhanced location update endpoint with real-time broadcasting
 app.post('/webhook/cab-receive-location', async (req, res, next) => {
-    console.log('--- Incoming request to /webhook/cab-receive-location ---');
-    console.log('Request Body:', req.body);
+    // console.log('--- Incoming request to /webhook/cab-receive-location ---');
+    // console.log('Request Body:', req.body);
 
     if (!req.body.riderId) {
-        console.log('No riderId provided in request body, applying Protect middleware...');
+        // console.log('No riderId provided in request body, applying Protect middleware...');
         return Protect(req, res, next);
     }
 
-    console.log('riderId found, skipping Protect middleware');
+    // console.log('riderId found, skipping Protect middleware');
     next();
 
 }, async (req, res) => {
     try {
-        console.log('--- Entering location update handler ---');
+        // console.log('--- Entering location update handler ---');
 
         const { latitude, longitude, riderId, heading, speed } = req.body;
-        console.log('Received Data:', { latitude, longitude, riderId, heading, speed });
+        // console.log('Received Data:', { latitude, longitude, riderId, heading, speed });
 
         let userId;
         if (riderId) {
             userId = riderId;
-            console.log('Using riderId from request body:', userId);
+            // console.log('Using riderId from request body:', userId);
         } else {
             userId = req.user?.userId;
         }
 
         if (!userId) {
-            console.warn('No userId available for updating location');
+            // console.warn('No userId available for updating location');
             return res.status(400).json({ error: 'User ID is required' });
         }
 
@@ -442,7 +442,7 @@ app.post('/webhook/cab-receive-location', async (req, res, next) => {
             lastUpdated: new Date()
         };
 
-        console.log('Updating rider location with payload:', updatePayload);
+        // console.log('Updating rider location with payload:', updatePayload);
 
         const data = await RiderModel.findOneAndUpdate(
             { _id: userId },
@@ -450,7 +450,7 @@ app.post('/webhook/cab-receive-location', async (req, res, next) => {
             { upsert: true, new: true }
         );
 
-        console.log('Rider location updated:', data?.name);
+        // console.log('Rider location updated:', data?.name);
 
         // Broadcast real-time location update via Socket.IO
         if (req.getIO) {
@@ -1068,61 +1068,62 @@ async function loadDayNotifications() {
     }
 }
 
-// 📌 Har ghante ek notification
-cron.schedule(
-    "0 * * * *",
-    async () => {
-        try {
-            let log = await SentLog.findOne({ date: todayDate });
-            if (!log) return;
+// // 📌 Har ghante ek notification
 
-            // next unsent notification
-            let idx = notifArray.findIndex((_, i) => !log.sentIndexes.includes(i));
-            if (idx === -1) {
-                console.log("✅ All notifications sent for today!");
-                return;
-            }
+// cron.schedule(
+//     "0 * * * *",
+//     async () => {
+//         try {
+//             let log = await SentLog.findOne({ date: todayDate });
+//             if (!log) return;
 
-            let { title, message } = notifArray[idx];
+//             // next unsent notification
+//             let idx = notifArray.findIndex((_, i) => !log.sentIndexes.includes(i));
+//             if (idx === -1) {
+//                 console.log("✅ All notifications sent for today!");
+//                 return;
+//             }
 
-            // ✅ mark as sent before sending
-            log.sentIndexes.push(idx);
-            await log.save();
+//             let { title, message } = notifArray[idx];
 
-            // send to all users
-            const users = await userModel.find({}, "fcmToken");
-            for (let user of users) {
-                if (user.fcmToken) {
-                    try {
-                        await sendNotification.sendNotification(user.fcmToken, title, message);
-                        console.log(`📤 Sent to ${user._id || "user"} => ${title}`);
-                    } catch (sendErr) {
-                        console.error(`❌ Failed for ${user._id || "user"}:`, sendErr.message);
-                    }
-                }
-            }
+//             // ✅ mark as sent before sending
+//             log.sentIndexes.push(idx);
+//             await log.save();
 
-            console.log(`✅ Notification #${idx + 1} sent: ${title}`);
-        } catch (err) {
-            console.error("❌ Error in cron job:", err);
-        }
-    },
-    { timezone: "Asia/Kolkata" }
-);
+//             // send to all users
+//             const users = await userModel.find({}, "fcmToken");
+//             for (let user of users) {
+//                 if (user.fcmToken) {
+//                     try {
+//                         await sendNotification.sendNotification(user.fcmToken, title, message);
+//                         console.log(`📤 Sent to ${user._id || "user"} => ${title}`);
+//                     } catch (sendErr) {
+//                         console.error(`❌ Failed for ${user._id || "user"}:`, sendErr.message);
+//                     }
+//                 }
+//             }
 
-// 📌 Midnight → reload next day's JSON
-cron.schedule(
-    "0 0 * * *",
-    async () => {
-        await loadDayNotifications();
-    },
-    { timezone: "Asia/Kolkata" }
-);
+//             console.log(`✅ Notification #${idx + 1} sent: ${title}`);
+//         } catch (err) {
+//             console.error("❌ Error in cron job:", err);
+//         }
+//     },
+//     { timezone: "Asia/Kolkata" }
+// );
 
-// 📌 Initial load
-(async () => {
-    await loadDayNotifications();
-})();
+// // 📌 Midnight → reload next day's JSON
+// cron.schedule(
+//     "0 0 * * *",
+//     async () => {
+//         await loadDayNotifications();
+//     },
+//     { timezone: "Asia/Kolkata" }
+// );
+
+// // 📌 Initial load
+// (async () => {
+//     await loadDayNotifications();
+// })();
 // Server Startup Function
 async function startServer() {
     const PORT = process.env.PORT || 3100;
