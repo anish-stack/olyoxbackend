@@ -4,134 +4,148 @@ const axios = require("axios");
 const { notifyDriverService } = require("./ParcelSockets/Notify_Parcel");
 const RiderModel = require("../models/Rider.model");
 const SendWhatsAppMessageNormal = require("../utils/normalWhatsapp");
+const { getAllConnectedClients } = require("../socket/socketManager");
 
 exports.NewBooking = async (req, res) => {
-    try {
-
-        // Validate required fields
-        if (!req.body.pickup || !req.body.dropoff || !req.body.vehicle_id) {
-            return res.status(400).json({
-                message: "Missing required fields: pickup, dropoff, or vehicle_id"
-            });
-        }
-
-        // Transform coordinates for MongoDB GeoJSON format
-        const transformedData = {
-            customerId: req.body.userId,
-            status: "pending",
-            locations: {
-                pickup: {
-                    address: req.body.pickup.address,
-                    location: {
-                        type: "Point",
-                        coordinates: [req.body.pickup.coordinates.lng, req.body.pickup.coordinates.lat]
-                    }
-                },
-                dropoff: {
-                    address: req.body.dropoff.address,
-                    location: {
-                        type: "Point",
-                        coordinates: [req.body.dropoff.coordinates.lng, req.body.dropoff.coordinates.lat]
-                    }
-                },
-                stops: []
-            },
-            // Add receiver information
-            apartment: req.body.receiver?.apartment || "",
-            name: req.body.receiver?.name || "",
-            phone: req.body.receiver?.phone || "",
-            useMyNumber: req.body.receiver?.useMyNumber || false,
-            savedAs: req.body.receiver?.savedAs || null,
-
-            // Vehicle information
-            vehicle_id: new mongoose.Types.ObjectId(req.body.vehicle_id),
-
-            // Fare information
-            fares: {
-                baseFare: req.body.fares?.baseFare || 0,
-                netFare: req.body.fares?.netFare || 0,
-                couponApplied: req.body.fares?.couponApplied || false,
-                discount: req.body.fares?.discount || 0,
-                payableAmount: req.body.fares?.payableAmount || 0
-            },
-
-            // Ride information
-            ride_id: req.body.ride_id || `RIDE-${Date.now()}`,
-            km_of_ride: parseFloat(req.body.km_of_ride) || 0,
-
-            // Status flags
-            is_rider_assigned: req.body.is_rider_assigned || false,
-            is_booking_completed: req.body.is_booking_completed || false,
-            is_booking_cancelled: req.body.is_booking_cancelled || false,
-            is_pickup_complete: req.body.is_pickup_complete || false,
-            is_dropoff_complete: req.body.is_dropoff_complete || false
-        };
-
-        // Process stops if any
-        if (req.body.stops && Array.isArray(req.body.stops)) {
-            transformedData.locations.stops = req.body.stops.map(stop => ({
-                address: stop.address,
-                location: {
-                    type: "Point",
-                    coordinates: [stop.coordinates.lng, stop.coordinates.lat]
-                }
-            }));
-        }
-
-        // Generate OTP for verification
-        transformedData.otp = Math.floor(1000 + Math.random() * 9000);
-
-
-        // Create new booking in database
-        const newBooking = new Parcel_Request(transformedData);
-        await newBooking.save();
-        const io = req.app.get("socketio");
-        const userSocketMap = req.app.get("userSocketMap");
-        const customerId = newBooking.customerId.toString();
-        const customerSocketId = userSocketMap instanceof Map
-            ? userSocketMap.get(customerId) || [...userSocketMap.entries()].find(([key]) => key.includes(customerId))?.[1]
-            : userSocketMap[customerId];
-        console.log("Customer Socket ID:", customerSocketId);
-
-        if (io && customerSocketId) {
-            console.log("Customer Ko send kiya ID:", customerSocketId);
-
-            io.to(customerSocketId).emit("your_parcel_is_confirm", {
-                success: true,
-                message: "New parcel request created",
-                parcel: newBooking._id,
-            });
-        }
-        // Optional: Notify driver service about new booking
-        try {
-            const data = await notifyDriverService(newBooking._id, req, res);
-            console.log("✅ notifyDriverService success:", data);
-
-            if (!data.success) {
-                console.warn("⚠️ notifyDriverService returned with warning:", data.message);
-                // Optional: handle fallback or notify user here
-            }
-        } catch (error) {
-            console.error("❌ Error occurred while calling notifyDriverService:", error.message);
-            res.status(201).json({
-                success: true,
-                message: "Booking created successfully",
-                booking_id: newBooking._id,
-                ride_id: newBooking.ride_id,
-                otp: newBooking.otp
-            });
-        }
-
-
-
-    } catch (error) {
-        console.error("Booking creation failed:", error);
-        res.status(500).json({
-            success: false,
-            message: "Booking Failed",
-            error: error.message
-        });
+  try {
+    // 🛑 Validate required fields
+    if (!req.body.pickup || !req.body.dropoff || !req.body.vehicle_id) {
+      return res.status(400).json({
+        message: "Missing required fields: pickup, dropoff, or vehicle_id"
+      });
     }
+
+    // 🔄 Transform request into DB schema format
+    const transformedData = {
+      customerId: req.body.userId,
+      status: "pending",
+      locations: {
+        pickup: {
+          address: req.body.pickup.address,
+          location: {
+            type: "Point",
+            coordinates: [
+              req.body.pickup.coordinates.lng,
+              req.body.pickup.coordinates.lat
+            ]
+          }
+        },
+        dropoff: {
+          address: req.body.dropoff.address,
+          location: {
+            type: "Point",
+            coordinates: [
+              req.body.dropoff.coordinates.lng,
+              req.body.dropoff.coordinates.lat
+            ]
+          }
+        },
+        stops: []
+      },
+      // Receiver info
+      apartment: req.body.receiver?.apartment || "",
+      name: req.body.receiver?.name || "",
+      phone: req.body.receiver?.phone || "",
+      useMyNumber: req.body.receiver?.useMyNumber || false,
+      savedAs: req.body.receiver?.savedAs || null,
+
+      // Vehicle info
+      vehicle_id: new mongoose.Types.ObjectId(req.body.vehicle_id),
+
+      // Fare info
+      fares: {
+        baseFare: req.body.fares?.baseFare || 0,
+        netFare: req.body.fares?.netFare || 0,
+        couponApplied: req.body.fares?.couponApplied || false,
+        discount: req.body.fares?.discount || 0,
+        payableAmount: req.body.fares?.payableAmount || 0
+      },
+
+      // Ride info
+      ride_id: req.body.ride_id || `RIDE-${Date.now()}`,
+      km_of_ride: parseFloat(req.body.km_of_ride) || 0,
+
+      // Flags
+      is_rider_assigned: req.body.is_rider_assigned || false,
+      is_booking_completed: req.body.is_booking_completed || false,
+      is_booking_cancelled: req.body.is_booking_cancelled || false,
+      is_pickup_complete: req.body.is_pickup_complete || false,
+      is_dropoff_complete: req.body.is_dropoff_complete || false
+    };
+
+    // ⏩ Process stops
+    if (req.body.stops && Array.isArray(req.body.stops)) {
+      transformedData.locations.stops = req.body.stops.map((stop) => ({
+        address: stop.address,
+        location: {
+          type: "Point",
+          coordinates: [stop.coordinates.lng, stop.coordinates.lat]
+        }
+      }));
+    }
+
+    // 🔢 Generate OTP
+    transformedData.otp = Math.floor(1000 + Math.random() * 9000);
+
+    // 💾 Save booking
+    const newBooking = new Parcel_Request(transformedData);
+    await newBooking.save();
+
+    // 🔔 Notify via Socket
+    const io = req.app.get("socketio");
+    const clients = getAllConnectedClients();
+
+    console.log("📡 All connected clients:", clients);
+
+    const customerId = newBooking.customerId.toString();
+    console.log("🆔 CustomerId:", customerId);
+
+    // 🎯 Find customer in connected clients
+    const customerClient = clients.users.find(
+      (u) => u.userId.toString() === customerId
+    );
+
+    if (io && customerClient) {
+      console.log("✅ Customer socket mil gaya:", customerClient);
+
+      io.to(customerClient.socketId).emit("your_parcel_is_confirm", {
+        success: true,
+        message: "New parcel request created",
+        parcel: newBooking._id
+      });
+    } else {
+      console.warn("⚠️ Customer abhi connected nahi hai, socket send skip kar diya.");
+    }
+
+    // 🚖 Notify driver service
+    console.log("🚖 Notifying drivers about new parcel request...");
+    try {
+      const data = await notifyDriverService(newBooking._id, req, res);
+      console.log("✅ notifyDriverService success:", data);
+
+      if (!data.success) {
+        console.warn("⚠️ notifyDriverService warning:", data.message);
+      }
+    } catch (error) {
+      console.error("❌ Error notifyDriverService:", error.message);
+    }
+
+    // ✅ Response
+    return res.status(201).json({
+      success: true,
+      message: "Booking created successfully",
+      booking_id: newBooking._id,
+      ride_id: newBooking.ride_id,
+      otp: newBooking.otp
+    });
+  } catch (error) {
+    console.error("❌ Booking creation failed:", error);
+    res.status(500).json({
+      success: false,
+      message: "Booking Failed",
+      error: error.message
+    });
+  }
 };
 
 exports.getParcelDetails = async (req, res) => {
@@ -326,73 +340,73 @@ exports.updateParcelStatus = async (req, res) => {
                 }
                 break;
 
-          case "delivered":
-    parcel.is_parcel_delivered = true;
-    parcel.is_dropoff_complete = true;
-    parcel.is_parcel_delivered_time = new Date();
-    parcel.is_booking_completed = true;
-    parcel.money_collected = parcel.fares?.payableAmount || 0;
+            case "delivered":
+                parcel.is_parcel_delivered = true;
+                parcel.is_dropoff_complete = true;
+                parcel.is_parcel_delivered_time = new Date();
+                parcel.is_booking_completed = true;
+                parcel.money_collected = parcel.fares?.payableAmount || 0;
 
-    const rider = parcel.rider_id;
+                const rider = parcel.rider_id;
 
-    // Log current order earning
-    const currentEarning = Number(parcel.fares?.payableAmount || 0);
-    console.log("🛍️ Current Order Earning:", currentEarning);
+                // Log current order earning
+                const currentEarning = Number(parcel.fares?.payableAmount || 0);
+                console.log("🛍️ Current Order Earning:", currentEarning);
 
-    // Get recharge date from rider
-    const rechargeDate = new Date(rider?.RechargeData?.whichDateRecharge);
-    console.log("📅 Recharge Date:", rechargeDate);
+                // Get recharge date from rider
+                const rechargeDate = new Date(rider?.RechargeData?.whichDateRecharge) || new Date(rider?.createdAt);
+                console.log("📅 Recharge Date:", rechargeDate);
 
-    // Fetch all previously delivered parcels after recharge date
-    const deliveredParcels = await Parcel_Request.find({
-        rider_id: rider._id,
-        is_parcel_delivered: true,
-        createdAt: { $gte: rechargeDate }
-    });
+                // Fetch all previously delivered parcels after recharge date
+                const deliveredParcels = await Parcel_Request.find({
+                    rider_id: rider._id,
+                    is_parcel_delivered: true,
+                    createdAt: { $gte: new Date() }
+                });
 
-    // Calculate past earnings after recharge
-    const pastEarnings = deliveredParcels.reduce(
-        (acc, cur) => acc + Number(cur.fares?.payableAmount || 0),
-        0
-    );
-    console.log("💰 Past Earnings After Recharge:", pastEarnings);
+                // Calculate past earnings after recharge
+                const pastEarnings = deliveredParcels.reduce(
+                    (acc, cur) => acc + Number(cur.fares?.payableAmount || 0),
+                    0
+                );
+                console.log("💰 Past Earnings After Recharge:", pastEarnings);
 
-    // Calculate total earnings (past + current)
-    const totalEarnings = pastEarnings + currentEarning;
-    console.log("🧾 Total Earnings (Current + Past):", totalEarnings);
+                // Calculate total earnings (past + current)
+                const totalEarnings = pastEarnings + currentEarning;
+                console.log("🧾 Total Earnings (Current + Past):", totalEarnings);
 
-    // Earnings limit from current plan
-    const earningLimit = Number(rider?.RechargeData?.onHowManyEarning || 0);
-    const remainingEarnings = earningLimit - totalEarnings;
+                // Earnings limit from current plan
+                const earningLimit = Number(rider?.RechargeData?.onHowManyEarning || 0);
+                const remainingEarnings = earningLimit - totalEarnings;
 
-    console.log("🎯 Earning Limit:", earningLimit);
-    console.log("📉 Remaining Earnings Until Limit:", remainingEarnings);
+                console.log("🎯 Earning Limit:", earningLimit);
+                console.log("📉 Remaining Earnings Until Limit:", remainingEarnings);
 
-    const number = rider?.phone;
+                const number = rider?.phone;
 
-    if (totalEarnings >= earningLimit) {
-        const message = `🎉 You’ve crossed your earning limit according to your current plan. Thank you for using Olyox! Please recharge now to continue earning more.`;
-        console.log("⚠️ Earning limit reached. Sending recharge message.");
-        await SendWhatsAppMessageNormal(message, number);
+                if (totalEarnings >= earningLimit) {
+                    const message = `🎉 You’ve crossed your earning limit according to your current plan. Thank you for using Olyox! Please recharge now to continue earning more.`;
+                    console.log("⚠️ Earning limit reached. Sending recharge message.");
+                    await SendWhatsAppMessageNormal(message, number);
 
-        rider.isAvailable = false;
-        rider.RechargeData = {
-            expireData: new Date(Date.now() - 5 * 60 * 1000), // expired 5 min ago
-            rechargePlan: '',
-            onHowManyEarning: '',
-            approveRecharge: false,
-        };
-        rider.isPaid = false;
-    } else if (remainingEarnings < 300) {
-        console.log("🔔 Low earnings reminder. Sending warning.");
-        const reminderMessage = `🛎️ Reminder: You have ₹${remainingEarnings} earning potential left on your plan. Recharge soon to avoid interruptions in your earnings. – Team Olyox`;
-        await SendWhatsAppMessageNormal(reminderMessage, number);
+                    rider.isAvailable = false;
+                    rider.RechargeData = {
+                        expireData: new Date(Date.now() - 5 * 60 * 1000), // expired 5 min ago
+                        rechargePlan: '',
+                        onHowManyEarning: '',
+                        approveRecharge: false,
+                    };
+                    rider.isPaid = false;
+                } else if (remainingEarnings < 300) {
+                    console.log("🔔 Low earnings reminder. Sending warning.");
+                    const reminderMessage = `🛎️ Reminder: You have ₹${remainingEarnings} earning potential left on your plan. Recharge soon to avoid interruptions in your earnings. – Team Olyox`;
+                    await SendWhatsAppMessageNormal(reminderMessage, number);
 
-        rider.isAvailable = true;
-    }
+                    rider.isAvailable = true;
+                }
 
-    await rider.save();
-    break;
+                await rider.save();
+                break;
 
 
             default:

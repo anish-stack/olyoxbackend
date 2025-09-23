@@ -27,7 +27,6 @@ cloudinary.config({
 exports.registerRider = async (req, res) => {
   try {
     const { name, phone, rideVehicleInfo, BH, role, aadharNumber } = req.body;
-    console.log("Incoming Request Body:", req.body);
 
     const {
       vehicleName,
@@ -204,9 +203,6 @@ exports.getSingleRider = async (req, res) => {
 exports.updateRechargeDetails = async (req, res) => {
   try {
     const { rechargePlan, expireData, approveRecharge, BH } = req.body || {};
-
-    console.log("Request body:", req.body);
-
     // Validate required fields
     if (!BH) {
       return res
@@ -1536,12 +1532,12 @@ exports.updateRiderDocumentVerify = async (req, res) => {
       rider.RechargeData = {
         rechargePlan: "Free Tier",
         expireData: oneMonthLater,
+        onHowManyEarning:50000,
         approveRecharge: true,
       };
 
       await SendWhatsAppMessage(
-        `🎉 Dear ${
-          rider.name
+        `🎉 Dear ${rider.name
         }, your documents have been successfully verified, and you've been granted 1 month of Free Tier membership! 🗓️
 
 ✅ Plan: Free Tier  
@@ -2171,7 +2167,7 @@ exports.updateVehicleDetailsForDriver = async (req, res) => {
         { $set: { isActive: false } }
       );
       vehicleDoc.isActive = true;
-     
+
       await vehicleDoc.save();
 
       return res.status(200).json({
