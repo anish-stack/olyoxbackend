@@ -54,8 +54,7 @@ exports.registerRider = async (req, res) => {
     }
 
     // Check if BH number already exists
-    const bhExists = await Rider.findOne({ BH });
-    console.log("BH Exists:", bhExists);
+    const bhExists = await Rider.findOne({ BH, isDocumentUpload: true });
     if (bhExists) {
       return res.status(400).json({
         success: false,
@@ -106,7 +105,7 @@ exports.registerRider = async (req, res) => {
           },\n\nYour OTP for registering as ${role} rider is: ${otp}\n\nPlease use this to complete your registration.\n\n- Team Olyox`,
           phone
         );
-          await sendDltMessage(otp, phone);
+        await sendDltMessage(otp, phone);
 
         return res.status(200).json({
           success: true,
@@ -173,7 +172,7 @@ exports.registerRider = async (req, res) => {
     // Send OTP via WhatsApp
     const message = `Hi ${name},\n\nWelcome to Olyox!\nYour OTP for registering as a ${role} rider is: ${otp}.\n\nPlease verify your OTP to complete your registration.\n\nThank you for choosing us!\n- Team Olyox`;
     await SendWhatsAppMessage(message, phone);
-              await sendDltMessage(otp, phone);
+    await sendDltMessage(otp, phone);
 
     console.log("OTP message sent to:", phone);
 
@@ -296,6 +295,7 @@ exports.login = async (req, res) => {
         message: "Your account has been blocked by admin. Contact support.",
       });
     }
+
 
     // Check if the user is blocked for OTP
     if (partner.isOtpBlock) {
@@ -542,23 +542,13 @@ exports.verifyOtp = async (req, res) => {
     partner.isOtpBlock = false;
     partner.otpUnblockAfterThisTime = null;
 
-    console.log("✅ OTP verified for number:", partner.phone);
 
     // ✅ Try fetching recharge details ONLY if not already paid
     if (!partner.isPaid) {
-      console.log(
-        "ℹ️ Partner is not paid, attempting to fetch recharge data..."
-      );
 
       try {
         const { success, payment_id, member_id } =
           await checkBhAndDoRechargeOnApp({ number: partner.phone });
-
-        console.log("✅ Recharge API response:", {
-          success,
-          payment_id,
-          member_id,
-        });
 
         if (
           success &&
@@ -576,8 +566,6 @@ exports.verifyOtp = async (req, res) => {
             approveRecharge: payment_id.payment_approved,
           };
           partner.isPaid = true;
-
-          console.log("✅ Recharge data saved for partner:", partner.phone);
         } else {
           console.log(
             "⚠️ Recharge data incomplete or invalid, not updating RechargeData."
@@ -592,10 +580,18 @@ exports.verifyOtp = async (req, res) => {
     }
 
     // ✅ Save partner
-    await partner.save();
-    console.log("✅ Partner data saved successfully:", partner);
 
-    // ✅ Send token
+    if (!partner.isDocumentUpload) {
+      const docCount = Object.keys(partner.documents || {}).length;
+
+      if (docCount === 6) {
+        partner.isDocumentUpload = true;
+      }
+    }
+
+
+    await partner.save();
+
     await send_token(partner, { type: "CAB" }, res, req);
   } catch (error) {
     console.error("❌ OTP Verification Error:", error.message);
@@ -1547,7 +1543,7 @@ exports.updateRiderDocumentVerify = async (req, res) => {
 
       const oneMonthLater = new Date();
       oneMonthLater.setMonth(oneMonthLater.getMonth() + 1); // Add 1 month
-      
+
       console.log("📅 Free Tier valid until:", oneMonthLater.toDateString());
       rider.freeTierEndData = oneMonthLater;
 

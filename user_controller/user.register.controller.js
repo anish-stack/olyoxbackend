@@ -14,7 +14,7 @@ const NewRideModelModel = require("../src/New-Rides-Controller/NewRideModel.mode
 
 exports.createUser = async (req, res) => {
     try {
-        const { number, email, name, referral ,platform } = req.body;
+        const { number, email, name, referral, platform, campaign } = req.body;
         let otp = generateOtp(); // Default OTP
         const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -31,11 +31,20 @@ exports.createUser = async (req, res) => {
             user.otpExpiresAt = otpExpiresAt;
             user.tryLogin = true;
             user.isOtpVerify = user.isOtpVerify || false;
-            user.platform=platform || 'android'
+            user.platform = platform || 'android'
             // Save applied referral code if provided
             if (referral && !user.appliedReferralCode) {
                 user.appliedReferralCode = referral;
             }
+            if (campaign) {
+                const parsed = Object.fromEntries(new URLSearchParams(campaign));
+
+                user.install_referrer = {
+                    raw: campaign,      // "utm_source=instagram&utm_campaign=offer100"
+                    parsed              // { utm_source:"instagram", utm_campaign:"offer100" }
+                };
+            }
+
 
             await user.save();
 
@@ -65,7 +74,7 @@ If you have any questions, feel free to reach out.`;
             email,
             name,
             otp,
-            platform:platform || 'android',
+            platform: platform || 'android',
             otpExpiresAt,
         });
 
