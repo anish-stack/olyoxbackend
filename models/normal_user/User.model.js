@@ -4,6 +4,8 @@ const mongoose = require('mongoose');
 const userSchema = new mongoose.Schema({
     number: {
         type: String,
+         index: true,
+         unique: true,
     },
     currentRide: {
         type: mongoose.Schema.Types.ObjectId,

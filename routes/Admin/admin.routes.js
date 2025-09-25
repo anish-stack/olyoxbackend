@@ -6,7 +6,9 @@ const {
     get_onboarding_slides,
     update_onboarding_slide,
     delete_onboarding_slide,
-    get_onboarding_slide_by_id
+    get_onboarding_slide_by_id,
+    create_chardham_file,
+    get_chardham_files
 } = require('../../Admin Controllers/OnboardFnc/Onboard.Controller');
 
 const {
@@ -79,6 +81,12 @@ admin.get('/get_onboarding_slides', get_onboarding_slides);
 admin.get('/get_single_onboarding_slides/:id', get_onboarding_slide_by_id);
 admin.put('/update_onboarding_slide/:id', upload.single('image'), update_onboarding_slide);
 admin.delete('/delete_onboarding_slide/:id', delete_onboarding_slide);
+
+
+// 
+admin.post('/create_char_dham_slide', upload.single('image'), create_chardham_file);
+admin.get('/get_chardham_files', get_chardham_files);
+
 
 // Settings
 admin.post('/createSetting', createSetting);

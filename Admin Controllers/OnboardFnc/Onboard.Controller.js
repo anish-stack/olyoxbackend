@@ -1,6 +1,6 @@
 const { uploadSingleImage, deleteImage } = require("../../utils/cloudinary");
 const OnboardModel = require('../../models/Admin/OnboardingSlides');
-
+const CharDhamBannerModel = require('../../models/CharDhamBannerModel');
 exports.create_onboarding_slide = async (req, res) => {
     try {
         const file = req.file;
@@ -39,11 +39,11 @@ exports.create_onboarding_slide = async (req, res) => {
             title,
             description,
             slug,
-            imageUrl:{
+            imageUrl: {
                 image: image,
                 public_id: public_id
             },
-       
+
         });
 
         await newSlide.save();
@@ -64,8 +64,93 @@ exports.create_onboarding_slide = async (req, res) => {
     }
 };
 
+exports.create_chardham_file = async (req, res) => {
+    try {
+        const file = req.file;
+
+        const { type } = req.body;
+
+        // ✅ Validate required fields
+        if (!type) {
+            return res.status(400).json({
+                success: false,
+                message: 'All fields (title, description, slug) are required.',
+            });
+        }
+
+        // ✅ Validate image file
+        if (!file) {
+            return res.status(400).json({
+                success: false,
+                message: 'Image is required.',
+            });
+        }
+
+        let result
+        // ✅ Upload image to Cloudinary
+        if (type === "image") {
+            result = await uploadSingleImage(file.buffer, 'onboarding_slides');
+            if (!result) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to upload image.',
+                });
+            }
+        }
+
+        if (type === "video") {
+            result = await uploadSingleImage(file.buffer, 'chardham_videos');
+            if (!result) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to upload video.',
+                });
+            }
+        }
 
 
+        // ✅ Save the onboarding slide to the database
+        const new_char_dham = new CharDhamBannerModel({
+            type,
+            link: result.image,
+            public_id: result.public_id
+        });
+
+        await new_char_dham.save();
+
+        return res.status(201).json({
+            success: true,
+            message: 'Chardham slide created successfully.',
+            data: new_char_dham
+        });
+
+    } catch (error) {
+        console.error("Error creating Chardham slide:", error);
+        return res.status(500).json({
+            success: false,
+            message: 'Chardham Internal server error. Please try again later.',
+            error: error.message
+        });
+    }
+};
+
+exports.get_chardham_files = async (req, res) => {
+    try {
+        const files = await CharDhamBannerModel.find();
+        return res.status(200).json({
+            success: true,
+            message: 'Chardham files retrieved successfully.',
+            data: files
+        });
+    } catch (error) {
+        console.error("Error retrieving Chardham files:", error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error. Please try again later.',
+            error: error.message
+        });
+    }
+}
 
 exports.get_onboarding_slides = async (req, res) => {
     try {
@@ -165,7 +250,7 @@ exports.update_onboarding_slide = async (req, res) => {
             // Delete old image from Cloudinary (optional, but recommended for cleanup)
             if (slide.imageUrl?.public_id) {
                 // Assuming you have a deleteImage function in cloudinary utils
-                await deleteImage(slide.imageUrl.public_id); 
+                await deleteImage(slide.imageUrl.public_id);
             }
 
             const result = await uploadSingleImage(file.buffer, 'onboarding_slides');

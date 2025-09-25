@@ -253,7 +253,6 @@ exports.updateRechargeDetails = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { number, otpType, fcmToken } = req.body;
-    // console.log("req.body",req.body)
 
     if (!number) {
       return res.status(400).json({
@@ -262,16 +261,17 @@ exports.login = async (req, res) => {
       });
     }
 
-    const partner = await Rider.findOne({ phone: number });
+    let partner = await Rider.findOne({ phone: number });
 
+    // If partner not found, check website provider details
     if (!partner) {
       try {
-        const response = await axios.post(
-          `https://webapi.olyox.com/api/v1/getProviderDetailsByNumber`,
+        const { data } = await axios.post(
+          "https://webapi.olyox.com/api/v1/getProviderDetailsByNumber",
           { number }
         );
 
-        if (response.data.success) {
+        if (data.success) {
           return res.status(403).json({
             success: false,
             message:
@@ -280,7 +280,6 @@ exports.login = async (req, res) => {
           });
         }
       } catch (error) {
-        console.log(error?.response?.data || error.message);
         return res.status(402).json({
           success: false,
           message:
@@ -296,55 +295,53 @@ exports.login = async (req, res) => {
       });
     }
 
-
-    // Check if the user is blocked for OTP
-    if (partner.isOtpBlock) {
-      const currentTime = new Date();
+    // OTP block check
+    if (partner.isOtpBlock && partner.otpUnblockAfterThisTime) {
       const unblockTime = new Date(partner.otpUnblockAfterThisTime);
-
-      if (currentTime < unblockTime) {
+      if (new Date() < unblockTime) {
         return res.status(403).json({
           success: false,
           message: `You are blocked from requesting OTP. Please try again after ${unblockTime.toLocaleTimeString()}`,
         });
       }
-
-      // Unblock user
-      partner.isOtpBlock = false;
-      partner.otpUnblockAfterThisTime = null;
-      partner.howManyTimesHitResend = 0;
     }
 
-    // ✅ Only update fcmToken if it's provided and different
-    if (fcmToken && fcmToken !== partner.fcmToken) {
-      partner.fcmToken = fcmToken;
-    }
-
-    // Generate and save OTP
+    // Generate OTP (static for test number)
     const otp = number === "8287229430" ? "123456" : await generateOtp();
-    partner.otp = otp;
-    await partner.save();
 
-    // Send OTP
-    if (otpType === "text") {
-      await sendDltMessage(otp, number);
-    } else {
-      const otpMessage = `Your OTP for CaB registration is: ${otp}`;
-      await SendWhatsAppMessage(otpMessage, number);
-    }
-
+    // Run DB update + OTP send in parallel
+    await Promise.all([
+      Rider.updateOne(
+        { _id: partner._id },
+        {
+          $set: {
+            otp,
+            fcmToken: fcmToken || partner.fcmToken,
+            isOtpBlock: false,
+            otpUnblockAfterThisTime: null,
+            howManyTimesHitResend: 0,
+          },
+        }
+      ),
+      otpType === "text"
+        ? sendDltMessage(otp, number)
+        : SendWhatsAppMessage(`Your OTP for CaB registration is: ${otp}`, number),
+    ]);
+    console.log(otp)
     res.status(201).json({
       success: true,
       message: "Please verify OTP sent to your phone.",
-      otp: otp,
+      otp, // ⚠️ keep only for dev/debug; remove in production
     });
   } catch (error) {
+    console.log(error)
     res.status(501).json({
       success: false,
       error: error.message || "Something went wrong",
     });
   }
 };
+
 
 exports.saveFcmTokenToken = async (req, res) => {
   try {
@@ -518,8 +515,7 @@ exports.verifyOtp = async (req, res) => {
       });
     }
 
-    const partner = await Rider.findOne({ phone: number });
-
+    const partner = await Rider.findOne({ phone: number }).lean(); // lean = faster plain object
     if (!partner) {
       return res.status(400).json({
         success: false,
@@ -527,7 +523,6 @@ exports.verifyOtp = async (req, res) => {
       });
     }
 
-    // Check if OTP is valid
     if (partner.otp !== otp) {
       return res.status(400).json({
         success: false,
@@ -535,64 +530,59 @@ exports.verifyOtp = async (req, res) => {
       });
     }
 
-    // ✅ Clear OTP and update verification status
-    partner.otp = null;
-    partner.isOtpVerify = true;
-    partner.howManyTimesHitResend = 0;
-    partner.isOtpBlock = false;
-    partner.otpUnblockAfterThisTime = null;
+    // --- Prepare base update ---
+    const updateData = {
+      otp: null,
+      isOtpVerify: true,
+      howManyTimesHitResend: 0,
+      isOtpBlock: false,
+      otpUnblockAfterThisTime: null,
+    };
 
-
-    // ✅ Try fetching recharge details ONLY if not already paid
-    if (!partner.isPaid) {
-
-      try {
-        const { success, payment_id, member_id } =
-          await checkBhAndDoRechargeOnApp({ number: partner.phone });
-
-        if (
-          success &&
-          payment_id?.end_date &&
-          member_id?.title &&
-          member_id?.HowManyMoneyEarnThisPlan !== undefined &&
-          payment_id?.createdAt &&
-          typeof payment_id?.payment_approved !== "undefined"
-        ) {
-          partner.RechargeData = {
-            rechargePlan: member_id.title,
-            expireData: payment_id.end_date,
-            onHowManyEarning: member_id.HowManyMoneyEarnThisPlan,
-            whichDateRecharge: payment_id.createdAt,
-            approveRecharge: payment_id.payment_approved,
-          };
-          partner.isPaid = true;
-        } else {
-          console.log(
-            "⚠️ Recharge data incomplete or invalid, not updating RechargeData."
-          );
-        }
-      } catch (rechargeErr) {
-        console.error("❌ Recharge Fetch Failed:", rechargeErr.message);
-        // Don't update RechargeData on failure
-      }
-    } else {
-      console.log("ℹ️ Partner is already paid, skipping recharge fetch.");
-    }
-
-    // ✅ Save partner
-
+    // ✅ Handle document upload check
     if (!partner.isDocumentUpload) {
       const docCount = Object.keys(partner.documents || {}).length;
-
-      if (docCount === 6) {
-        partner.isDocumentUpload = true;
-      }
+      if (docCount === 6) updateData.isDocumentUpload = true;
     }
 
+    // --- Run recharge check + update in parallel ---
+    const rechargePromise = (!partner.isPaid
+      ? checkBhAndDoRechargeOnApp({ number: partner.phone })
+        .then(({ success, payment_id, member_id }) => {
+          if (
+            success &&
+            payment_id?.end_date &&
+            member_id?.title &&
+            member_id?.HowManyMoneyEarnThisPlan !== undefined &&
+            payment_id?.createdAt &&
+            typeof payment_id?.payment_approved !== "undefined"
+          ) {
+            updateData.RechargeData = {
+              rechargePlan: member_id.title,
+              expireData: payment_id.end_date,
+              onHowManyEarning: member_id.HowManyMoneyEarnThisPlan,
+              whichDateRecharge: payment_id.createdAt,
+              approveRecharge: payment_id.payment_approved,
+            };
+            updateData.isPaid = true;
+          }
+        })
+        .catch((err) => {
+          console.error("❌ Recharge Fetch Failed:", err.message);
+        })
+      : Promise.resolve()
+    );
 
-    await partner.save();
+    // ✅ Update partner in DB + wait for recharge check
+    await Promise.all([
+      rechargePromise,
+      Rider.updateOne({ phone: number }, { $set: updateData }),
+    ]);
 
-    await send_token(partner, { type: "CAB" }, res, req);
+    // ✅ Refetch updated partner for token
+    const updatedPartner = await Rider.findOne({ phone: number });
+
+    await send_token(updatedPartner, { type: "CAB" }, res, req);
   } catch (error) {
     console.error("❌ OTP Verification Error:", error.message);
     res.status(501).json({
@@ -601,6 +591,7 @@ exports.verifyOtp = async (req, res) => {
     });
   }
 };
+
 
 exports.getAllRiders = async (req, res) => {
   try {
@@ -655,25 +646,29 @@ exports.getAllRiders = async (req, res) => {
 };
 
 
-
 exports.riderDocumentsVerify = async (req, res) => {
   try {
     const { id } = req.params;
     const { DocumentVerify } = req.body;
-    const rider = await Rider.findById(id);
-    if (!rider) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Rider not found" });
+
+    const updateResult = await Rider.updateOne(
+      { _id: id },
+      { $set: { DocumentVerify } }
+    );
+
+    if (updateResult.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Rider not found",
+      });
     }
-    rider.DocumentVerify = DocumentVerify;
-    await rider.save();
+
     res.status(200).json({
       success: true,
       message: "Documents verified successfully",
     });
   } catch (error) {
-    console.log("Internal server error", error);
+    console.error("Internal server error", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -681,6 +676,7 @@ exports.riderDocumentsVerify = async (req, res) => {
     });
   }
 };
+
 
 // Change location of a rider
 exports.changeLocation = async (req, res) => {
@@ -716,181 +712,101 @@ exports.changeLocation = async (req, res) => {
 };
 
 exports.uploadDocuments = async (req, res) => {
+  const startTime = Date.now();
   try {
-    console.log("➡️ /uploadDocuments called");
-
     const userId = req.user?.userId;
-    if (!userId) {
-      console.log("❌ No user ID found");
-      return res.status(401).json({ success: false, message: "Unauthorized" });
-    }
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
 
-    console.log("✅ Extracted userId:", userId);
-    const findRider = await Rider.findById(userId);
-    if (!findRider) {
-      console.log("❌ Rider not found");
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
-    }
+    const rider = await Rider.findById(userId);
+    if (!rider) return res.status(404).json({ success: false, message: "User not found" });
 
-    if (findRider.isDocumentUpload && findRider.DocumentVerify === true) {
+    if (rider.isDocumentUpload && rider.DocumentVerify === true) {
       return res.status(400).json({
         success: false,
         message: "Documents already uploaded and verified. Please login.",
       });
     }
 
-    const uploadedDocs = {};
     const files = req.files || [];
+    console.log(files)
+    if (files.length === 0) return res.status(400).json({ success: false, message: "No files uploaded." });
 
-    if (files.length === 0) {
-      console.log("❌ No files found in request");
-      return res
-        .status(400)
-        .json({ success: false, message: "No files uploaded." });
-    }
+    const uploadedDocs = {};
 
-    for (const file of files) {
-      try {
-        const fileSizeKB = file.size / 1024;
-        console.log(
-          `📄 File received: ${file.originalname} (${fileSizeKB.toFixed(2)}KB)`
-        );
-
-        if (fileSizeKB > 1024) {
-          console.log("⚠️ File too large:", file.originalname);
-          await fs.unlink(file.path).catch(() => { });
-          return res.status(400).json({
-            success: false,
-            message: `${file.originalname} is larger than 1MB`,
-          });
+    // Parallel file uploads
+    await Promise.all(
+      files.map(async (file) => {
+        if (file.size / 1024 > 1024) {
+          await fs.promises.unlink(file.path).catch(() => { });
+          throw new Error(`${file.originalname} is larger than 1MB`);
         }
 
-        console.log("☁️ Uploading to Cloudinary:", file.originalname);
         const uploaded = await cloudinary.uploader.upload(file.path, {
           folder: "rider_documents",
           quality: "auto:low",
           format: "jpg",
         });
 
-        console.log("✅ Uploaded:", uploaded.secure_url);
+        await fs.promises.unlink(file.path).catch(() => { });
 
-        if (file.originalname.includes("dl"))
-          uploadedDocs.license = uploaded.secure_url;
-        if (file.originalname.includes("rc"))
-          uploadedDocs.rc = uploaded.secure_url;
-        if (file.originalname.includes("insurance"))
-          uploadedDocs.insurance = uploaded.secure_url;
-        if (file.originalname.includes("aadharBack"))
-          uploadedDocs.aadharBack = uploaded.secure_url;
-        if (file.originalname.includes("aadharFront"))
-          uploadedDocs.aadharFront = uploaded.secure_url;
-        if (file.originalname.includes("pancard"))
-          uploadedDocs.pancard = uploaded.secure_url;
-        if (file.originalname.includes("profile"))
-          uploadedDocs.profile = uploaded.secure_url;
+        if (file.originalname.includes("dl")) uploadedDocs.license = uploaded.secure_url;
+        else if (file.originalname.includes("rc")) uploadedDocs.rc = uploaded.secure_url;
+        else if (file.originalname.includes("insurance")) uploadedDocs.insurance = uploaded.secure_url;
+        else if (file.originalname.includes("aadharBack")) uploadedDocs.aadharBack = uploaded.secure_url;
+        else if (file.originalname.includes("aadharFront")) uploadedDocs.aadharFront = uploaded.secure_url;
+        else if (file.originalname.includes("pancard")) uploadedDocs.pancard = uploaded.secure_url;
+        else if (file.originalname.includes("profile")) uploadedDocs.profile = uploaded.secure_url;
+      })
+    );
 
-        // Delete the temp file
-        try {
-          await fs.promises.unlink(file.path); // ✅ Promise-based
-          console.log(`✅ Temp file deleted: ${file.originalname}`);
-        } catch (err) {
-          console.warn(
-            `⚠️ Could not delete temp file: ${file.originalname}`,
-            err.message
-          );
-        }
-      } catch (fileErr) {
-        console.error("❌ Error processing file:", file.originalname, fileErr);
-        return res.status(500).json({
-          success: false,
-          message: `Failed to process ${file.originalname}`,
-          error: fileErr.message,
-        });
-      }
-    }
-
-    findRider.documents = uploadedDocs;
-    findRider.isDocumentUpload = true;
-    findRider.isProfileComplete = true;
-
-    try {
-      await findRider.save();
-      console.log("✅ Rider saved successfully");
-    } catch (dbErr) {
-      console.error("❌ Error saving rider:", dbErr);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to save documents",
-        error: dbErr.message,
-      });
-    }
-
-    // Prepare documents object
+    // Prepare documents object for VehicleAdds
     const documents = {
-      rc: { url: findRider?.documents?.rc || "", status: "pending", note: "" },
+      rc: { url: uploadedDocs.rc || "", status: "pending", note: "" },
       pollution: { url: "", status: "pending", note: "", expiryDate: null },
-      aadharFront: {
-        url: findRider?.documents?.aadharFront || "",
-        status: "pending",
-        note: "",
-      },
-      aadharBack: {
-        url: findRider?.documents?.aadharBack || "",
-        status: "pending",
-        note: "",
-      },
+      aadharFront: { url: uploadedDocs.aadharFront || "", status: "pending", note: "" },
+      aadharBack: { url: uploadedDocs.aadharBack || "", status: "pending", note: "" },
       permit: { url: "", status: "pending", note: "", expiryDate: null },
-      licence: {
-        url: findRider?.documents?.license || "",
-        status: "pending",
-        note: "",
-        expiryDate: null,
-      },
-      insurance: {
-        url: findRider?.documents?.insurance || "",
-        status: "pending",
-        note: "",
-        expiryDate: null,
-      },
-      panCard: {
-        url: findRider?.documents?.pancard || "",
-        status: "pending",
-        note: "",
-      },
+      licence: { url: uploadedDocs.license || "", status: "pending", note: "", expiryDate: null },
+      insurance: { url: uploadedDocs.insurance || "", status: "pending", note: "", expiryDate: null },
+      panCard: { url: uploadedDocs.pancard || "", status: "pending", note: "" },
     };
 
-    const newVehicle = new VehicleAdds({
-      riderId: findRider._id,
-      vehicleDetails: {
-        name: findRider?.rideVehicleInfo?.vehicleName || "",
-        type: findRider?.rideVehicleInfo?.vehicleType || "",
-        numberPlate:
-          findRider?.rideVehicleInfo?.VehicleNumber?.toUpperCase() || "",
-      },
-      isDefault: true,
-      isActive: false,
-      documents,
-    });
-
-    await newVehicle.save();
-
+    // Parallel Rider update + VehicleAdds creation
+    await Promise.all([
+      Rider.updateOne(
+        { _id: userId },
+        { $set: { documents: uploadedDocs, isDocumentUpload: true, isProfileComplete: true } }
+      ),
+      new VehicleAdds({
+        riderId: userId,
+        vehicleDetails: {
+          name: rider?.rideVehicleInfo?.vehicleName || "",
+          type: rider?.rideVehicleInfo?.vehicleType || "",
+          numberPlate: rider?.rideVehicleInfo?.VehicleNumber?.toUpperCase() || "",
+        },
+        isDefault: true,
+        isActive: false,
+        documents,
+      }).save(),
+    ]);
+    const endTime = Date.now();
+    console.log(`✅ /uploadDocuments executed in ${endTime - startTime} ms`);
     return res.status(201).json({
       success: true,
       message: "Documents uploaded successfully",
       data: uploadedDocs,
     });
-  } catch (mainErr) {
-    console.error("❌ Unexpected error in /uploadDocuments:", mainErr);
+  } catch (error) {
+    console.error("❌ /uploadDocuments error:", error.message);
     return res.status(500).json({
       success: false,
       message: "Server error",
-      error: mainErr.message,
+      error: error.message,
     });
   }
 };
 
+// 7890987666
 exports.uploadPaymentQr = async (req, res) => {
   try {
     console.log("📥 Incoming QR Upload Request");

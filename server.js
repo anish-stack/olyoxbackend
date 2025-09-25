@@ -19,7 +19,7 @@ const { connectwebDb } = require('./PaymentWithWebDb/db');
 const RiderModel = require('./models/Rider.model');
 const userModel = require('./models/normal_user/User.model');
 
-
+const TrackEvent = require('./models/Admin/Tracking');
 const Settings = require('./models/Admin/Settings');
 const NewRideModel = require('./src/New-Rides-Controller/NewRideModel.model');
 const setupBullBoard = require('./bullboard');
@@ -349,6 +349,55 @@ app.get('/rider', async (req, res) => {
     }
 });
 
+
+
+// 🎯 POST /track
+app.post("/track", Protect, async (req, res) => {
+    try {
+        const userId = req.user?.user._id || req.user._id;  // from Protect middleware
+
+        if (!userId) {
+            return res.status(400).json({ error: "User ID is required" });
+        }
+
+        // 📦 Extract fields from body
+        const {
+
+            event,      // e.g. SCREEN_VIEW / ACTION
+            screen,     // e.g. "RideBooking"
+            action,     // e.g. "book_ride"
+            params,     // extra data
+            device,     // android / ios
+            timestamp,  // optional, else we use now
+        } = req.body;
+
+        // ✅ Basic validation
+        if (!event || !screen || !action) {
+            return res.status(400).json({
+                error: "Missing required fields: event, screen, action",
+            });
+        }
+
+        // 📌 Prepare new event object
+        const trackEvent = new TrackEvent({
+            userId,
+            event,
+            screen,
+            action,
+            params: params || {},
+            device: device || "unknown",
+            ip: req.ip,
+            timestamp: timestamp ? new Date(timestamp) : new Date(),
+        });
+
+        // 💾 Save to DB
+        await trackEvent.save();
+        return res.json({ success: true, eventId: trackEvent._id });
+    } catch (err) {
+        console.error("❌ Track Event Error:", err);
+        return res.status(500).json({ error: "Server error: " + err.message });
+    }
+});
 // Enhanced ride tracking endpoint
 app.get('/rider/:tempRide', async (req, res) => {
     const { tempRide } = req.params;
