@@ -860,7 +860,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
           }
         }
         const sendRideNotifications = async (riders, ride) => {
-          console.log("i am starting to send notifications");
+          console.log("i am starting to send notifications",ride);
           for (const rider of riders) {
             try {
               await sendNotification.sendNotification(
@@ -1052,7 +1052,7 @@ const processRiders = async (redisClient, rideId, riders, rideDetails = {}) => {
         try {
           await redisClient.watch(`ride:${rideId}`);
           const ride = await RideBooking.findById(rideId).select(
-            "ride_status rejected_by_drivers pickup_address drop_address vehicle_type pricing"
+            "ride_status rejected_by_drivers pickup_address drop_address vehicle_type pricing route_info"
           );
 
           if (!ride) {
