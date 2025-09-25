@@ -120,6 +120,7 @@ const sendNotification = async (token, title, body, eventData = null, channel) =
     if (eventData && Object.keys(eventData).length > 0) {
       message.data = {
         event: eventData.event || "DEFAULT_EVENT",
+        distance:String(eventData?.rideDetails?.distance || ""),
         vehicleType: String(eventData?.rideDetails?.vehicleType || ""),
         rideId: String(eventData?.rideDetails?.rideId || ""),
         pickup: String(eventData?.rideDetails?.pickup?.formatted_address || ""),
