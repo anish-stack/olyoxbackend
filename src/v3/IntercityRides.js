@@ -1375,6 +1375,8 @@ exports.RejectRide = async (req, res) => {
 // ===== ADMIN/GENERAL FUNCTIONS =====
 
 exports.IntercityRideAll = async (req, res) => {
+    const startTime = Date.now(); // Start time tracking
+    console.log("Start time",startTime)
     try {
         const {
             originCity,
@@ -1389,13 +1391,13 @@ exports.IntercityRideAll = async (req, res) => {
 
         let query = {};
 
-        // Build query based on filters
+        // Optimized filtering
         if (originCity) {
-            query['route.origin.city'] = new RegExp(originCity, 'i');
+            query['route.origin.city'] = { $regex: new RegExp(`^${originCity}`, 'i') }; // Prefix regex for index usage
         }
 
         if (destinationCity) {
-            query['route.destination.city'] = new RegExp(destinationCity, 'i');
+            query['route.destination.city'] = { $regex: new RegExp(`^${destinationCity}`, 'i') };
         }
 
         if (departureDate) {
@@ -1410,29 +1412,27 @@ exports.IntercityRideAll = async (req, res) => {
             };
         }
 
-        if (status) {
-            query.status = status;
-        }
-
-        if (passengerId) {
-            query.passengerId = passengerId;
-        }
-
-        if (driverId) {
-            query.driverId = driverId;
-        }
+        if (status) query.status = status;
+        if (passengerId) query.passengerId = passengerId;
+        if (driverId) query.driverId = driverId;
 
         const skip = (page - 1) * limit;
 
-        const rides = await IntercityRide.find(query)
-            .populate('driverId', 'name phone email rating vehicle')
-            .populate('passengerId', 'name number email createdAt platform')
-            .sort({ 'schedule.departureTime': -1 })
-            .skip(skip)
-            .limit(parseInt(limit))
-            .lean();
+        // Run count + query in parallel to reduce response time
+        const [rides, totalRides] = await Promise.all([
+            IntercityRide.find(query)
+                .populate('driverId', 'name phone email rating vehicle')
+                .populate('passengerId', 'name number email createdAt platform')
+                .select('-messageSendToDriver')
+                .sort({ 'schedule.departureTime': -1 })
+                .skip(skip)
+                .limit(parseInt(limit))
+                .lean(),
+            IntercityRide.countDocuments(query)
+        ]);
 
-        const totalRides = await IntercityRide.countDocuments(query);
+        const endTime = Date.now(); // End time
+        const executionTime = endTime - startTime; // ms
 
         return res.status(200).json({
             success: true,
@@ -1443,18 +1443,24 @@ exports.IntercityRideAll = async (req, res) => {
                 totalRides,
                 hasNext: skip + rides.length < totalRides,
                 hasPrev: page > 1
-            }
+            },
+            executionTime: `${executionTime} ms` // ⏱ show time taken
         });
+            console.log("End time",executionTime)
+
 
     } catch (error) {
         console.error('Error getting rides:', error);
+        const endTime = Date.now();
         return res.status(500).json({
             success: false,
             message: 'Failed to fetch rides',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+            executionTime: `${endTime - startTime} ms`
         });
     }
 };
+
 
 
 exports.paymentCollect = async (req, res) => {
