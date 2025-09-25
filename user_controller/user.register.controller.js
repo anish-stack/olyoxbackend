@@ -14,39 +14,44 @@ const NewRideModelModel = require("../src/New-Rides-Controller/NewRideModel.mode
 exports.createUser = async (req, res) => {
   try {
     const { number, email, name, referral, platform, campaign } = req.body;
-    let otp = generateOtp();
-    const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
+    // Generate OTP
+    let otp = generateOtp();
+    const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+    // Special number for testing
     if (number == 7217619794) {
       otp = 123456;
     }
 
-    let user = await User.findOne({ number }).lean(); // lean() for faster read
+    // Check if user exists
+    let user = await User.findOne({ number }).lean();
 
     if (user) {
-      await User.updateOne(
-        { number },
-        {
-          $set: {
-            otp,
-            otpExpiresAt,
-            tryLogin: true,
-            isOtpVerify: user.isOtpVerify || false,
-            platform: platform || "android",
-            ...(referral && !user.appliedReferralCode
-              ? { appliedReferralCode: referral }
-              : {}),
-            ...(campaign
-              ? {
-                  install_referrer: {
-                    raw: campaign,
-                    parsed: Object.fromEntries(new URLSearchParams(campaign)),
-                  },
-                }
-              : {}),
-          },
-        }
-      );
+      // Prepare update data
+      const updateData = {
+        otp,
+        otpExpiresAt,
+        tryLogin: true,
+        isOtpVerify: user.isOtpVerify || false,
+        platform: platform || "android",
+      };
+
+      // Apply referral code if not already applied
+      if (referral && !user.appliedReferralCode) {
+        updateData.appliedReferralCode = referral;
+      }
+
+      // Only set install_referrer if it doesn't exist
+      if (campaign && !user.install_referrer) {
+        updateData.install_referrer = {
+          raw: campaign,
+          parsed: Object.fromEntries(new URLSearchParams(campaign)),
+        };
+      }
+
+      // Update user
+      await User.updateOne({ number }, { $set: updateData });
 
       const message = user.isOtpVerify
         ? `Hi there! Your OTP is: ${otp}. Please verify it.`
@@ -58,7 +63,7 @@ Here’s your OTP: ${otp}
 
 Please verify it to kickstart your Olyox journey.`;
 
-      // send async (no await)
+      // Send WhatsApp message asynchronously
       SendWhatsAppMessageUser(message, number, otp).catch(console.error);
 
       return res.status(200).json({
@@ -67,7 +72,7 @@ Please verify it to kickstart your Olyox journey.`;
       });
     }
 
-    // New user
+    // Create new user
     const newUser = await User.create({
       number,
       email,
@@ -76,6 +81,14 @@ Please verify it to kickstart your Olyox journey.`;
       platform: platform || "android",
       otpExpiresAt,
       ...(referral ? { appliedReferralCode: referral } : {}),
+      ...(campaign
+        ? {
+            install_referrer: {
+              raw: campaign,
+              parsed: Object.fromEntries(new URLSearchParams(campaign)),
+            },
+          }
+        : {}),
     });
 
     const newUserMessage = `Hi there!
@@ -84,7 +97,7 @@ Welcome to Olyox – your all-in-one app for rides, food delivery, heavy vehicle
 
 Here’s your OTP: ${otp}`;
 
-    // send async (no await)
+    // Send WhatsApp message asynchronously
     SendWhatsAppMessage(newUserMessage, number, otp).catch(console.error);
 
     return res.status(201).json({
@@ -101,6 +114,7 @@ Here’s your OTP: ${otp}`;
     });
   }
 };
+
 
 exports.verify_user = async (req, res) => {
   try {

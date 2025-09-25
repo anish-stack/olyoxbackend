@@ -4,8 +4,8 @@ const mongoose = require('mongoose');
 const userSchema = new mongoose.Schema({
     number: {
         type: String,
-         index: true,
-         unique: true,
+        index: true,
+        unique: true,
     },
     currentRide: {
         type: mongoose.Schema.Types.ObjectId,
@@ -79,14 +79,14 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: null
     },
-install_referrer: {
-    raw: { type: mongoose.Schema.Types.Mixed }, // <-- allows object or string
-    parsed: {
-        utm_source: { type: String },
-        utm_campaign: { type: String },
-        utm_medium: { type: String },
-    }
-},
+    install_referrer: {
+        raw: { type: mongoose.Schema.Types.Mixed }, // <-- allows object or string
+        parsed: {
+            utm_source: { type: String },
+            utm_campaign: { type: String },
+            utm_medium: { type: String },
+        }
+    },
 
     fcmToken: {
         type: String
