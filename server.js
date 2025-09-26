@@ -249,35 +249,10 @@ app.post('/directions', async (req, res) => {
             return res.status(400).json({ error: 'Invalid pickup or dropoff location data' });
         }
 
-        // Create a unique cache key based on coordinates
-        const cacheKey = `directions:${data.pickup.latitude},${data.pickup.longitude}:${data.dropoff.latitude},${data.dropoff.longitude}`;
         const startTime = Date.now();
 
-        // Try fetching from Redis cache
-        const cachedData = await pubClient.get(cacheKey);
-        if (cachedData) {
-            const timeTakenMs = Date.now() - startTime;
-            const result = JSON.parse(cachedData);
-
-            console.log(`[${new Date().toISOString()}] Successfully fetched directions from cache for key: ${cacheKey} (took ${timeTakenMs} ms)`);
-
-            // Broadcast to Socket.IO if ride ID is provided
-            if (data.rideId && req.sendToRide) {
-                req.sendToRide(data.rideId, 'directions_updated', {
-                    ...result,
-                    source: 'cache'
-                });
-            }
-
-            return res.json({
-                ...result,
-                source: 'cache',
-                timeTakenMs
-            });
-        }
-
-        // If no cache, call Google Maps API
-        const googleMapsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${data?.pickup?.latitude},${data?.pickup?.longitude}&destination=${data?.dropoff?.latitude},${data?.dropoff?.longitude}&key=AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8`;
+        // Call Google Maps API directly
+        const googleMapsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${data.pickup.latitude},${data.pickup.longitude}&destination=${data.dropoff.latitude},${data.dropoff.longitude}&key=AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8`;
         const apiStartTime = Date.now();
         const response = await axios.get(googleMapsUrl);
         const apiTimeTakenMs = Date.now() - apiStartTime;
@@ -292,19 +267,7 @@ app.post('/directions', async (req, res) => {
                 polyline,
             };
 
-            // Save to Redis cache with expiration (e.g., 1 hour = 3600 seconds)
-            await pubClient.setEx(cacheKey, 3600, JSON.stringify(result));
-
-            console.log(`[${new Date().toISOString()}] Successfully fetched directions from Google API for key: ${cacheKey} (took ${apiTimeTakenMs} ms)`);
-
-            // Broadcast to Socket.IO if ride ID is provided
-            if (data.rideId && req.sendToRide) {
-                req.sendToRide(data.rideId, 'directions_updated', {
-                    ...result,
-                    source: 'google-api'
-                });
-            }
-
+   
             return res.json({
                 ...result,
                 source: 'google-api',
@@ -319,6 +282,7 @@ app.post('/directions', async (req, res) => {
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
+
 
 // Enhanced rider listing with real-time updates
 app.get('/rider', async (req, res) => {
@@ -456,34 +420,16 @@ app.get('/rider/:tempRide', async (req, res) => {
 
 // Enhanced location update endpoint with real-time broadcasting
 app.post('/webhook/cab-receive-location', async (req, res, next) => {
-    // console.log('--- Incoming request to /webhook/cab-receive-location ---');
-    // console.log('Request Body:', req.body);
-
     if (!req.body.riderId) {
-        // console.log('No riderId provided in request body, applying Protect middleware...');
         return Protect(req, res, next);
     }
-
-    // console.log('riderId found, skipping Protect middleware');
     next();
-
 }, async (req, res) => {
     try {
-        // console.log('--- Entering location update handler ---');
-
         const { latitude, longitude, riderId, heading, speed } = req.body;
-        // console.log('Received Data:', { latitude, longitude, riderId, heading, speed });
 
-        let userId;
-        if (riderId) {
-            userId = riderId;
-            // console.log('Using riderId from request body:', userId);
-        } else {
-            userId = req.user?.userId;
-        }
-
+        let userId = riderId || req.user?.userId;
         if (!userId) {
-            // console.warn('No userId available for updating location');
             return res.status(400).json({ error: 'User ID is required' });
         }
 
@@ -495,56 +441,14 @@ app.post('/webhook/cab-receive-location', async (req, res, next) => {
             lastUpdated: new Date()
         };
 
-        // console.log('Updating rider location with payload:', updatePayload);
-
         const data = await RiderModel.findOneAndUpdate(
             { _id: userId },
             updatePayload,
             { upsert: true, new: true }
         );
-
-        // console.log('Rider location updated:', data?.name);
-
-        // Broadcast real-time location update via Socket.IO
-        if (req.getIO) {
-            const io = req.getIO();
-            const locationUpdate = {
-                userId,
-                userType: 'driver',
-                latitude,
-                longitude,
-                heading: heading || null,
-                speed: speed || null,
-                timestamp: new Date().toISOString()
-            };
-
-            // Emit to all users tracking this driver
-            io.to(`tracking_driver_${userId}`).emit('driver_location', locationUpdate);
-
-            // Emit to admin dashboard
-            io.to('admins').emit('driver_location_updated', locationUpdate);
-        }
-
-        // Store in Redis for quick access
-        const locationData = {
-            userId,
-            userType: 'driver',
-            latitude,
-            longitude,
-            heading: heading || null,
-            speed: speed || null,
-            timestamp: new Date().toISOString()
-        };
-
-        await pubClient.setEx(
-            `location_driver_${userId}`,
-            300,
-            JSON.stringify(locationData)
-        );
-
+        console.log("Location updated successfully",userId)
         res.status(200).json({
-            message: 'Location updated successfully',
-            realTimeBroadcast: !!req.getIO
+            message: 'Location updated successfully'
         });
 
     } catch (error) {
@@ -552,6 +456,7 @@ app.post('/webhook/cab-receive-location', async (req, res, next) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
 
 // Enhanced parcel boy location update
 app.post('/webhook/receive-location', Protect, async (req, res) => {
