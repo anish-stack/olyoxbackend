@@ -1665,6 +1665,13 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
                     decision = driverType === "Bike";
                     break;
 
+                case "AUTO":
+                case "auto":
+                case "Auto":
+                    // ✅ Special case:Auto → always accept, ignore preferences
+                    decision = driverType === "auto";
+                    break;
+
                 case "MINI":
                     decision =
                         driverType === "MINI" ||
