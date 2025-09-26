@@ -1031,98 +1031,84 @@ exports.getMyAllRides = async (req, res) => {
   }
 };
 
+
 exports.toggleWorkStatusOfRider = async (req, res) => {
   try {
     const user_id = req.user?.userId;
+    if (!user_id) return res.status(401).json({ message: "User ID is required" });
 
-    if (!user_id) {
-      return res.status(401).json({ message: "User ID is required" });
-    }
-
-    // Fetch the current status of the rider
-    const rider = await Rider.findById({ _id: user_id });
-    if (!rider) {
-      return res.status(404).json({ message: "Rider not found" });
-    }
+    // Fetch minimal rider info needed
+    const rider = await Rider.findById(user_id, "isAvailable isPaid on_ride_id").lean();
+    if (!rider) return res.status(404).json({ message: "Rider not found" });
 
     if (!rider.isPaid) {
       return res.status(400).json({
-        message:
-          "Oops! It looks like your account isn’t recharged. Please top up to proceed.",
+        message: "Oops! It looks like your account isn’t recharged. Please top up to proceed.",
       });
     }
 
-    // Toggle the status dynamically
     const newStatus = !rider.isAvailable;
 
-    // Check if rider is trying to go offline while having an active ride
     if (!newStatus && rider.on_ride_id) {
       return res.status(400).json({
-        message:
-          "You currently have an active ride. Please complete the ride before going offline.",
+        message: "You currently have an active ride. Please complete the ride before going offline.",
       });
     }
 
-    // Update rider's isAvailable status
-    const toggleStatus = await Rider.updateOne(
-      { _id: user_id },
-      { $set: { isAvailable: newStatus } }
+    // Update rider status atomically
+    const toggleResult = await Rider.findByIdAndUpdate(
+      user_id,
+      { isAvailable: newStatus },
+      { new: true }
     );
 
-    if (toggleStatus.modifiedCount !== 1) {
-      return res.status(400).json({ message: "Status update failed" });
-    }
-
-    // Handle CabRider session tracking
     const today = moment().format("YYYY-MM-DD");
-    let cabRider = await CabRiderTimes.findOne({
-      riderId: user_id,
-      date: today,
-    });
 
-    if (!cabRider) {
-      cabRider = new CabRiderTimes({
-        riderId: user_id,
-        status: newStatus ? "online" : "offline",
-        date: today,
-        sessions: [],
-      });
-    } else {
-      // Update status
-      cabRider.status = newStatus ? "online" : "offline";
-    }
-
+    // Prepare session update
+    let sessionUpdate = {};
     if (newStatus) {
-      // Rider is going online - start a new session
-      cabRider.sessions.push({
-        onlineTime: new Date(),
-        offlineTime: null,
-        duration: null,
-      });
+      // Going online → add new session
+      sessionUpdate = {
+        $push: { sessions: { onlineTime: new Date(), offlineTime: null, duration: null } },
+        $set: { status: "online" },
+      };
     } else {
-      // Rider is going offline - close the last session
-      const lastSession = cabRider.sessions[cabRider.sessions.length - 1];
-      if (lastSession && !lastSession.offlineTime) {
-        lastSession.offlineTime = new Date();
-        lastSession.duration = Math.round(
-          (new Date() - new Date(lastSession.onlineTime)) / 60000
-        );
+      // Going offline → update last session
+      const cabRiderDoc = await CabRiderTimes.findOne({ riderId: user_id, date: today });
+      if (cabRiderDoc && cabRiderDoc.sessions?.length > 0) {
+        const lastSession = cabRiderDoc.sessions[cabRiderDoc.sessions.length - 1];
+        const duration = lastSession.onlineTime
+          ? Math.round((new Date() - lastSession.onlineTime) / 60000)
+          : 0;
+        sessionUpdate = {
+          $set: {
+            status: "offline",
+            [`sessions.${cabRiderDoc.sessions.length - 1}.offlineTime`]: new Date(),
+            [`sessions.${cabRiderDoc.sessions.length - 1}.duration`]: duration,
+          },
+        };
+      } else {
+        sessionUpdate = { $set: { status: "offline" } };
       }
     }
 
-    await cabRider.save();
+    const cabRider = await CabRiderTimes.findOneAndUpdate(
+      { riderId: user_id, date: today },
+      sessionUpdate,
+      { new: true, upsert: true }
+    ).select("status");
 
     return res.status(200).json({
       success: true,
-      message: `Status updated to ${newStatus ? "Available (Online)" : "Unavailable (Offline)"
-        } successfully.`,
-      cabRider,
+      message: `Status updated to ${newStatus ? "Available (Online)" : "Unavailable (Offline)"} successfully.`,
+      cabRider:cabRider?.status,
     });
   } catch (error) {
     console.error("Error toggling work status:", error);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
 exports.AdmintoggleWorkStatusOfRider = async (req, res) => {
   try {
     const user_id = req.params.id;
