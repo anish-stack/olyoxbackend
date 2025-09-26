@@ -1098,6 +1098,7 @@ exports.toggleWorkStatusOfRider = async (req, res) => {
       { new: true, upsert: true }
     ).select("status");
 
+    console.log("I am update stauts")
     return res.status(200).json({
       success: true,
       message: `Status updated to ${newStatus ? "Available (Online)" : "Unavailable (Offline)"} successfully.`,
