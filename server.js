@@ -5,29 +5,21 @@ const { createClient } = require('redis');
 const mongoose = require('mongoose');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
+const multer = require('multer');
 const axios = require('axios');
 require('dotenv').config();
-const compression = require("compression");
-const cluster = require('cluster')
-const os = require('os')
-const PORT = process.env.PORT || 3100;
-const numCPUs = os.cpus().length;
-
-
-console.log("numCPUs",numCPUs)
-// Import Socket.IO manager
-const { initSocket, getIO, getStats, sendNotificationToUser, broadcastToUserType, sendToRide } = require('./socket/socketManager');
-
+const compression = require("compression")
+// Database and Models
 const connectDb = require('./database/db');
 const { connectwebDb } = require('./PaymentWithWebDb/db');
+const rideRequestModel = require('./models/ride.request.model');
 const RiderModel = require('./models/Rider.model');
-const userModel = require('./models/normal_user/User.model');
-
-const TrackEvent = require('./models/Admin/Tracking');
+const User = require('./models/normal_user/User.model');
+const ParcelBoyLocation = require('./models/Parcel_Models/Parcel_Boys_Location');
 const Settings = require('./models/Admin/Settings');
-const NewRideModel = require('./src/New-Rides-Controller/NewRideModel.model');
+const tempRideDetailsSchema = require('./models/tempRideDetailsSchema');
+const NewRideModel = require('./src/New-Rides-Controller/NewRideModel.model')
 const setupBullBoard = require('./bullboard');
-
 // Routes
 const router = require('./routes/routes');
 const rides = require('./routes/rides.routes');
@@ -40,8 +32,28 @@ const Heavy = require('./routes/Heavy_vehicle/Heavy.routes');
 const NewRoutes = require('./routes/New/New.routes');
 const sendNotification = require('./utils/sendNotification');
 
+// Controllers and Middleware
+const {
+    ChangeRideRequestByRider,
+    findRider,
+    rideStart,
+    rideEnd,
+    collectCash,
+    AddRating,
+    cancelRideByAnyOne,
+    cancelRideForOtherDrivers,
+    updateRideRejectionStatus,
+    findNextAvailableDriver
+} = require('./controllers/ride.request');
+const {
+    update_parcel_request,
+    mark_reached,
+    mark_pick,
+    mark_deliver,
+    mark_cancel
+} = require('./driver');
 const Protect = require('./middleware/Auth');
-const SentLog = require('./models/log/sendLogs.model');
+const { debugIOSNotification } = require('./utils/DebugNotifications');
 
 // Initialize Express and Server
 const app = express();
@@ -65,6 +77,9 @@ const redisOptions = {
     },
     password: process.env.REDIS_PASSWORD || undefined
 };
+
+
+
 
 // Global Redis client
 let pubClient;
@@ -121,35 +136,42 @@ async function connectDatabases() {
     }
 }
 
-// Socket.IO initialization
-async function initializeSocket() {
-    try {
-        const io = await initSocket(server, pubClient);
 
-        // Make Socket.IO available globally in the app
-        app.set('io', io);
-        app.set('getIO', getIO);
-        app.set('sendNotificationToUser', sendNotificationToUser);
-        app.set('broadcastToUserType', broadcastToUserType);
-        app.set('sendToRide', sendToRide);
+async function sendPushNotification(expoPushTokens, title, body) {
+ try {
+  const response = await sendNotification.sendNotification(
+    'f_tdIVaMTJyvTYwxrNtD8m:APA91bEyIBblc-oy_YdseEKWbXNor-kA_GYdniMi2BluhBkkvvjlg_QM-vXIJZdpcwh8j6L0yKWa_dNNygctLD1i9fCsPJbkLYVHGtFIMpe8DNseoHfA_ec',
+    '🚖 Ride Request',
+    'A new rider has booked a cab. Tap to view details.',
+    { rideId: '12345', type: 'newBooking' }, // extra data
+    true // Android flag if your fn supports it
+  );
 
-        console.log(`[${new Date().toISOString()}] Socket.IO initialized successfully`);
-        return io;
-    } catch (error) {
-        console.error(`[${new Date().toISOString()}] Socket.IO initialization failed:`, error.message);
-        throw error;
-    }
+  console.log("✅ Notification sent successfully:", response);
+} catch (error) {
+  console.error("❌ Failed to send notification:", error);
+}
 }
 
+// sendNotification.sendTestNotification("cTVlPvzWqE6WhQPcL87uQT:APA91bF-TV2a1TtNtrIJg_7iWtnb9kUfX8BhyHypQ-ZeAfMa3Dw_FtONXwCXnNnP-OcxxzNx4nRpIIP2G5OkXNA1ZRyBSSGerJ60lWUTIrhK0eQhB7oBFFw", "ios");
+// sendNotification.sendNotification("dbRY9fE1K0VIvE23QS8qYK:APA91bF_WAKSnkSYri3LFBX7VBegYzxhmRWJCqAOFEYRlO3Z7hNh-_ynFEX2BKVJur9d-vjyszJ5Cdt-zCy5uhFc6TU4ZI1wKVN_Iz9tdAmyja_DKTQCQe4", "Hey Buddy i am Your Ios Notification code", "This is not for test")
+//   .then(() => console.log("Success ios notification!"))
+//   .catch(console.error);
+// Example usage:
+// const expoPushTokens = ['ExponentPushToken[yBRBtTIa6xCmtrO8igmTz0]'];
 
-// Enhanced Middleware
+
+
+
+
+
+// Multer for File Uploads
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
+
+// Middleware
 app.use(cors({ origin: '*', credentials: true }));
-app.use(compression({
-    threshold: 0, // compress everything, even small responses
-}));
-
 setupBullBoard(app);
-
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 300000,
@@ -164,23 +186,15 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Enhanced middleware to check Redis connection and make Socket.IO available
+// Middleware to check Redis connection
 app.use((req, res, next) => {
     if (!pubClient || !pubClient.isOpen) {
         console.warn(`[${new Date().toISOString()}] Redis client not available for request: ${req.path}`);
     }
-
-    // Make Socket.IO functions available in all routes
-    req.io = app.get('io');
-    req.getIO = app.get('getIO');
-    req.sendNotificationToUser = app.get('sendNotificationToUser');
-    req.broadcastToUserType = app.get('broadcastToUserType');
-    req.sendToRide = app.get('sendToRide');
-
     next();
 });
-
-// Enhanced Long Polling Updates Endpoint with Socket.IO integration
+// ia am ams
+// Long Polling Updates Endpoint
 app.get('/updates/:userId/:userType', async (req, res) => {
     const { userId, userType } = req.params;
     const validTypes = ['user', 'driver', 'tiffin_partner'];
@@ -201,58 +215,54 @@ app.get('/updates/:userId/:userType', async (req, res) => {
         // Register client as active
         await pubClient.set(`active:${userType}:${userId}`, '1', { EX: 3600 });
 
-        // Check if user is connected via Socket.IO
-        const socketStats = getStats();
-        const isConnectedViaSocket = userType === 'driver'
-            ? socketStats.connectedDrivers > 0
-            : socketStats.connectedUsers > 0;
-
         while (Date.now() - startTime < timeoutMs) {
             const updates = await pubClient.lPop(key);
             if (updates) {
                 const data = JSON.parse(updates);
-
-                // Also send via Socket.IO if connected
-                if (isConnectedViaSocket && req.sendNotificationToUser) {
-                    req.sendNotificationToUser(userId, userType, {
-                        type: 'long_polling_update',
-                        data: data
-                    });
-                }
-
-                return res.json({
-                    success: true,
-                    updates: data,
-                    socketConnected: isConnectedViaSocket
-                });
+                return res.json({ success: true, updates: data });
             }
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
-
-        res.json({
-            success: true,
-            updates: null,
-            socketConnected: isConnectedViaSocket
-        });
+        res.json({ success: true, updates: null });
     } catch (err) {
         console.error(`[${new Date().toISOString()}] Polling error for ${userType}:${userId}:`, err.message);
         res.status(500).json({ success: false, message: 'Polling failed' });
     }
 });
 
-// Enhanced directions endpoint with real-time updates
+
 app.post('/directions', async (req, res) => {
     try {
         const data = req.body || {};
+
+   
 
         if (!data?.pickup?.latitude || !data?.pickup?.longitude || !data?.dropoff?.latitude || !data?.dropoff?.longitude) {
             return res.status(400).json({ error: 'Invalid pickup or dropoff location data' });
         }
 
+        // Create a unique cache key based on coordinates
+        const cacheKey = `directions:${data.pickup.latitude},${data.pickup.longitude}:${data.dropoff.latitude},${data.dropoff.longitude}`;
+
         const startTime = Date.now();
 
-        // Call Google Maps API directly
-        const googleMapsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${data.pickup.latitude},${data.pickup.longitude}&destination=${data.dropoff.latitude},${data.dropoff.longitude}&key=AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8`;
+        // Try fetching from Redis cache
+        const cachedData = await pubClient.get(cacheKey);
+        if (cachedData) {
+            const timeTakenMs = Date.now() - startTime;
+            const result = JSON.parse(cachedData);
+
+            console.log(`[${new Date().toISOString()}] Successfully fetched directions from cache for key: ${cacheKey} (took ${timeTakenMs} ms)`);
+
+            return res.json({
+                ...result,
+                source: 'cache',
+                timeTakenMs
+            });
+        }
+
+        // If no cache, call Google Maps API
+        const googleMapsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${data?.pickup?.latitude},${data?.pickup?.longitude}&destination=${data?.dropoff?.latitude},${data?.dropoff?.longitude}&key=AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8`;
         const apiStartTime = Date.now();
         const response = await axios.get(googleMapsUrl);
         const apiTimeTakenMs = Date.now() - apiStartTime;
@@ -267,7 +277,12 @@ app.post('/directions', async (req, res) => {
                 polyline,
             };
 
-   
+            // Save to Redis cache with expiration (e.g., 1 hour = 3600 seconds)
+            await pubClient.setEx(cacheKey, 3600, JSON.stringify(result));
+
+            console.log(`[${new Date().toISOString()}] Successfully fetched directions from Google API for key: ${cacheKey} (took ${apiTimeTakenMs} ms)`);
+            console.log('Passing API result to client:', result);
+
             return res.json({
                 ...result,
                 source: 'google-api',
@@ -283,90 +298,18 @@ app.post('/directions', async (req, res) => {
     }
 });
 
-
-// Enhanced rider listing with real-time updates
+// List Available Riders
 app.get('/rider', async (req, res) => {
     try {
-        console.log("Fetching available riders...");
+        console.log("iamht")
         const riders = await RiderModel.find({ isAvailable: true });
-
-        // Get Socket.IO connection stats
-        const socketStats = getStats();
-
-        // Enhance rider data with online status
-        const enhancedRiders = await Promise.all(riders.map(async (rider) => {
-            const onlineStatus = await pubClient.get(`user_online_driver_${rider._id}`);
-            return {
-                ...rider.toObject(),
-                isOnline: !!onlineStatus,
-                lastSeen: onlineStatus ? JSON.parse(onlineStatus).timestamp : null
-            };
-        }));
-
-        res.json({
-            success: true,
-            riders: enhancedRiders,
-            socketStats: {
-                connectedDrivers: socketStats.connectedDrivers,
-                totalConnections: socketStats.totalSockets
-            }
-        });
+        res.json({ success: true, riders });
     } catch (err) {
         console.error(`[${new Date().toISOString()}] List riders error:`, err.message);
         res.status(500).json({ success: false, error: 'Failed to list riders' });
     }
 });
 
-
-
-// 🎯 POST /track
-app.post("/track", Protect, async (req, res) => {
-    try {
-        const userId = req.user?.user._id || req.user._id;  // from Protect middleware
-
-        if (!userId) {
-            return res.status(400).json({ error: "User ID is required" });
-        }
-
-        // 📦 Extract fields from body
-        const {
-
-            event,      // e.g. SCREEN_VIEW / ACTION
-            screen,     // e.g. "RideBooking"
-            action,     // e.g. "book_ride"
-            params,     // extra data
-            device,     // android / ios
-            timestamp,  // optional, else we use now
-        } = req.body;
-
-        // ✅ Basic validation
-        if (!event || !screen || !action) {
-            return res.status(400).json({
-                error: "Missing required fields: event, screen, action",
-            });
-        }
-
-        // 📌 Prepare new event object
-        const trackEvent = new TrackEvent({
-            userId,
-            event,
-            screen,
-            action,
-            params: params || {},
-            device: device || "unknown",
-            ip: req.ip,
-            timestamp: timestamp ? new Date(timestamp) : new Date(),
-        });
-
-        // 💾 Save to DB
-        await trackEvent.save();
-        return res.json({ success: true, eventId: trackEvent._id });
-    } catch (err) {
-        console.error("❌ Track Event Error:", err);
-        return res.status(500).json({ error: "Server error: " + err.message });
-    }
-});
-// Enhanced ride tracking endpoint
 app.get('/rider/:tempRide', async (req, res) => {
     const { tempRide } = req.params;
     console.log(`[STEP 1] Received tempRide param: ${tempRide}`);
@@ -385,31 +328,10 @@ app.get('/rider/:tempRide', async (req, res) => {
             return res.status(404).json({ error: 'Ride not found' });
         }
 
-        // Get real-time driver location if available
-        let driverLocation = null;
-        if (ride.driver) {
-            const locationData = await pubClient.get(`location_driver_${ride.driver._id}`);
-            if (locationData) {
-                driverLocation = JSON.parse(locationData);
-            }
-        }
-
-        // Check Socket.IO connection status
-        const socketStats = getStats();
-        const isDriverOnline = ride.driver ?
-            await pubClient.get(`user_online_driver_${ride.driver._id}`) : null;
 
         return res.status(200).json({
             success: true,
-            data: {
-                ...ride.toObject(),
-                realTimeDriverLocation: driverLocation,
-                driverOnlineStatus: !!isDriverOnline,
-                socketStats: {
-                    activeRides: socketStats.activeRides,
-                    connectedDrivers: socketStats.connectedDrivers
-                }
-            }
+            data: ride
         });
 
     } catch (error) {
@@ -418,18 +340,36 @@ app.get('/rider/:tempRide', async (req, res) => {
     }
 });
 
-// Enhanced location update endpoint with real-time broadcasting
 app.post('/webhook/cab-receive-location', async (req, res, next) => {
+    console.log('--- Incoming request to /webhook/cab-receive-location ---');
+    console.log('Request Body:', req.body);
+
     if (!req.body.riderId) {
+        console.log('No riderId provided in request body, applying Protect middleware...');
         return Protect(req, res, next);
     }
-    next();
+
+    console.log('riderId found, skipping Protect middleware');
+    next(); // Proceed to the handler if riderId is provided
+
 }, async (req, res) => {
     try {
-        const { latitude, longitude, riderId, heading, speed } = req.body;
+        console.log('--- Entering location update handler ---');
 
-        let userId = riderId || req.user?.userId;
+        const { latitude, longitude, riderId } = req.body;
+        console.log('Received Data:', { latitude, longitude, riderId });
+
+        let userId;
+        if (riderId) {
+            userId = riderId;
+            console.log('Using riderId from request body:', userId);
+        } else {
+            userId = req.user?.userId;
+            // console.log('Using authenticated userId:', userId);
+        }
+
         if (!userId) {
+            console.warn('No userId available for updating location');
             return res.status(400).json({ error: 'User ID is required' });
         }
 
@@ -441,15 +381,17 @@ app.post('/webhook/cab-receive-location', async (req, res, next) => {
             lastUpdated: new Date()
         };
 
+        console.log('Updating rider location with payload:', updatePayload);
+
         const data = await RiderModel.findOneAndUpdate(
             { _id: userId },
             updatePayload,
             { upsert: true, new: true }
         );
-        console.log("Location updated successfully",userId)
-        res.status(200).json({
-            message: 'Location updated successfully'
-        });
+
+        console.log('Rider location updated:', data?.name);
+
+        res.status(200).json({ message: 'Location updated successfully' });
 
     } catch (error) {
         console.error('Error updating location:', error);
@@ -458,11 +400,10 @@ app.post('/webhook/cab-receive-location', async (req, res, next) => {
 });
 
 
-// Enhanced parcel boy location update
 app.post('/webhook/receive-location', Protect, async (req, res) => {
     try {
-        console.log("User hits", req.user);
-        const { latitude, longitude, heading, speed } = req.body;
+        console.log("user hits", req.user)
+        const { latitude, longitude } = req.body;
         const userId = req.user.userId;
 
         const data = await Parcel_boy_Location.findOneAndUpdate(
@@ -476,23 +417,7 @@ app.post('/webhook/receive-location', Protect, async (req, res) => {
             },
             { upsert: true, new: true }
         );
-
-        // Broadcast via Socket.IO
-        if (req.getIO) {
-            const locationUpdate = {
-                userId,
-                userType: 'parcel_boy',
-                latitude,
-                longitude,
-                heading: heading || null,
-                speed: speed || null,
-                timestamp: new Date().toISOString()
-            };
-
-            const io = req.getIO();
-            io.to(`tracking_parcel_boy_${userId}`).emit('parcel_boy_location', locationUpdate);
-            io.to('admins').emit('parcel_boy_location_updated', locationUpdate);
-        }
+        // console.log("data", data)
 
         res.status(200).json({ message: 'Location updated successfully' });
     } catch (error) {
@@ -503,18 +428,15 @@ app.post('/webhook/receive-location', Protect, async (req, res) => {
 
 // Root Endpoint
 app.get('/', (req, res) => {
-    const socketStats = getStats();
     res.status(200).json({
-        message: 'Welcome to the Olyox API',
+        message: 'Welcome to the API',
         timestamp: new Date().toISOString(),
-        version: '1.0.0',
-        socketStats: socketStats
+        version: '1.0.0'
     });
 });
 
-// Enhanced Health Check with Socket.IO status
+// Health Check
 app.get('/health', async (req, res) => {
-    const socketStats = getStats();
     const health = {
         status: 'UP',
         timestamp: new Date().toISOString(),
@@ -526,11 +448,6 @@ app.get('/health', async (req, res) => {
             mongodb: {
                 connected: mongoose.connection.readyState === 1,
                 status: mongoose.connection.readyState === 1 ? 'UP' : 'DOWN'
-            },
-            socketio: {
-                initialized: !!req.getIO,
-                status: !!req.getIO ? 'UP' : 'DOWN',
-                stats: socketStats
             }
         }
     };
@@ -552,19 +469,9 @@ app.get('/health', async (req, res) => {
     res.status(statusCode).json(health);
 });
 
-// Socket.IO statistics endpoint
-app.get('/socket-stats', (req, res) => {
-    const stats = getStats();
-    res.json({
-        success: true,
-        stats: stats,
-        timestamp: new Date().toISOString()
-    });
-});
-
-// Enhanced location fetch with real-time capabilities
+// Fetch Current Location
 app.post('/Fetch-Current-Location', async (req, res) => {
-    const { lat, lng, userId, userType } = req.body;
+    const { lat, lng } = req.body;
 
     if (!lat || !lng) {
         return res.status(400).json({ success: false, message: 'Latitude and longitude required' });
@@ -579,20 +486,9 @@ app.post('/Fetch-Current-Location', async (req, res) => {
             try {
                 cachedData = await pubClient.get(cacheKey);
                 if (cachedData) {
-                    const result = JSON.parse(cachedData);
-
-                    // Broadcast location update if user info provided
-                    if (userId && userType && req.sendNotificationToUser) {
-                        req.sendNotificationToUser(userId, userType, {
-                            type: 'location_fetched',
-                            data: result,
-                            source: 'cache'
-                        });
-                    }
-
                     return res.status(200).json({
                         success: true,
-                        data: result,
+                        data: JSON.parse(cachedData),
                         message: 'Location fetched from cache'
                     });
                 }
@@ -632,15 +528,6 @@ app.post('/Fetch-Current-Location', async (req, res) => {
             }
         }
 
-        // Broadcast location update if user info provided
-        if (userId && userType && req.sendNotificationToUser) {
-            req.sendNotificationToUser(userId, userType, {
-                type: 'location_fetched',
-                data: result,
-                source: 'google-api'
-            });
-        }
-
         res.status(200).json({ success: true, data: result, message: 'Location fetched' });
     } catch (err) {
         console.error(`[${new Date().toISOString()}] Location fetch error:`, err.message);
@@ -648,7 +535,7 @@ app.post('/Fetch-Current-Location', async (req, res) => {
     }
 });
 
-// Enhanced driver location endpoint with real-time tracking
+
 app.get('/driver/:id/location', async (req, res) => {
     try {
         const { id } = req.params;
@@ -657,25 +544,28 @@ app.get('/driver/:id/location', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Driver ID is required' });
         }
 
-        const driver = await RiderModel.findById(id).select('location name phone');
+        const driver = await RiderModel.findById(id);
         if (!driver) {
             return res.status(404).json({ success: false, message: 'Driver not found' });
         }
 
-        const location =  driver.location;
-
-        if (!location || !location.coordinates || location.coordinates.length < 2) {
+        if (!driver.location || !driver.location.coordinates || driver.location.coordinates.length < 2) {
             return res.status(404).json({ success: false, message: 'Driver location not available' });
         }
+
+        const lastUpdated = driver.location?.lastUpdated;
+        const timeAgo = lastUpdated ? getTimeAgo(new Date(lastUpdated)) : null;
 
         const riders = {
             id: driver._id,
             name: driver.name,
             phone: driver.phone,
             location: {
-                lat: location.coordinates ? location.coordinates[1] : location.latitude,
-                lng: location.coordinates ? location.coordinates[0] : location.longitude,
-            }
+                lat: driver.location.coordinates[1],
+                lng: driver.location.coordinates[0],
+            },
+            howOldUpdated: timeAgo,
+            lastUpdated,
         };
 
         console.log(`[${new Date().toISOString()}] Fetched driver location for ID: ${id}`);
@@ -702,10 +592,11 @@ function getTimeAgo(date) {
     return `${days} days ago`;
 }
 
-// Enhanced geo-code distance with real-time updates
+
+// Geo-code Distance
 app.post('/geo-code-distance', async (req, res) => {
     try {
-        const { pickup, dropOff, rideId } = req.body;
+        const { pickup, dropOff } = req.body;
 
         if (!pickup || !dropOff) {
             return res.status(400).json({ success: false, message: 'Pickup and dropoff addresses required' });
@@ -718,21 +609,7 @@ app.post('/geo-code-distance', async (req, res) => {
             try {
                 const cachedData = await pubClient.get(cacheKey);
                 if (cachedData) {
-                    const result = JSON.parse(cachedData);
-
-                    // Broadcast to ride room if rideId provided
-                    if (rideId && req.sendToRide) {
-                        req.sendToRide(rideId, 'distance_calculated', {
-                            ...result,
-                            source: 'cache'
-                        });
-                    }
-
-                    return res.status(200).json({
-                        success: true,
-                        ...result,
-                        fromCache: true
-                    });
+                    return res.status(200).json({ success: true, ...JSON.parse(cachedData), fromCache: true });
                 }
             } catch (cacheError) {
                 console.warn(`[${new Date().toISOString()}] Cache read error:`, cacheError.message);
@@ -794,14 +671,6 @@ app.post('/geo-code-distance', async (req, res) => {
             }
         }
 
-        // Broadcast to ride room if rideId provided
-        if (rideId && req.sendToRide) {
-            req.sendToRide(rideId, 'distance_calculated', {
-                ...result,
-                source: 'google-api'
-            });
-        }
-
         res.status(200).json({ success: true, ...result });
     } catch (err) {
         console.error(`[${new Date().toISOString()}] Geo-code distance error:`, err.message);
@@ -809,61 +678,63 @@ app.post('/geo-code-distance', async (req, res) => {
     }
 });
 
-// New Socket.IO testing endpoints
-app.post('/test-socket-notification', async (req, res) => {
-    const { userId, userType, message } = req.body;
+const ANDROID_STORE = "https://play.google.com/store/apps/details?id=com.happy_coding.olyox&hl=en_IN";
+const IOS_STORE = "https://apps.apple.com/in/app/olyox-book-cab-hotel-food/id6744582670";
 
-    if (!userId || !userType || !message) {
-        return res.status(400).json({ error: 'userId, userType, and message are required' });
-    }
 
-    try {
-        if (req.sendNotificationToUser) {
-            req.sendNotificationToUser(userId, userType, {
-                type: 'test_notification',
-                message: message,
-                timestamp: new Date().toISOString()
-            });
+const ridesTest = {
+  "64a83f42": {
+    id: "64a83f42",
+    pickup: "Sector 99A",
+    drop: "Sector 29",
+    fare: 119.18
+  }
+};
 
-            res.json({
-                success: true,
-                message: 'Notification sent via Socket.IO'
-            });
-        } else {
-            res.status(503).json({ error: 'Socket.IO not available' });
-        }
-    } catch (error) {
-        console.error('Error sending test notification:', error);
-        res.status(500).json({ error: 'Failed to send notification' });
-    }
+
+// Endpoint to share ride
+app.get("/share-ride-to-loveone/:rideId", (req, res) => {
+  const { rideId } = req.params;
+  const ride = ridesTest[rideId];
+
+  if (!ride) return res.status(404).send("Ride not found");
+
+  // Deep link to open app ride page
+  const deepLink = `https://appv2.olyox.com/share-ride-to-loveone/${rideId}`;
+
+  const userAgent = req.headers["user-agent"] || "";
+
+  // Redirect logic
+  if (/android/i.test(userAgent)) {
+    // Android: open app if installed, otherwise Play Store
+    res.send(`
+      <script>
+        window.location = "${deepLink}";
+        setTimeout(() => { window.location = "${ANDROID_STORE}"; }, 2000);
+      </script>
+    `);
+  } else if (/iphone|ipad|ipod/i.test(userAgent)) {
+    // iOS: open app if installed, otherwise App Store
+    res.send(`
+      <script>
+        window.location = "${deepLink}";
+        setTimeout(() => { window.location = "${IOS_STORE}"; }, 2000);
+      </script>
+    `);
+  } else {
+    // Fallback web page
+    res.send(`
+      <h2>Ride from ${ride.pickup} to ${ride.drop}</h2>
+      <p>Fare: ₹${ride.fare}</p>
+      <p>Download the app to see full ride details:</p>
+      <ul>
+        <li><a href="${IOS_STORE}">iOS</a></li>
+        <li><a href="${ANDROID_STORE}">Android</a></li>
+      </ul>
+    `);
+  }
 });
 
-app.post('/test-broadcast', async (req, res) => {
-    const { userType, event, message } = req.body;
-
-    if (!userType || !event || !message) {
-        return res.status(400).json({ error: 'userType, event, and message are required' });
-    }
-
-    try {
-        if (req.broadcastToUserType) {
-            req.broadcastToUserType(userType, event, {
-                message: message,
-                timestamp: new Date().toISOString()
-            });
-
-            res.json({
-                success: true,
-                message: `Broadcasted ${event} to all ${userType}s`
-            });
-        } else {
-            res.status(503).json({ error: 'Socket.IO not available' });
-        }
-    } catch (error) {
-        console.error('Error broadcasting message:', error);
-        res.status(500).json({ error: 'Failed to broadcast message' });
-    }
-});
 
 // API Routes
 app.use('/api/v1/rider', router);
@@ -875,7 +746,11 @@ app.use('/api/v1/parcel', parcel);
 app.use('/api/v1/heavy', Heavy);
 app.use('/api/v1/admin', admin);
 app.use('/api/v1/new', NewRoutes);
-
+app.use(
+  compression({
+    threshold: 0, // compress everything, even small responses
+  })
+);
 // 404 Handler
 app.use('*', (req, res) => {
     res.status(404).json({
@@ -903,10 +778,6 @@ process.on('SIGTERM', async () => {
 
     server.close(async () => {
         console.log(`[${new Date().toISOString()}] HTTP server closed`);
-
-        // Close Socket.IO connections
-        const { cleanup } = require('./socket/socketManager');
-        await cleanup();
 
         // Close Redis connection
         if (pubClient) {
@@ -951,62 +822,31 @@ process.on('uncaughtException', (error) => {
 
 
 
-
-
-
-
+// Server Startup Function
 async function startServer() {
-  try {
-    console.log(`[${new Date().toISOString()}] Starting server initialization...`);
+    const PORT = process.env.PORT || 3100;
 
-    // Connect to Redis first
-    await connectRedis();
+    try {
+        console.log(`[${new Date().toISOString()}] Starting server initialization...`);
 
-    // Connect to databases
-    await connectDatabases();
+        // Connect to Redis first
+        await connectRedis();
+        // Connect to databases
+        await connectDatabases();
 
-    // Create HTTP server
-    const server = http.createServer(app);
+        // Start the server
+        server.listen(PORT, () => {
+            console.log(`[${new Date().toISOString()}] 🚀 Server running on port ${PORT}`);
+            console.log(`Bull Board available at http://localhost:${PORT}/admin/queues`);
+            console.log(`[${new Date().toISOString()}] 🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+            console.log(`[${new Date().toISOString()}] ✅ All services connected successfully`);
+        });
 
-    // Initialize Socket.IO
-    await initializeSocket(server);
-
-    // Start listening
-    server.listen(PORT, '0.0.0.0',() => {
-      console.log(`[${new Date().toISOString()}] 🚀 Worker ${process.pid} running on port ${PORT}`);
-      console.log(`Bull Board available at http://localhost:${PORT}/admin/queues`);
-      console.log(`Socket.IO Stats available at http://localhost:${PORT}/socket-stats`);
-      console.log(`Health Check available at http://localhost:${PORT}/health`);
-      console.log(`[${new Date().toISOString()}] 🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`[${new Date().toISOString()}] ✅ All services connected successfully`);
-
-      // Log Socket.IO statistics
-      const stats = getStats();
-      console.log(`[${new Date().toISOString()}] 📊 Socket.IO initialized with Redis adapter`);
-      console.log(`[${new Date().toISOString()}] 👥 Ready to handle real-time connections`);
-    });
-
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] ❌ Worker ${process.pid} failed:`, error.message);
-    process.exit(1);
-  }
+    } catch (error) {
+        console.error(`[${new Date().toISOString()}] ❌ Failed to start server:`, error.message);
+        process.exit(1);
+    }
 }
 
-// Cluster logic
-if (cluster.isPrimary) {
-  console.log(`Master ${process.pid} is running with ${numCPUs} CPUs`);
-
-  // Fork workers
-  for (let i = 0; i < numCPUs; i++) {
-    cluster.fork();
-  }
-
-  // Restart worker if it dies
-  cluster.on("exit", (worker, code, signal) => {
-    console.log(`Worker ${worker.process.pid} died. Restarting...`);
-    cluster.fork();
-  });
-} else {
-  // Worker starts the actual server
-  startServer();
-}
+// Start the server
+startServer();
