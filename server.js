@@ -12,6 +12,7 @@ const compression = require("compression")
 // Database and Models
 const connectDb = require('./database/db');
 const { connectwebDb } = require('./PaymentWithWebDb/db');
+const TrackEvent = require('./models/Admin/Tracking');
 const rideRequestModel = require('./models/ride.request.model');
 const RiderModel = require('./models/Rider.model');
 const User = require('./models/normal_user/User.model');
@@ -230,6 +231,52 @@ app.get('/updates/:userId/:userType', async (req, res) => {
     }
 });
 
+app.post("/track", Protect, async (req, res) => {
+    try {
+        const userId = req.user?.user._id || req.user._id;  // from Protect middleware
+
+        if (!userId) {
+            return res.status(400).json({ error: "User ID is required" });
+        }
+
+        // 📦 Extract fields from body
+        const {
+
+            event,      // e.g. SCREEN_VIEW / ACTION
+            screen,     // e.g. "RideBooking"
+            action,     // e.g. "book_ride"
+            params,     // extra data
+            device,     // android / ios
+            timestamp,  // optional, else we use now
+        } = req.body;
+
+        // ✅ Basic validation
+        if (!event || !screen || !action) {
+            return res.status(400).json({
+                error: "Missing required fields: event, screen, action",
+            });
+        }
+
+        // 📌 Prepare new event object
+        const trackEvent = new TrackEvent({
+            userId,
+            event,
+            screen,
+            action,
+            params: params || {},
+            device: device || "unknown",
+            ip: req.ip,
+            timestamp: timestamp ? new Date(timestamp) : new Date(),
+        });
+
+        // 💾 Save to DB
+        await trackEvent.save();
+        return res.json({ success: true, eventId: trackEvent._id });
+    } catch (err) {
+        console.error("❌ Track Event Error:", err);
+        return res.status(500).json({ error: "Server error: " + err.message });
+    }
+});
 
 app.post('/directions', async (req, res) => {
     try {
