@@ -7,7 +7,8 @@ const mongoose = require("mongoose");
 const SendWhatsAppMessageNormal = require("../../utils/normalWhatsapp");
 const sendNotification = require("../../utils/sendNotification");
 const cron = require("node-cron");
-
+const { Worker } = require('worker_threads');
+const path = require('path');
 const jwt = require("jsonwebtoken");
 
 const scheduleRideCancellationCheck = async (redisClient, rideId) => {
@@ -2053,131 +2054,292 @@ exports.cleanupRedisRideCache = async (req, res) => {
     }
 };
 
+
+const pLimit = require("p-limit");
+
+const CONCURRENCY = 25;                 // bounded concurrency for notifications
+const RIDE_CACHE_TTL = 3600;            // 1h
+const log = (...args) => console.log("[rider-action]", ...args);
+
 exports.riderActionAcceptOrRejectRide = async (req, res) => {
-    try {
-        const { riderId, rideId, action } = req.body;
-        console.log("=== RIDER ACTION REQUEST ===");
-        console.log("Rider ID:", riderId);
-        console.log("Ride ID:", rideId);
-        console.log("Action:", action);
+  try {
+    const { riderId, rideId, action } = req.body;
 
-        // Input validation
-        if (!riderId || !rideId || !action) {
-            console.log("ERROR: Missing required fields");
-            return res.status(400).json({
-                success: false,
-                message: "Rider ID, Ride ID, and action are required.",
-            });
-        }
-
-        if (!["accept", "reject"].includes(action.toLowerCase())) {
-            console.log("ERROR: Invalid action provided");
-            return res.status(400).json({
-                success: false,
-                message: "Invalid action. Must be 'accept' or 'reject'.",
-            });
-        }
-
-        // Convert to ObjectIds
-        const riderObjectId = new mongoose.Types.ObjectId(riderId);
-        const rideObjectId = new mongoose.Types.ObjectId(rideId);
-        console.log(
-            "Converted to ObjectIds - Rider:",
-            riderObjectId,
-            "Ride:",
-            rideObjectId
-        );
-
-        // Validate rider
-        console.log("\n=== VALIDATING RIDER ===");
-        const rider = await RiderModel.findById(riderObjectId);
-        if (!rider) {
-            console.log("ERROR: Rider not found");
-            return res.status(404).json({
-                success: false,
-                message: "Rider not found.",
-            });
-        }
-
-        console.log("Rider found:", rider.name);
-        console.log("Rider available:", rider.isAvailable);
-        console.log("Rider on ride:", rider.on_ride_id);
-
-        if (!rider.isAvailable || rider.on_ride_id) {
-            console.log("ERROR: Rider not available or already on ride");
-            return res.status(400).json({
-                success: false,
-                message: "Rider is not available or is already on a ride.",
-            });
-        }
-
-        // Validate ride
-        console.log("\n=== VALIDATING RIDE ===");
-        const ride = await RideBooking.findById(rideObjectId).populate(
-            "user driver"
-        );
-        if (!ride) {
-            console.log("ERROR: Ride not found");
-            return res.status(404).json({
-                success: false,
-                message: "Ride not found.",
-            });
-        }
-
-        console.log("Ride found - ID:", ride._id);
-        console.log("Ride status:", ride.ride_status);
-        console.log("Ride user:", ride.user?.name || ride.user?.phone);
-
-        if (ride.ride_status !== "searching") {
-            console.log("ERROR: Ride not in searching status");
-            return res.status(400).json({
-                success: false,
-                message: `Ride is in ${ride.ride_status} status, cannot perform action.`,
-            });
-        }
-
-        const redisClient = getRedisClient(req);
-
-        // Handle REJECT action
-        if (action.toLowerCase() === "reject") {
-            console.log("\n=== PROCESSING REJECT ACTION ===");
-            return await handleRideRejection(
-                req,
-                res,
-                ride,
-                rider,
-                rideObjectId,
-                riderId,
-                redisClient
-            );
-        }
-
-        // Handle ACCEPT action
-        if (action.toLowerCase() === "accept") {
-            console.log("\n=== PROCESSING ACCEPT ACTION ===");
-            return await handleRideAcceptance(
-                req,
-                res,
-                ride,
-                rider,
-                riderObjectId,
-                rideObjectId,
-                riderId,
-                rideId,
-                redisClient
-            );
-        }
-    } catch (error) {
-        console.error("=== UNEXPECTED ERROR ===");
-        console.error("Error message:", error.message);
-        console.error("Error stack:", error.stack);
-        return res.status(500).json({
-            success: false,
-            message: "Server error while processing rider action.",
-            error: error.message,
-        });
+    // --- Validate input fast ---
+    if (!riderId || !rideId || !action) {
+      return res.status(400).json({ success: false, message: "Rider ID, Ride ID, and action are required." });
     }
+    const act = String(action).toLowerCase();
+    if (act !== "accept" && act !== "reject") {
+      return res.status(400).json({ success: false, message: "Invalid action. Must be 'accept' or 'reject'." });
+    }
+
+    // --- Precompute ObjectIds once ---
+    let riderObjectId, rideObjectId;
+    try {
+      riderObjectId = new mongoose.Types.ObjectId(riderId);
+      rideObjectId  = new mongoose.Types.ObjectId(rideId);
+    } catch {
+      return res.status(400).json({ success: false, message: "Invalid riderId or rideId." });
+    }
+
+    const redis = getRedisClient(req);
+
+    // --- Fetch rider (lean + projection) ---
+    const rider = await RiderModel.findById(
+      riderObjectId,
+      { _id: 1, name: 1, isAvailable: 1, on_ride_id: 1, rideVehicleInfo: 1, fcmToken: 1 }
+    ).lean();
+
+    if (!rider) {
+      return res.status(404).json({ success: false, message: "Rider not found." });
+    }
+
+    if (!rider.isAvailable || rider.on_ride_id) {
+      return res.status(400).json({ success: false, message: "Rider is not available or is already on a ride." });
+    }
+
+    // --- Fetch ride (lean + projection) ---
+    const ride = await RideBooking.findById(
+      rideObjectId,
+      {
+        _id: 1,
+        ride_status: 1,
+        user: 1,
+        pickup_address: 1,
+        drop_address: 1,
+        vehicle_type: 1,
+        pricing: 1,
+        rejected_by_drivers: 1
+      }
+    ).lean();
+
+    if (!ride) {
+      return res.status(404).json({ success: false, message: "Ride not found." });
+    }
+
+    if (ride.ride_status !== "searching") {
+      return res.status(400).json({ success: false, message: `Ride is in ${ride.ride_status} status, cannot perform action.` });
+    }
+
+    if (act === "reject") {
+      return handleRideRejectionFast({ res, ride, rider, rideObjectId, riderId, redis });
+    } else {
+      return handleRideAcceptanceFast({ req, res, ride, rider, riderObjectId, rideObjectId, riderId, redis });
+    }
+  } catch (err) {
+    log("UNEXPECTED ERROR", err.message);
+    return res.status(500).json({ success: false, message: "Server error while processing rider action.", error: err.message });
+  }
 };
+
+// ------------------------ REJECT (fast + idempotent) ------------------------
+async function handleRideRejectionFast({ res, ride, rider, rideObjectId, riderId, redis }) {
+  try {
+    // $addToSet is idempotent—no need to check "already rejected" in app code
+    const updated = await RideBooking.findOneAndUpdate(
+      { _id: rideObjectId, ride_status: "searching" },
+      {
+        $addToSet: {
+          rejected_by_drivers: { driver: rider._id, rejected_at: new Date() }
+        }
+      },
+      { new: true, projection: { _id: 1, rejected_by_drivers: 1 } }
+    ).lean();
+
+    // If ride moved on, still return success (nothing else to do)
+    if (!updated) {
+      // Clean redis membership anyway; no need to fail user
+      await safeRedisSRem(redis, ride._id, riderId);
+      return res.status(200).json({ success: true, message: "Ride rejected (no longer searching)." });
+    }
+
+    // Redis updates: remove rider from candidate set, update cached ride
+    const pipeline = redis.multi();
+    pipeline.srem(rideRidersKey(ride._id), riderId);
+    pipeline.set(rideJsonKey(ride._id), JSON.stringify(updated), "EX", RIDE_CACHE_TTL);
+    await pipeline.exec();
+
+    return res.status(200).json({ success: true, message: "Ride rejected successfully." });
+  } catch (err) {
+    log("reject error", err.message);
+    return res.status(500).json({ success: false, message: "Failed to reject ride.", error: err.message });
+  }
+}
+
+// ------------------------ ACCEPT (atomic, race-safe) ------------------------
+async function handleRideAcceptanceFast({ req, res, ride, rider, riderObjectId, rideObjectId, riderId, redis }) {
+  try {
+    // Atomic claim: flip ride_status only if still 'searching'
+    const now = new Date();
+    const acceptedRide = await RideBooking.findOneAndUpdate(
+      { _id: rideObjectId, ride_status: "searching" },
+      {
+        $set: {
+          ride_status: "driver_assigned",
+          driver: riderObjectId,
+          driver_assigned_at: now,
+          eta: 5,
+          updated_at: now
+        }
+      },
+      {
+        new: true,
+        projection: {
+          _id: 1,
+          user: 1,
+          pickup_address: 1,
+          drop_address: 1,
+          vehicle_type: 1,
+          pricing: 1,
+          eta: 1
+        }
+      }
+    ).lean();
+
+    if (!acceptedRide) {
+      // Someone else likely accepted first
+      await safeRedisSRem(redis, ride._id, riderId);
+      return res.status(400).json({ success: false, message: "Ride is no longer available." });
+    }
+
+    // Mark rider unavailable (no need for transaction for these 2 writes)
+    await RiderModel.updateOne(
+      { _id: riderObjectId, isAvailable: true, on_ride_id: { $in: [null, undefined] } },
+      { $set: { isAvailable: false, on_ride_id: rideObjectId } }
+    );
+
+    // Cache ride + drop rider from candidate set in Redis (pipeline)
+    const pipeline = redis.multi();
+    pipeline.srem(rideRidersKey(acceptedRide._id), riderId);
+    pipeline.set(rideJsonKey(acceptedRide._id), JSON.stringify(acceptedRide), "EX", RIDE_CACHE_TTL);
+    const [[, _sremRes], [, _setRes]] = await pipeline.exec();
+
+    // Respond to the acceptor ASAP (don’t block on fan-out)
+    res.status(200).json({
+      success: true,
+      message: "Ride accepted successfully.",
+      data: {
+        rideId: String(acceptedRide._id),
+        pickup: acceptedRide.pickup_address,
+        drop: acceptedRide.drop_address,
+        vehicleType: acceptedRide.vehicle_type,
+        pricing: acceptedRide.pricing,
+        driverName: rider.name,
+        vehicleDetails: rider.rideVehicleInfo,
+        eta: acceptedRide.eta ?? 5
+      }
+    });
+
+    // ---- Fire & Forget: notify user + other riders (bounded) ----
+    // 1) User notification (if token available)
+    notifyUserSafely(acceptedRide, rider).catch(() => {});
+
+    // 2) Other riders: read the set and notify with bounded concurrency
+    notifyOthersSafely(redis, String(acceptedRide._id), riderId).catch(() => {});
+  } catch (err) {
+    log("accept error", err.message);
+    return res.status(500).json({ success: false, message: "Failed to accept ride.", error: err.message });
+  }
+}
+
+// ------------------------ Helpers ------------------------
+
+function rideRidersKey(rideId) {
+  return `ride:${rideId}:riders`;
+}
+function rideJsonKey(rideId) {
+  return `ride:${rideId}:json`;
+}
+
+async function safeRedisSRem(redis, rideId, riderId) {
+  try {
+    await redis.srem(rideRidersKey(rideId), riderId);
+  } catch (e) {
+    // swallow
+  }
+}
+
+async function notifyUserSafely(acceptedRide, rider) {
+  try {
+    // Fetch user’s FCM token cheaply (projection)
+    const rideDoc = await RideBooking.findById(acceptedRide._id, { user: 1 })
+      .populate({ path: "user", select: "fcmToken name phone", options: { lean: true } });
+
+    const user = rideDoc?.user;
+    if (!user?.fcmToken) return;
+
+    await sendNotification.sendNotification(
+      user.fcmToken,
+      "Ride Accepted",
+      "Your ride request has been accepted!",
+      {
+        event: "RIDE_ACCEPTED",
+        eta: acceptedRide.eta ?? 5,
+        message: "Your ride request has been accepted!",
+        rideDetails: {
+          rideId: String(acceptedRide._id),
+          pickup: acceptedRide.pickup_address,
+          drop: acceptedRide.drop_address,
+          vehicleType: acceptedRide.vehicle_type,
+          pricing: acceptedRide.pricing,
+          driverName: rider.name,
+          vehicleDetails: rider.rideVehicleInfo
+        },
+        screen: "TrackRider",
+        riderId: rider.name
+      }
+    );
+  } catch (e) {
+    // don’t throw
+  }
+}
+
+async function notifyOthersSafely(redis, rideId, winnerRiderId) {
+  // Get all riders currently in the set, exclude the winner
+  let others = [];
+  try {
+    const members = await redis.smembers(rideRidersKey(rideId));
+    others = members.filter((id) => id !== String(winnerRiderId));
+  } catch {
+    // ignore
+  }
+
+  if (!others.length) return;
+
+  // (Optional) Clear the set entirely now that ride is taken
+  try { await redis.del(rideRidersKey(rideId)); } catch {}
+
+  // Fetch tokens for others in one query (only fcmToken)
+  const drivers = await RiderModel.find(
+    { _id: { $in: others.map((id) => new mongoose.Types.ObjectId(id)) } },
+    { _id: 1, fcmToken: 1 }
+  ).lean();
+
+  const limit = pLimit(CONCURRENCY);
+  await Promise.allSettled(
+    drivers
+      .filter((d) => d.fcmToken)
+      .map((d) =>
+        limit(() =>
+          sendNotification
+            .sendNotification(
+              d.fcmToken,
+              "Ride Unavailable",
+              "The ride you were considering is no longer available.",
+              {
+                event: "RIDE_UNAVAILABLE",
+                rideId,
+                message: "The ride you were considering is no longer available.",
+                screen: "RiderDashboard"
+              },
+              "another_driver_accept"
+            )
+            .catch(() => {})
+        )
+      )
+  );
+}
 
 exports.riderActionAcceptOrRejectRideVia = async (req, res) => {
     try {
@@ -2347,290 +2509,7 @@ exports.riderActionAcceptOrRejectRideVia = async (req, res) => {
     }
 };
 
-// Handle ride rejection
-const handleRideRejection = async (
-    req,
-    res,
-    ride,
-    rider,
-    rideObjectId,
-    riderId,
-    redisClient
-) => {
-    try {
-        console.log("Adding rider to rejected_by_drivers list");
 
-        // Check if rider already rejected this ride
-        const alreadyRejected = ride.rejected_by_drivers?.some(
-            (rejection) =>
-                rejection.driver && rejection.driver.toString() === riderId.toString()
-        );
-
-        if (alreadyRejected) {
-            console.log("WARNING: Rider already rejected this ride");
-            return res.status(400).json({
-                success: false,
-                message: "You have already rejected this ride.",
-            });
-        }
-
-        // Update ride with rejection
-        const updatedRide = await RideBooking.findByIdAndUpdate(
-            rideObjectId,
-            {
-                $addToSet: {
-                    rejected_by_drivers: {
-                        driver: rider._id,
-                        rejected_at: new Date(),
-                    },
-                },
-            },
-            { new: true }
-        );
-
-        if (!updatedRide) {
-            console.log("ERROR: Failed to update ride with rejection");
-            return res.status(404).json({
-                success: false,
-                message: "Ride not found or failed to update.",
-            });
-        }
-
-        console.log("Successfully added rejection to database");
-        console.log(
-            "Updated rejected_by_drivers:",
-            JSON.stringify(updatedRide.rejected_by_drivers, null, 2)
-        );
-
-        // Clean up Redis
-        try {
-            console.log("Cleaning up Redis data");
-            let cachedRiders = await getRidersFromRedis(
-                redisClient,
-                ride._id.toString()
-            );
-
-            if (cachedRiders && cachedRiders.length > 0) {
-                console.log("Found cached riders:", cachedRiders.length);
-                cachedRiders = cachedRiders.filter((r) => {
-                    const rId = typeof r === "string" ? r : r._id?.toString();
-                    return rId !== riderId;
-                });
-
-                await saveRidersToRedis(redisClient, ride._id.toString(), cachedRiders);
-                console.log("Rider removed from Redis cache");
-            } else {
-                console.log("No cached riders found in Redis");
-            }
-
-            // Update ride data in Redis
-            const rideKey = `ride:${ride._id}`;
-            await redisClient.set(rideKey, JSON.stringify(updatedRide), "EX", 3600);
-            console.log("Updated ride data in Redis");
-        } catch (redisError) {
-            console.error("Redis cleanup error:", redisError.message);
-            // Don't fail the request if Redis fails
-        }
-
-        console.log("=== REJECTION COMPLETED SUCCESSFULLY ===");
-        return res.status(200).json({
-            success: true,
-            message: "Ride rejected successfully.",
-        });
-    } catch (error) {
-        console.error("Error in handleRideRejection:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: "Failed to reject ride.",
-            error: error.message,
-        });
-    }
-};
-
-// Handle ride acceptance
-const handleRideAcceptance = async (
-    req,
-    res,
-    ride,
-    rider,
-    riderObjectId,
-    rideObjectId,
-    riderId,
-    rideId,
-    redisClient
-) => {
-    try {
-        console.log("Attempting to accept ride");
-
-        // Double-check ride is still available (race condition protection)
-        const currentRide = await RideBooking.findById(rideObjectId);
-        if (!currentRide || currentRide.ride_status !== "searching") {
-            console.log("ERROR: Ride no longer available");
-            return res.status(400).json({
-                success: false,
-                message: "Ride is no longer available.",
-            });
-        }
-
-        // Update ride status to accepted
-        console.log("Updating ride status to driver_assigned");
-        await RideBooking.findByIdAndUpdate(
-            rideObjectId,
-            {
-                $set: {
-                    ride_status: "driver_assigned",
-                    driver: riderObjectId,
-                    driver_assigned_at: new Date(),
-                    eta: 5,
-                    updated_at: new Date(),
-                },
-            },
-            { new: true, runValidators: true }
-        );
-
-        const updatedRide = await RideBooking.findById(rideObjectId).populate(
-            "user driver"
-        );
-
-        if (!updatedRide) {
-            console.log("ERROR: Failed to update ride status");
-            return res.status(500).json({
-                success: false,
-                message: "Failed to update ride status.",
-            });
-        }
-
-        console.log("Ride status updated successfully", updatedRide.ride_status);
-
-        console.log("Updating rider status");
-        await RiderModel.findByIdAndUpdate(riderObjectId, {
-            $set: {
-                isAvailable: false,
-                on_ride_id: rideObjectId,
-            },
-        });
-
-        console.log("Rider status updated successfully");
-
-        // Send notification to user
-        console.log("Sending notification to user");
-        if (updatedRide.user?.fcmToken) {
-            try {
-                await sendNotification.sendNotification(
-                    updatedRide.user.fcmToken,
-                    "Ride Accepted",
-                    "Your ride request has been accepted!",
-                    {
-                        event: "RIDE_ACCEPTED",
-                        eta: 5,
-                        message: "Your ride request has been accepted!",
-                        rideDetails: {
-                            rideId: updatedRide._id.toString(),
-                            pickup: updatedRide.pickup_address,
-                            drop: updatedRide.drop_address,
-                            vehicleType: updatedRide.vehicle_type,
-                            pricing: updatedRide.pricing,
-                            driverName: rider.name,
-                            vehicleDetails: rider.rideVehicleInfo,
-                        },
-                        screen: "TrackRider",
-                        riderId: rider.name,
-                    }
-                );
-                console.log("User notification sent successfully");
-            } catch (notificationError) {
-                console.error(
-                    "Failed to send user notification:",
-                    notificationError.message
-                );
-            }
-        } else {
-            console.log("No FCM token found for user");
-        }
-
-        // Notify other riders and clean up Redis
-        console.log("Notifying other riders and cleaning up Redis");
-        try {
-            let cachedRiders = await getRidersFromRedis(redisClient, rideId);
-
-            if (cachedRiders && cachedRiders.length > 0) {
-                console.log("Found cached riders:", cachedRiders.length);
-                const otherRiders = cachedRiders.filter((r) => {
-                    const rId = typeof r === "string" ? r : r._id?.toString();
-                    return rId !== riderId;
-                });
-
-                console.log("Other riders to notify:", otherRiders.length);
-                console.log("Other riders:", otherRiders);
-
-                // Notify other riders
-                for (const otherRider of otherRiders) {
-                    const token =
-                        typeof otherRider === "string" ? null : otherRider.fcmToken;
-
-                    if (token) {
-                        try {
-                            await sendNotification.sendNotification(
-                                token,
-                                "Ride Unavailable",
-                                "The ride you were considering is no longer available.",
-                                {
-                                    event: "RIDE_UNAVAILABLE",
-                                    rideId: rideId,
-                                    message:
-                                        "The ride you were considering is no longer available.",
-                                    screen: "RiderDashboard",
-                                },
-                                "another_driver_accept"
-                            );
-                            console.log("Notification sent to other rider");
-                        } catch (notificationError) {
-                            console.error(
-                                "Failed to notify other rider:",
-                                notificationError.message
-                            );
-                        }
-                    }
-                }
-
-                // Clear riders cache
-                await redisClient.del(`riders:${rideId}`);
-                console.log("Cleared riders cache from Redis");
-            }
-
-            // Update ride data in Redis
-            const rideKey = `ride:${rideId}`;
-            await redisClient.set(rideKey, JSON.stringify(updatedRide), "EX", 3600);
-            console.log("Updated ride data in Redis");
-        } catch (redisError) {
-            console.error("Redis cleanup error:", redisError.message);
-            // Don't fail the request if Redis fails
-        }
-
-        console.log("=== ACCEPTANCE COMPLETED SUCCESSFULLY ===");
-        return res.status(200).json({
-            success: true,
-            message: "Ride accepted successfully.",
-            data: {
-                rideId: updatedRide._id.toString(),
-                pickup: updatedRide.pickup_address,
-                drop: updatedRide.drop_address,
-                vehicleType: updatedRide.vehicle_type,
-                pricing: updatedRide.pricing,
-                driverName: rider.name,
-                vehicleDetails: rider.rideVehicleInfo,
-                eta: 5,
-            },
-        });
-    } catch (error) {
-        console.error("Error in handleRideAcceptance:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: "Failed to accept ride.",
-            error: error.message,
-        });
-    }
-};
 
 exports.ride_status_after_booking_for_drivers = async (req, res) => {
     try {
