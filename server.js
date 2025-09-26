@@ -358,33 +358,37 @@ app.get('/rider', async (req, res) => {
 });
 
 app.get('/rider/:tempRide', async (req, res) => {
-    const { tempRide } = req.params;
-    console.log(`[STEP 1] Received tempRide param: ${tempRide}`);
+  const { tempRide } = req.params;
 
-    if (!tempRide || !mongoose.Types.ObjectId.isValid(tempRide)) {
-        console.warn("[STEP 2] Invalid ride ID");
-        return res.status(400).json({ error: 'Invalid ride ID' });
+  if (!mongoose.Types.ObjectId.isValid(tempRide)) {
+    console.warn("[STEP 2] Invalid ride ID");
+    return res.status(400).json({ error: 'Invalid ride ID' });
+  }
+
+  try {
+    console.log("[STEP 3] Fetching ride from MongoDB...");
+
+    const ride = await NewRideModel.findById(tempRide)
+      .select("-__v -updatedAt") // optional: exclude unused ride fields
+      .populate("user", "name email number") // fetch only required user fields
+      .populate("driver", "-documents -preferences -updateLogs -RechargeData") // fetch all driver fields EXCEPT these
+      .lean()
+      .exec();
+
+    if (!ride) {
+      console.warn("[STEP 4] Ride not found in MongoDB");
+      return res.status(404).json({ error: 'Ride not found' });
     }
 
-    try {
-        console.log("[STEP 3] Fetching ride from MongoDB...");
-        const ride = await NewRideModel.findById(tempRide).populate('user').populate('driver');
+    return res.status(200).json({
+      success: true,
+      data: ride
+    });
 
-        if (!ride) {
-            console.warn("[STEP 4] Ride not found in MongoDB");
-            return res.status(404).json({ error: 'Ride not found' });
-        }
-
-
-        return res.status(200).json({
-            success: true,
-            data: ride
-        });
-
-    } catch (error) {
-        console.error(`[ERROR] ${new Date().toISOString()} Internal server error:`, error);
-        return res.status(500).json({ error: 'Internal server error' });
-    }
+  } catch (error) {
+    console.error(`[ERROR] ${new Date().toISOString()} Internal server error:`, error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 app.post('/webhook/cab-receive-location', async (req, res, next) => {
