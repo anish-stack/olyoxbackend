@@ -1339,105 +1339,75 @@ exports.cancelRideRequest = async (req, res) => {
 };
 
 exports.ride_status_after_booking = async (req, res) => {
-    try {
-        const { rideId } = req.params;
+  try {
+    const { rideId } = req.params;
 
-        console.log("🔎 Received request for ride status.");
-        console.log("📦 rideId from params new hai bilkul:", rideId);
-
-        if (!rideId) {
-            console.warn("⚠️ Ride ID not provided in request.");
-            return res.status(400).json({ message: "Ride ID is required." });
-        }
-
-        console.log(
-            "⏳ Simulating delay before fetching ride status (5 seconds)..."
-        );
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-
-        console.log("📡 Fetching ride details from database...");
-        const ride = await RideBooking.findOne({ _id: rideId }).populate("driver");
-
-        if (!ride) {
-            console.warn("❌ Ride not found for ID:", rideId);
-            return res.status(404).json({ message: "Ride not found." });
-        }
-
-        console.log("✅ Ride found:", {
-            rideId: ride._id,
-            status: ride.ride_status,
-            driver: ride.driver ? ride.driver._id : null,
-        });
-
-        let responsePayload = {
-            status: ride.ride_status,
-            message: "",
-            rideDetails: null,
-        };
-
-        switch (ride.ride_status) {
-            case "pending":
-                responsePayload.message = "Your ride request is pending confirmation.";
-                console.log("🕒 Status: pending");
-                break;
-            case "searching":
-                responsePayload.message = "Searching for a driver near you...";
-                responsePayload.rideDetails = ride;
-                console.log("🔍 Status: searching, ride details included");
-                break;
-            case "driver_assigned":
-                responsePayload.message = "Driver assigned! Your ride is on the way.";
-                responsePayload.rideDetails = ride;
-                console.log("🚗 Status: driver_assigned");
-                break;
-            case "driver_arrived":
-                responsePayload.message =
-                    "Your driver has arrived at the pickup location!";
-                responsePayload.rideDetails = ride;
-                console.log("📍 Status: driver_arrived");
-                break;
-            case "in_progress":
-                responsePayload.message = "Your ride is currently in progress.";
-                responsePayload.rideDetails = ride
-                    ? {
-                        rideId: ride._id,
-                        driverId: ride.driver._id,
-                    }
-                    : null;
-                console.log("🚕 Status: in_progress");
-                break;
-            case "completed":
-                responsePayload.message = "Your ride has been completed. Thank you!";
-                responsePayload.rideDetails = ride;
-                console.log("✅ Status: completed");
-                break;
-            case "cancelled":
-                responsePayload.message = `This ride has been cancelled${ride.cancelledBy ? ` by ${ride.cancelledBy}` : ""
-                    }.`;
-                responsePayload.rideDetails = ride;
-                console.log("❌ Status: cancelled");
-                break;
-            default:
-                responsePayload.message = "Ride status is unknown or invalid.";
-                console.warn(
-                    `⚠️ Unhandled ride status: ${ride.ride_status} for rideId: ${ride._id}`
-                );
-                break;
-        }
-
-        console.log("📤 Sending response:", responsePayload.status);
-        return res.status(200).json(responsePayload);
-    } catch (error) {
-        console.error("💥 Error fetching ride status:", error);
-        if (error.name === "CastError") {
-            console.warn("❗ Invalid Ride ID format received.");
-            return res.status(400).json({ message: "Invalid Ride ID format." });
-        }
-        return res
-            .status(500)
-            .json({ message: "Server error while fetching ride status." });
+    if (!rideId) {
+      return res.status(400).json({ message: "Ride ID is required." });
     }
+
+    const ride = await RideBooking.findOne({ _id: rideId }).populate("driver","_id");
+
+    if (!ride) {
+      return res.status(404).json({ message: "Ride not found." });
+    }
+
+    let responsePayload = {
+      status: ride.ride_status,
+      message: "",
+      rideDetails: null,
+    };
+
+    switch (ride.ride_status) {
+      case "pending":
+        responsePayload.message = "Your ride request is pending confirmation.";
+        break;
+      case "searching":
+        responsePayload.message = "Searching for a driver near you...";
+        responsePayload.rideDetails = ride;
+        break;
+      case "driver_assigned":
+        responsePayload.message = "Driver assigned! Your ride is on the way.";
+        responsePayload.rideDetails = ride;
+        break;
+      case "driver_arrived":
+        responsePayload.message =
+          "Your driver has arrived at the pickup location!";
+        responsePayload.rideDetails = ride;
+        break;
+      case "in_progress":
+        responsePayload.message = "Your ride is currently in progress.";
+        responsePayload.rideDetails = {
+          rideId: ride._id,
+          driverId: ride.driver?._id,
+        };
+        break;
+      case "completed":
+        responsePayload.message = "Your ride has been completed. Thank you!";
+        responsePayload.rideDetails = ride;
+        break;
+      case "cancelled":
+        responsePayload.message = `This ride has been cancelled${
+          ride.cancelledBy ? ` by ${ride.cancelledBy}` : ""
+        }.`;
+        responsePayload.rideDetails = ride;
+        break;
+      default:
+        responsePayload.message = "Ride status is unknown or invalid.";
+        break;
+    }
+
+    return res.status(200).json(responsePayload);
+  } catch (error) {
+    if (error.name === "CastError") {
+      return res.status(400).json({ message: "Invalid Ride ID format." });
+    }
+    return res
+      .status(500)
+      .json({ message: "Server error while fetching ride status." });
+  }
 };
+
 
 const isRideAllowedByPreferences = (rideVehicleType, rider) => {
     const driverType = rider?.rideVehicleInfo?.vehicleType?.trim();
@@ -4005,48 +3975,3 @@ exports.FindRiderNearByUser = async (req, res) => {
     }
 };
 
-cron.schedule("*/10 * * * * *", async () => {
-    try {
-        // console.log('🕒 Running scheduled ride cleanup job...');
-
-        const currentTime = new Date();
-        const oneMinuteAgo = new Date(currentTime.getTime() - 1 * 60 * 1000);
-
-        // Find rides still pending or searching and older than 1 minute
-        const allRides = await RideBooking.find({
-            ride_status: { $in: ["pending", "searching"] },
-            requested_at: { $lte: oneMinuteAgo }, // ✅ Fixed field name
-        })
-            .populate("user")
-            .populate("driver");
-
-        if (allRides.length === 0) {
-            // console.log('✅ No rides to cancel. All clean.');
-            return;
-        }
-
-        // console.log(`🔍 Found ${allRides.length} outdated rides. Cleaning up...`);
-
-        for (const ride of allRides) {
-            // console.log(`⛔ Cancelling ride ${ride._id} requested at ${ride.requested_at}`);
-
-            ride.ride_status = "cancelled";
-            ride.cancelled_at = new Date();
-            ride.cancellation_reason = "Auto-cancelled due to inactivity";
-            ride.cancelled_by = "system";
-
-            if (ride.user) {
-                ride.user.currentRide = null;
-                await ride.user.save();
-                console.log(`👤 Cleared currentRide for user ${ride.user._id}`);
-            }
-
-            await ride.save();
-            // console.log(`✅ Ride ${ride._id} cancelled successfully`);
-        }
-
-        // console.log('🎯 Ride cleanup job completed.');
-    } catch (error) {
-        console.error("❌ Error in ride cleanup cron job:", error.message);
-    }
-});
