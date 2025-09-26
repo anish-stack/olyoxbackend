@@ -8,9 +8,10 @@ const rateLimit = require('express-rate-limit');
 const axios = require('axios');
 require('dotenv').config();
 const compression = require("compression");
-const cron = require('node-cron');
-const path = require('path');
-const fs = require('fs');
+const cluster = require('cluster')
+const os = require('os')
+const PORT = process.env.PORT || 3100;
+const numCPUs = os.cpus().length;
 // Import Socket.IO manager
 const { initSocket, getIO, getStats, sendNotificationToUser, broadcastToUserType, sendToRide } = require('./socket/socketManager');
 
@@ -1067,150 +1068,63 @@ process.on('uncaughtException', (error) => {
 });
 
 
-let notifications = [];
-let notifArray = [];
-let todayDate = "";
-let currentDay = 2;
 
 
 
-const dayMap = {
-    "2025-09-23": "day2.json",
-    "2025-09-24": "day3.json",
-    "2025-09-25": "day3.json",
-    "2025-09-26": "day4.json",
-    "2025-09-27": "day5.json",
-    "2025-09-28": "day6.json",
-    "2025-09-29": "day7.json",
-    "2025-09-30": "day8.json",
-    "2025-10-01": "day9.json",
-    "2025-10-02": "day10.json",
-};
 
-// 📌 Load notifications for current date
-async function loadDayNotifications() {
-    todayDate = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-    const fileName = dayMap[todayDate];
-    if (!fileName) {
-        console.log(`⚠️ No notification mapping for ${todayDate}`);
-        notifications = [];
-        notifArray = [];
-        return;
-    }
 
-    const filePath = path.join(__dirname, "Notifications", fileName);
-    if (fs.existsSync(filePath)) {
-        const data = fs.readFileSync(filePath);
-        notifications = JSON.parse(data);
-        notifArray = Object.values(notifications)[0];
-        console.log(`✅ Loaded notifications from ${fileName}`);
-    } else {
-        notifications = [];
-        notifArray = [];
-        console.log(`⚠️ File not found: ${filePath}`);
-    }
-
-    // create log doc if not exist
-    let log = await SentLog.findOne({ date: todayDate });
-    if (!log) {
-        await SentLog.create({ date: todayDate, sentIndexes: [] });
-    }
-}
-
-// // 📌 Har ghante ek notification
-
-// cron.schedule(
-//     "0 * * * *",
-//     async () => {
-//         try {
-//             let log = await SentLog.findOne({ date: todayDate });
-//             if (!log) return;
-
-//             // next unsent notification
-//             let idx = notifArray.findIndex((_, i) => !log.sentIndexes.includes(i));
-//             if (idx === -1) {
-//                 console.log("✅ All notifications sent for today!");
-//                 return;
-//             }
-
-//             let { title, message } = notifArray[idx];
-
-//             // ✅ mark as sent before sending
-//             log.sentIndexes.push(idx);
-//             await log.save();
-
-//             // send to all users
-//             const users = await userModel.find({}, "fcmToken");
-//             for (let user of users) {
-//                 if (user.fcmToken) {
-//                     try {
-//                         await sendNotification.sendNotification(user.fcmToken, title, message);
-//                         console.log(`📤 Sent to ${user._id || "user"} => ${title}`);
-//                     } catch (sendErr) {
-//                         console.error(`❌ Failed for ${user._id || "user"}:`, sendErr.message);
-//                     }
-//                 }
-//             }
-
-//             console.log(`✅ Notification #${idx + 1} sent: ${title}`);
-//         } catch (err) {
-//             console.error("❌ Error in cron job:", err);
-//         }
-//     },
-//     { timezone: "Asia/Kolkata" }
-// );
-
-// // 📌 Midnight → reload next day's JSON
-// cron.schedule(
-//     "0 0 * * *",
-//     async () => {
-//         await loadDayNotifications();
-//     },
-//     { timezone: "Asia/Kolkata" }
-// );
-
-// // 📌 Initial load
-// (async () => {
-//     await loadDayNotifications();
-// })();
-// Server Startup Function
 async function startServer() {
-    const PORT = process.env.PORT || 3100;
+  try {
+    console.log(`[${new Date().toISOString()}] Starting server initialization...`);
 
-    try {
-        console.log(`[${new Date().toISOString()}] Starting server initialization...`);
+    // Connect to Redis first
+    await connectRedis();
 
-        // Connect to Redis first
-        await connectRedis();
+    // Connect to databases
+    await connectDatabases();
 
-        // Connect to databases
-        await connectDatabases();
+    // Create HTTP server
+    const server = http.createServer(app);
 
-        // Initialize Socket.IO
-        await initializeSocket();
+    // Initialize Socket.IO
+    await initializeSocket(server);
 
-        // Start the server
-        server.listen(PORT, () => {
-            console.log(`[${new Date().toISOString()}] 🚀 Server running on port ${PORT}`);
-            console.log(`Bull Board available at http://localhost:${PORT}/admin/queues`);
-            console.log(`Socket.IO Stats available at http://localhost:${PORT}/socket-stats`);
-            console.log(`Health Check available at http://localhost:${PORT}/health`);
-            console.log(`[${new Date().toISOString()}] 🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-            console.log(`[${new Date().toISOString()}] ✅ All services connected successfully`);
+    // Start listening
+    server.listen(PORT, () => {
+      console.log(`[${new Date().toISOString()}] 🚀 Worker ${process.pid} running on port ${PORT}`);
+      console.log(`Bull Board available at http://localhost:${PORT}/admin/queues`);
+      console.log(`Socket.IO Stats available at http://localhost:${PORT}/socket-stats`);
+      console.log(`Health Check available at http://localhost:${PORT}/health`);
+      console.log(`[${new Date().toISOString()}] 🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`[${new Date().toISOString()}] ✅ All services connected successfully`);
 
-            // Log Socket.IO statistics
-            const stats = getStats();
-            console.log(`[${new Date().toISOString()}] 📊 Socket.IO initialized with Redis adapter`);
-            console.log(`[${new Date().toISOString()}] 👥 Ready to handle real-time connections`);
-        });
+      // Log Socket.IO statistics
+      const stats = getStats();
+      console.log(`[${new Date().toISOString()}] 📊 Socket.IO initialized with Redis adapter`);
+      console.log(`[${new Date().toISOString()}] 👥 Ready to handle real-time connections`);
+    });
 
-    } catch (error) {
-        console.error(`[${new Date().toISOString()}] ❌ Failed to start server:`, error.message);
-        process.exit(1);
-    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Worker ${process.pid} failed:`, error.message);
+    process.exit(1);
+  }
 }
 
+// Cluster logic
+if (cluster.isPrimary) {
+  console.log(`Master ${process.pid} is running with ${numCPUs} CPUs`);
 
+  // Fork workers
+  for (let i = 0; i < numCPUs; i++) {
+    cluster.fork();
+  }
 
-// Start the server
-startServer();
+  // Restart worker if it dies
+  cluster.on("exit", (worker, code, signal) => {
+    console.log(`Worker ${worker.process.pid} died. Restarting...`);
+    cluster.fork();
+  });
+} else {
+  // Worker starts the actual server
+  startServer();
+}
