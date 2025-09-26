@@ -752,7 +752,7 @@ app.get('/driver/:id/location', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Driver ID is required' });
         }
 
-        const driver = await RiderModel.findById(id);
+        const driver = await RiderModel.findById(id).select('location name phone');
         if (!driver) {
             return res.status(404).json({ success: false, message: 'Driver not found' });
         }
