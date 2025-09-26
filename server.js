@@ -12,6 +12,9 @@ const cluster = require('cluster')
 const os = require('os')
 const PORT = process.env.PORT || 3100;
 const numCPUs = os.cpus().length;
+
+
+console.log("numCPUs",numCPUs)
 // Import Socket.IO manager
 const { initSocket, getIO, getStats, sendNotificationToUser, broadcastToUserType, sendToRide } = require('./socket/socketManager');
 
