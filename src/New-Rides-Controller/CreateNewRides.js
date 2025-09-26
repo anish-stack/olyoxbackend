@@ -744,6 +744,8 @@ const initiateDriverSearch = async (rideId, req, res) => {
                     // ✅ Special case: Bike → always accept, ignore prefs
                     if (vType === "BIKE" && dType === "BIKE") {
                         decision = true;
+                    } else if (vType === "AUTO") {
+                        decision = true;
                     } else if (vType === "MINI") {
                         decision =
                             dType === "MINI" ||
@@ -1339,73 +1341,72 @@ exports.cancelRideRequest = async (req, res) => {
 };
 
 exports.ride_status_after_booking = async (req, res) => {
-  try {
-    const { rideId } = req.params;
+    try {
+        const { rideId } = req.params;
 
-    if (!rideId) {
-      return res.status(400).json({ message: "Ride ID is required." });
-    }
+        if (!rideId) {
+            return res.status(400).json({ message: "Ride ID is required." });
+        }
 
-    const ride = await RideBooking.findOne({ _id: rideId }).populate("driver","_id");
+        const ride = await RideBooking.findOne({ _id: rideId }).populate("driver", "_id");
 
-    if (!ride) {
-      return res.status(404).json({ message: "Ride not found." });
-    }
+        if (!ride) {
+            return res.status(404).json({ message: "Ride not found." });
+        }
 
-    let responsePayload = {
-      status: ride.ride_status,
-      message: "",
-      rideDetails: null,
-    };
-
-    switch (ride.ride_status) {
-      case "pending":
-        responsePayload.message = "Your ride request is pending confirmation.";
-        break;
-      case "searching":
-        responsePayload.message = "Searching for a driver near you...";
-        responsePayload.rideDetails = ride;
-        break;
-      case "driver_assigned":
-        responsePayload.message = "Driver assigned! Your ride is on the way.";
-        responsePayload.rideDetails = ride;
-        break;
-      case "driver_arrived":
-        responsePayload.message =
-          "Your driver has arrived at the pickup location!";
-        responsePayload.rideDetails = ride;
-        break;
-      case "in_progress":
-        responsePayload.message = "Your ride is currently in progress.";
-        responsePayload.rideDetails = {
-          rideId: ride._id,
-          driverId: ride.driver?._id,
+        let responsePayload = {
+            status: ride.ride_status,
+            message: "",
+            rideDetails: null,
         };
-        break;
-      case "completed":
-        responsePayload.message = "Your ride has been completed. Thank you!";
-        responsePayload.rideDetails = ride;
-        break;
-      case "cancelled":
-        responsePayload.message = `This ride has been cancelled${
-          ride.cancelledBy ? ` by ${ride.cancelledBy}` : ""
-        }.`;
-        responsePayload.rideDetails = ride;
-        break;
-      default:
-        responsePayload.message = "Ride status is unknown or invalid.";
-        break;
-    }
 
-    return res.status(200).json(responsePayload);
-  } catch (error) {
-    if (error.name === "CastError") {
-      return res.status(400).json({ message: "Invalid Ride ID format." });
+        switch (ride.ride_status) {
+            case "pending":
+                responsePayload.message = "Your ride request is pending confirmation.";
+                break;
+            case "searching":
+                responsePayload.message = "Searching for a driver near you...";
+                responsePayload.rideDetails = ride;
+                break;
+            case "driver_assigned":
+                responsePayload.message = "Driver assigned! Your ride is on the way.";
+                responsePayload.rideDetails = ride;
+                break;
+            case "driver_arrived":
+                responsePayload.message =
+                    "Your driver has arrived at the pickup location!";
+                responsePayload.rideDetails = ride;
+                break;
+            case "in_progress":
+                responsePayload.message = "Your ride is currently in progress.";
+                responsePayload.rideDetails = {
+                    rideId: ride._id,
+                    driverId: ride.driver?._id,
+                };
+                break;
+            case "completed":
+                responsePayload.message = "Your ride has been completed. Thank you!";
+                responsePayload.rideDetails = ride;
+                break;
+            case "cancelled":
+                responsePayload.message = `This ride has been cancelled${ride.cancelledBy ? ` by ${ride.cancelledBy}` : ""
+                    }.`;
+                responsePayload.rideDetails = ride;
+                break;
+            default:
+                responsePayload.message = "Ride status is unknown or invalid.";
+                break;
+        }
+
+        return res.status(200).json(responsePayload);
+    } catch (error) {
+        if (error.name === "CastError") {
+            return res.status(400).json({ message: "Invalid Ride ID format." });
+        }
+        return res
+            .status(500)
+            .json({ message: "Server error while fetching ride status." });
     }
-    return res
-      .status(500)
-      .json({ message: "Server error while fetching ride status." });
-  }
 };
 
 
