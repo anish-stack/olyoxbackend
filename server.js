@@ -972,7 +972,7 @@ async function startServer() {
     await initializeSocket(server);
 
     // Start listening
-    server.listen(PORT, () => {
+    server.listen(PORT, '0.0.0.0',() => {
       console.log(`[${new Date().toISOString()}] 🚀 Worker ${process.pid} running on port ${PORT}`);
       console.log(`Bull Board available at http://localhost:${PORT}/admin/queues`);
       console.log(`Socket.IO Stats available at http://localhost:${PORT}/socket-stats`);
