@@ -867,28 +867,29 @@ exports.details = async (req, res) => {
   try {
     const userId = req.user?.userId;
 
-    // Check if userId exists
     if (!userId) {
-      return res.status(400).json({ message: "User ID is required" });
+      return res.status(400).json({ success: false, message: "User ID is required" });
     }
 
-    // Find the partner
-    const partner = await Rider.findById(userId);
-    // console.log(partner)
-    // If partner not found, return error
+    // Only fetch required fields (projection for speed)
+    const partner = await Rider.findById(userId)
+      .select("-rides -preferences -recentRejections -updateLogs -activityLog") // space separated
+      .lean(); // return plain JS object → faster than Mongoose doc
+
     if (!partner) {
-      return res.status(404).json({ message: "Partner not found" });
+      return res.status(404).json({ success: false, message: "Partner not found" });
     }
 
-    // Return response
     return res.status(200).json({ success: true, partner });
   } catch (error) {
-    console.error("Error fetching partner details:", error);
-    return res
-      .status(500)
-      .json({ message: "Server error", error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
+
 
 exports.getMyAllDetails = async (req, res) => {
   try {
