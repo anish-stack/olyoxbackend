@@ -757,31 +757,11 @@ app.get('/driver/:id/location', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Driver not found' });
         }
 
-        // Get real-time location from Redis
-        let realtimeLocation = null;
-        try {
-            const locationData = await pubClient.get(`location_driver_${id}`);
-            if (locationData) {
-                realtimeLocation = JSON.parse(locationData);
-            }
-        } catch (error) {
-            console.warn('Error fetching realtime location:', error.message);
-        }
-
-        // Use realtime location if available, otherwise use database location
-        const location = realtimeLocation || driver.location;
+        const location =  driver.location;
 
         if (!location || !location.coordinates || location.coordinates.length < 2) {
             return res.status(404).json({ success: false, message: 'Driver location not available' });
         }
-
-        const lastUpdated = realtimeLocation ?
-            new Date(realtimeLocation.timestamp) :
-            driver.location?.lastUpdated;
-        const timeAgo = lastUpdated ? getTimeAgo(new Date(lastUpdated)) : null;
-
-        // Check online status
-        const isOnline = await pubClient.get(`user_online_driver_${id}`);
 
         const riders = {
             id: driver._id,
@@ -790,13 +770,7 @@ app.get('/driver/:id/location', async (req, res) => {
             location: {
                 lat: location.coordinates ? location.coordinates[1] : location.latitude,
                 lng: location.coordinates ? location.coordinates[0] : location.longitude,
-            },
-            heading: realtimeLocation?.heading || null,
-            speed: realtimeLocation?.speed || null,
-            howOldUpdated: timeAgo,
-            lastUpdated,
-            isOnline: !!isOnline,
-            hasRealtimeData: !!realtimeLocation
+            }
         };
 
         console.log(`[${new Date().toISOString()}] Fetched driver location for ID: ${id}`);
