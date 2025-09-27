@@ -252,7 +252,7 @@ exports.updateRechargeDetails = async (req, res) => {
 
 exports.login = async (req, res) => {
   try {
-    const { number, otpType, fcmToken } = req.body;
+    const { number, otpType, fcmToken, AppVersion } = req.body;
 
     if (!number) {
       return res.status(400).json({
@@ -316,6 +316,7 @@ exports.login = async (req, res) => {
         {
           $set: {
             otp,
+            AppVersion: AppVersion || "1.0.1",
             fcmToken: fcmToken || partner.fcmToken,
             isOtpBlock: false,
             otpUnblockAfterThisTime: null,
@@ -1102,7 +1103,7 @@ exports.toggleWorkStatusOfRider = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: `Status updated to ${newStatus ? "Available (Online)" : "Unavailable (Offline)"} successfully.`,
-      cabRider:cabRider?.status,
+      cabRider: cabRider?.status,
     });
   } catch (error) {
     console.error("Error toggling work status:", error);

@@ -237,6 +237,10 @@ const RiderSchema = new Schema({
     BH: {
         type: String
     },
+    AppVersion:{
+        type:String,
+        default:"1.0.1"
+    },
     on_ride_id: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'TempRideDetails'
