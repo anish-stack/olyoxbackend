@@ -284,6 +284,45 @@ app.post("/track", Protect, async (req, res) => {
     }
 });
 
+
+app.get('/track/user/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "No ID provided"
+            });
+        }
+
+        const findTrack = await TrackEvent.find({ userId: id })
+            .select('-userId')
+            .sort({ createdAt: -1 });
+
+        if (!findTrack || findTrack.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "No track events found for this user"
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            count: findTrack.length,
+            data: findTrack
+        });
+    } catch (error) {
+        console.error("Error fetching track events:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error",
+            error: error.message
+        });
+    }
+});
+
+
 app.post('/directions', async (req, res) => {
     try {
         const data = req.body || {};
