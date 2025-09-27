@@ -74,7 +74,7 @@ async function getSystemInfo() {
 async function checkPM2() {
     return new Promise((resolve) => {
         // Fixed: pm2 jlist -> pm2 list (or pm2 jlist for JSON)
-        exec("pm2 jlist", async (err, stdout) => {
+        exec("/root/.nvm/versions/node/v22.20.0/bin/pm2 jlist", async (err, stdout) => {
             if (err) {
                 await log("❌ Error fetching PM2 list: " + err.message, true);
                 return resolve();
@@ -135,7 +135,10 @@ async function checkPM2() {
 async function checkMongo() {
     try {
         await log("🔍 Checking MongoDB Atlas connection...", MONGO_URI);
-
+        if (!process.env.MONGO_DB_URL) {
+            await log("❌ MongoDB Atlas URI not set (MONGO_URI missing in .env)");
+            return;
+        }
         const start = Date.now();
 
         await mongoose.connect(process.env.MONGO_DB_URL, {
