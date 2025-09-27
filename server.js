@@ -439,14 +439,14 @@ app.post('/webhook/cab-receive-location', Protect, async (req, res) => {
         console.log(`📦 Cached in Redis for rider ${riderId}:`);
 
         // ✅ Accuracy filter
-        if (accuracy && accuracy > 10) {
-            //   console.log(`⏩ Skip DB update for ${riderId}: poor accuracy (${accuracy}m)`);
-            return res.status(200).json({
-                message: "Location cached (DB skipped due to accuracy)",
-                dbUpdated: false,
-                data: locationData,
-            });
-        }
+        // if (accuracy && accuracy > 10) {
+        //     //   console.log(`⏩ Skip DB update for ${riderId}: poor accuracy (${accuracy}m)`);
+        //     return res.status(200).json({
+        //         message: "Location cached (DB skipped due to accuracy)",
+        //         dbUpdated: false,
+        //         data: locationData,
+        //     });
+        // }
 
         // ✅ Check previous location (skip if moved <20m)
         const prev = await RiderModel.findById(riderId, { location: 1 }).lean();
@@ -464,11 +464,11 @@ app.post('/webhook/cab-receive-location', Protect, async (req, res) => {
             }
         }
 
-        // ✅ Speed convert (m/s → km/h)
-        let speedKmh = null;
-        if (typeof speed === "number") {
-            speedKmh = (speed * 3.6).toFixed(2);
-        }
+        // // ✅ Speed convert (m/s → km/h)
+        // let speedKmh = null;
+        // if (typeof speed === "number") {
+        //     speedKmh = (speed * 3.6).toFixed(2);
+        // }
 
         // ✅ DB update
         const updatedDoc = await RiderModel.findOneAndUpdate(
@@ -805,7 +805,7 @@ app.get("/share-ride-to-loveone/:rideId", (req, res) => {
     if (!ride) return res.status(404).send("Ride not found");
 
     // Deep link to open app ride page
-    const deepLink = `http://192.168.1.15:3200/share-ride-to-loveone/${rideId}`;
+    const deepLink = `https://appv2.olyox.com/share-ride-to-loveone/${rideId}`;
 
     const userAgent = req.headers["user-agent"] || "";
 
