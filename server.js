@@ -32,7 +32,12 @@ const admin = require('./routes/Admin/admin.routes');
 const Heavy = require('./routes/Heavy_vehicle/Heavy.routes');
 const NewRoutes = require('./routes/New/New.routes');
 const sendNotification = require('./utils/sendNotification');
+const cluster = require("cluster");
+const os = require("os");
 
+// Number of CPU cores
+const numCPUs = os.cpus().length;
+console.log("numCPUs", numCPUs)
 // Controllers and Middleware
 const {
     ChangeRideRequestByRider,
@@ -55,6 +60,7 @@ const {
 } = require('./driver');
 const Protect = require('./middleware/Auth');
 const { debugIOSNotification } = require('./utils/DebugNotifications');
+const locationQueue = require('./queues/LocationQue');
 
 // Initialize Express and Server
 const app = express();
@@ -139,19 +145,19 @@ async function connectDatabases() {
 
 
 async function sendPushNotification(expoPushTokens, title, body) {
- try {
-  const response = await sendNotification.sendNotification(
-    'f_tdIVaMTJyvTYwxrNtD8m:APA91bEyIBblc-oy_YdseEKWbXNor-kA_GYdniMi2BluhBkkvvjlg_QM-vXIJZdpcwh8j6L0yKWa_dNNygctLD1i9fCsPJbkLYVHGtFIMpe8DNseoHfA_ec',
-    '🚖 Ride Request',
-    'A new rider has booked a cab. Tap to view details.',
-    { rideId: '12345', type: 'newBooking' }, // extra data
-    true // Android flag if your fn supports it
-  );
+    try {
+        const response = await sendNotification.sendNotification(
+            'f_tdIVaMTJyvTYwxrNtD8m:APA91bEyIBblc-oy_YdseEKWbXNor-kA_GYdniMi2BluhBkkvvjlg_QM-vXIJZdpcwh8j6L0yKWa_dNNygctLD1i9fCsPJbkLYVHGtFIMpe8DNseoHfA_ec',
+            '🚖 Ride Request',
+            'A new rider has booked a cab. Tap to view details.',
+            { rideId: '12345', type: 'newBooking' }, // extra data
+            true // Android flag if your fn supports it
+        );
 
-  console.log("✅ Notification sent successfully:", response);
-} catch (error) {
-  console.error("❌ Failed to send notification:", error);
-}
+        console.log("✅ Notification sent successfully:", response);
+    } catch (error) {
+        console.error("❌ Failed to send notification:", error);
+    }
 }
 
 // sendNotification.sendTestNotification("cTVlPvzWqE6WhQPcL87uQT:APA91bF-TV2a1TtNtrIJg_7iWtnb9kUfX8BhyHypQ-ZeAfMa3Dw_FtONXwCXnNnP-OcxxzNx4nRpIIP2G5OkXNA1ZRyBSSGerJ60lWUTIrhK0eQhB7oBFFw", "ios");
@@ -282,7 +288,7 @@ app.post('/directions', async (req, res) => {
     try {
         const data = req.body || {};
 
-   
+
 
         if (!data?.pickup?.latitude || !data?.pickup?.longitude || !data?.dropoff?.latitude || !data?.dropoff?.longitude) {
             return res.status(400).json({ error: 'Invalid pickup or dropoff location data' });
@@ -358,98 +364,146 @@ app.get('/rider', async (req, res) => {
 });
 
 app.get('/rider/:tempRide', async (req, res) => {
-  const { tempRide } = req.params;
+    const { tempRide } = req.params;
 
-  if (!mongoose.Types.ObjectId.isValid(tempRide)) {
-    console.warn("[STEP 2] Invalid ride ID");
-    return res.status(400).json({ error: 'Invalid ride ID' });
-  }
-
-  try {
-    console.log("[STEP 3] Fetching ride from MongoDB...");
-
-    const ride = await NewRideModel.findById(tempRide)
-      .select("-__v -updatedAt") // optional: exclude unused ride fields
-      .populate("user", "name email number") // fetch only required user fields
-      .populate("driver", "-documents -preferences -updateLogs -RechargeData") // fetch all driver fields EXCEPT these
-      .lean()
-      .exec();
-
-    if (!ride) {
-      console.warn("[STEP 4] Ride not found in MongoDB");
-      return res.status(404).json({ error: 'Ride not found' });
+    if (!mongoose.Types.ObjectId.isValid(tempRide)) {
+        console.warn("[STEP 2] Invalid ride ID");
+        return res.status(400).json({ error: 'Invalid ride ID' });
     }
 
-    return res.status(200).json({
-      success: true,
-      data: ride
-    });
+    try {
+        console.log("[STEP 3] Fetching ride from MongoDB...");
 
-  } catch (error) {
-    console.error(`[ERROR] ${new Date().toISOString()} Internal server error:`, error);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
+        const ride = await NewRideModel.findById(tempRide)
+            .select("-__v -updatedAt") // optional: exclude unused ride fields
+            .populate("user", "name email number") // fetch only required user fields
+            .populate("driver", "-documents -preferences -updateLogs -RechargeData") // fetch all driver fields EXCEPT these
+            .lean()
+            .exec();
+
+        if (!ride) {
+            console.warn("[STEP 4] Ride not found in MongoDB");
+            return res.status(404).json({ error: 'Ride not found' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: ride
+        });
+
+    } catch (error) {
+        console.error(`[ERROR] ${new Date().toISOString()} Internal server error:`, error);
+        return res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
-app.post('/webhook/cab-receive-location', async (req, res, next) => {
-    console.log('--- Incoming request to /webhook/cab-receive-location ---');
-    console.log('Request Body:', req.body);
+const GEO_UPDATE_TTL = 30;
+function haversineDistance(lat1, lon1, lat2, lon2) {
+    const toRad = (x) => (x * Math.PI) / 180;
+    const R = 6371e3; // metres
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
-    if (!req.body.riderId) {
-        console.log('No riderId provided in request body, applying Protect middleware...');
-        return Protect(req, res, next);
-    }
-
-    console.log('riderId found, skipping Protect middleware');
-    next(); // Proceed to the handler if riderId is provided
-
-}, async (req, res) => {
+app.post('/webhook/cab-receive-location', Protect, async (req, res) => {
     try {
-        console.log('--- Entering location update handler ---');
+        const riderId = req.user?.userId;
+        const { latitude, longitude, accuracy, speed, timestamp, platform } = req.body;
 
-        const { latitude, longitude, riderId } = req.body;
-        console.log('Received Data:', { latitude, longitude, riderId });
+        if (!riderId) return Protect(req, res);
 
-        let userId;
-        if (riderId) {
-            userId = riderId;
-            console.log('Using riderId from request body:', userId);
-        } else {
-            userId = req.user?.userId;
-            // console.log('Using authenticated userId:', userId);
-        }
+        const now = timestamp || Date.now();
 
-        if (!userId) {
-            console.warn('No userId available for updating location');
-            return res.status(400).json({ error: 'User ID is required' });
-        }
-
-        const updatePayload = {
-            location: {
-                type: 'Point',
-                coordinates: [longitude, latitude]
-            },
-            lastUpdated: new Date()
+        // ✅ Redis cache
+        const locationData = {
+            riderId,
+            latitude,
+            longitude,
+            accuracy,
+            speed,
+            platform: platform || 'unknown',
+            timestamp: now,
         };
 
-        console.log('Updating rider location with payload:', updatePayload);
+        await pubClient.setEx(
+            `rider:location:${riderId}`,
+            GEO_UPDATE_TTL,
+            JSON.stringify(locationData)
+        );
 
-        const data = await RiderModel.findOneAndUpdate(
-            { _id: userId },
-            updatePayload,
+        console.log(`📦 Cached in Redis for rider ${riderId}:`);
+
+        // ✅ Accuracy filter
+        if (accuracy && accuracy > 10) {
+            //   console.log(`⏩ Skip DB update for ${riderId}: poor accuracy (${accuracy}m)`);
+            return res.status(200).json({
+                message: "Location cached (DB skipped due to accuracy)",
+                dbUpdated: false,
+                data: locationData,
+            });
+        }
+
+        // ✅ Check previous location (skip if moved <20m)
+        const prev = await RiderModel.findById(riderId, { location: 1 }).lean();
+        if (prev?.location?.coordinates?.length === 2) {
+            const [prevLng, prevLat] = prev.location.coordinates;
+            const distance = haversineDistance(prevLat, prevLng, latitude, longitude);
+
+            if (distance < 20) {
+                // console.log(`⏩ Skip DB update for ${riderId}: moved only ${distance.toFixed(1)}m`);
+                return res.status(200).json({
+                    message: "Location cached (DB skipped due to low movement)",
+                    dbUpdated: false,
+                    data: locationData,
+                });
+            }
+        }
+
+        // ✅ Speed convert (m/s → km/h)
+        let speedKmh = null;
+        if (typeof speed === "number") {
+            speedKmh = (speed * 3.6).toFixed(2);
+        }
+
+        // ✅ DB update
+        const updatedDoc = await RiderModel.findOneAndUpdate(
+            { _id: riderId },
+            {
+                location: { type: "Point", coordinates: [longitude, latitude] },
+                lastUpdated: new Date(now)
+            },
             { upsert: true, new: true }
         );
 
-        console.log('Rider location updated:', data?.name);
+        if (updatedDoc) {
+            console.log(`💾 DB updated for rider ${riderId}:`, {
+                name: updatedDoc.name,
+                coords: updatedDoc.location?.coordinates
+            });
 
-        res.status(200).json({ message: 'Location updated successfully' });
-
-    } catch (error) {
-        console.error('Error updating location:', error);
-        res.status(500).json({ error: 'Internal server error' });
+            return res.status(200).json({
+                message: "Location cached and updated successfully",
+                dbUpdated: true,
+                data: locationData,
+            });
+        } else {
+            console.log(`⚠️ Rider ${riderId} not found in DB`);
+            return res.status(200).json({
+                message: "Location cached (DB not found)",
+                dbUpdated: false,
+                data: locationData,
+            });
+        }
+    } catch (err) {
+        console.error("❌ Error handling location update:", err.message);
+        res.status(500).json({ error: "Internal server error" });
     }
 });
-
 
 app.post('/webhook/receive-location', Protect, async (req, res) => {
     try {
@@ -734,47 +788,47 @@ const IOS_STORE = "https://apps.apple.com/in/app/olyox-book-cab-hotel-food/id674
 
 
 const ridesTest = {
-  "64a83f42": {
-    id: "64a83f42",
-    pickup: "Sector 99A",
-    drop: "Sector 29",
-    fare: 119.18
-  }
+    "64a83f42": {
+        id: "64a83f42",
+        pickup: "Sector 99A",
+        drop: "Sector 29",
+        fare: 119.18
+    }
 };
 
 
 // Endpoint to share ride
 app.get("/share-ride-to-loveone/:rideId", (req, res) => {
-  const { rideId } = req.params;
-  const ride = ridesTest[rideId];
+    const { rideId } = req.params;
+    const ride = ridesTest[rideId];
 
-  if (!ride) return res.status(404).send("Ride not found");
+    if (!ride) return res.status(404).send("Ride not found");
 
-  // Deep link to open app ride page
-  const deepLink = `https://appv2.olyox.com/share-ride-to-loveone/${rideId}`;
+    // Deep link to open app ride page
+    const deepLink = `http://192.168.1.15:3200/share-ride-to-loveone/${rideId}`;
 
-  const userAgent = req.headers["user-agent"] || "";
+    const userAgent = req.headers["user-agent"] || "";
 
-  // Redirect logic
-  if (/android/i.test(userAgent)) {
-    // Android: open app if installed, otherwise Play Store
-    res.send(`
+    // Redirect logic
+    if (/android/i.test(userAgent)) {
+        // Android: open app if installed, otherwise Play Store
+        res.send(`
       <script>
         window.location = "${deepLink}";
         setTimeout(() => { window.location = "${ANDROID_STORE}"; }, 2000);
       </script>
     `);
-  } else if (/iphone|ipad|ipod/i.test(userAgent)) {
-    // iOS: open app if installed, otherwise App Store
-    res.send(`
+    } else if (/iphone|ipad|ipod/i.test(userAgent)) {
+        // iOS: open app if installed, otherwise App Store
+        res.send(`
       <script>
         window.location = "${deepLink}";
         setTimeout(() => { window.location = "${IOS_STORE}"; }, 2000);
       </script>
     `);
-  } else {
-    // Fallback web page
-    res.send(`
+    } else {
+        // Fallback web page
+        res.send(`
       <h2>Ride from ${ride.pickup} to ${ride.drop}</h2>
       <p>Fare: ₹${ride.fare}</p>
       <p>Download the app to see full ride details:</p>
@@ -783,7 +837,7 @@ app.get("/share-ride-to-loveone/:rideId", (req, res) => {
         <li><a href="${ANDROID_STORE}">Android</a></li>
       </ul>
     `);
-  }
+    }
 });
 
 
@@ -798,9 +852,9 @@ app.use('/api/v1/heavy', Heavy);
 app.use('/api/v1/admin', admin);
 app.use('/api/v1/new', NewRoutes);
 app.use(
-  compression({
-    threshold: 0, // compress everything, even small responses
-  })
+    compression({
+        threshold: 0, // compress everything, even small responses
+    })
 );
 // 404 Handler
 app.use('*', (req, res) => {
@@ -873,31 +927,47 @@ process.on('uncaughtException', (error) => {
 
 
 
-// Server Startup Function
 async function startServer() {
     const PORT = process.env.PORT || 3100;
 
     try {
-        console.log(`[${new Date().toISOString()}] Starting server initialization...`);
+        console.log(`[${new Date().toISOString()}] Worker ${process.pid} starting...`);
 
         // Connect to Redis first
         await connectRedis();
+
         // Connect to databases
         await connectDatabases();
 
         // Start the server
         server.listen(PORT, () => {
-            console.log(`[${new Date().toISOString()}] 🚀 Server running on port ${PORT}`);
+            console.log(`[${new Date().toISOString()}] 🚀 Server running on port ${PORT} (Worker ${process.pid})`);
             console.log(`Bull Board available at http://localhost:${PORT}/admin/queues`);
-            console.log(`[${new Date().toISOString()}] 🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+            console.log(`[${new Date().toISOString()}] 🌍 Environment: ${process.env.NODE_ENV || "development"}`);
             console.log(`[${new Date().toISOString()}] ✅ All services connected successfully`);
         });
-
     } catch (error) {
-        console.error(`[${new Date().toISOString()}] ❌ Failed to start server:`, error.message);
+        console.error(`[${new Date().toISOString()}] ❌ Failed to start server (Worker ${process.pid}):`, error.message);
         process.exit(1);
     }
 }
 
-// Start the server
-startServer();
+// Cluster logic
+if (cluster.isMaster) {
+    console.log(`[${new Date().toISOString()}] 🛠 Master ${process.pid} is running`);
+    console.log(`[${new Date().toISOString()}] Spawning ${numCPUs} workers...`);
+
+    // Fork workers
+    for (let i = 0; i < numCPUs; i++) {
+        cluster.fork();
+    }
+
+    // Restart worker if it dies
+    cluster.on("exit", (worker, code, signal) => {
+        console.log(`[${new Date().toISOString()}] ⚠️ Worker ${worker.process.pid} died. Restarting...`);
+        cluster.fork();
+    });
+} else {
+    // Workers run the server
+    startServer();
+}

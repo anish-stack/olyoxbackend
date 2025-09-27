@@ -1,0 +1,36 @@
+{
+  "name": "rider-service",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@bull-board/express": "^6.13.0",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "amqplib": "^0.10.9",
+    "axios": "^1.12.2",
+    "bcryptjs": "^3.0.2",
+    "cloudinary": "^2.7.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "firebase-admin": "^13.5.0",
+    "jsonwebtoken": "^9.0.2",
+    "moment": "^2.30.1",
+    "moment-timezone": "^0.6.0",
+    "mongoose": "^8.18.2",
+    "multer": "^2.0.2",
+    "node-cron": "^4.2.1",
+    "pino": "^9.11.0",
+    "razorpay": "^2.9.6",
+    "redis": "^5.8.2",
+    "socket.io": "^4.8.1"
+  }
+}

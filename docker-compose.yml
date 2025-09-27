@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: olyox-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: secret
+
+  rider-service:
+    build: ./services/rider-service
+   
+    env_file:
+      - ./services/rider-service/.env
+    depends_on:
+      - rabbitmq
+    restart: unless-stopped
+    expose:
+      - "3300"
+
+  notification-service:
+    build: ./services/notification-service
+    container_name: notification-service
+    env_file:
+      - ./services/notification-service/.env
+    depends_on:
+      - rabbitmq
+    restart: unless-stopped
+    expose:
+      - "3003"
+
+  gateway:
+    image: nginx:alpine
+    container_name: olyox-gateway
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - rider-service
+      - notification-service
