@@ -44,7 +44,7 @@ const CheckTolls = async (origin, destination) => {
     console.log("Toll route data received:", data.routes);
     return data;
   } catch (error) {
-    console.error("Routes API Error:", error.message || error);
+    console.error("Routes API Error checktoll:", error.message || error);
     throw new Error("Failed to fetch toll route data");
   }
 };

@@ -70,7 +70,7 @@ exports.CheckTolls = async (origin, destination) => {
     console.log(data.routes)
     return data.routes[1] || data || {}
   } catch (error) {
-    console.error('Routes API Error:', error.message);
+    console.error('Routes API Error api utls:', error.message);
     throw new Error(error.message);
   }
 };
