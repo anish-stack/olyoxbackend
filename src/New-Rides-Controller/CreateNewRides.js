@@ -1259,48 +1259,48 @@ exports.cancelRideRequest = async (req, res) => {
         }
 
         // 👉 अब ride cancel कर सकते हैं
-        // try {
-        //     console.log(
-        //         "notified_riders length:",
-        //         foundRide?.notified_riders?.length || 0
-        //     );
+        try {
+            console.log(
+                "notified_riders length:",
+                foundRide?.notified_riders?.length || 0
+            );
 
-        //     if (Array.isArray(foundRide?.notified_riders)) {
-        //         for (let index = 0; index < foundRide.notified_riders.length; index++) {
-        //             const element = foundRide.notified_riders[index];
-        //             console.log(
-        //                 `Sending notification to rider ${index + 1}:`,
-        //                 element?._id || element
-        //             );
+            if (Array.isArray(foundRide?.notified_riders)) {
+                for (let index = 0; index < foundRide.notified_riders.length; index++) {
+                    const element = foundRide.notified_riders[index];
+                    console.log(
+                        `Sending notification to rider ${index + 1}:`,
+                        element?._id || element
+                    );
 
-        //             // try {
-        //             //     await sendNotification.sendNotification(
-        //             //         element?.fcmToken,
-        //             //         "Ride Has Been Cancelled From The User. Sorry!",
-        //             //         "We Will Deliver More Rides Near You",
-        //             //         {},
-        //             //         "ride_cancel_channel"
-        //             //     );
-        //             //     console.log(
-        //             //         `Notification sent successfully to rider ${element?.name || "unknown"
-        //             //         } ${index + 1}`
-        //             //     );
-        //             // } catch (err) {
-        //             //     console.error(
-        //             //         `Failed to send notification to rider ${index + 1}:`,
-        //             //         err.message
-        //             //     );
-        //             // }
-        //         }
-        //     } else {
-        //         console.warn("notified_riders is not a valid array");
-        //     }
-        // } catch (error) {
-        //     console.error(
-        //         "Unexpected error while sending notifications:",
-        //         error.message
-        //     );
-        // }
+                    try {
+                        await sendNotification.sendNotification(
+                            element?.fcmToken,
+                            "Ye ride kisi aur ne le li!",
+                            "Fikr mat karo, aur rides aa rahe hain aapke area me.",
+                            {},
+                            "ride_cancel_channel"
+                        );
+                        console.log(
+                            `Notification sent successfully to rider ${element?.name || "unknown"
+                            } ${index + 1}`
+                        );
+                    } catch (err) {
+                        console.error(
+                            `Failed to send notification to rider ${index + 1}:`,
+                            err.message
+                        );
+                    }
+                }
+            } else {
+                console.warn("notified_riders is not a valid array");
+            }
+        } catch (error) {
+            console.error(
+                "Unexpected error while sending notifications:",
+                error.message
+            );
+        }
 
         // Cancel the ride
         foundRide.ride_status = "cancelled";
