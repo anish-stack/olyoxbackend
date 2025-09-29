@@ -345,52 +345,57 @@ exports.login = async (req, res) => {
 
 exports.saveFcmTokenToken = async (req, res) => {
   try {
-    const riderId = req.user?.userId
-    const { fcmToken, platform, deviceId, timestamp } = req.body
+    const riderId = req.user?.userId;
+    let { fcmToken, platform, deviceId, timestamp } = req.body;
 
     if (!fcmToken) {
       return res.status(400).json({
         success: false,
         message: "FCM token is required",
-      })
+      });
     }
 
-    const rider = await Rider.findById(riderId)
+    // Set default values if missing
+    deviceId = deviceId || "unknown";
+    timestamp = timestamp ? new Date(timestamp) : new Date();
+
+    const rider = await Rider.findById(riderId);
     if (!rider) {
       return res.status(401).json({
         success: false,
         message: "Rider not found",
-      })
+      });
     }
 
-    const now = new Date()
-    const lastUpdate = rider.fcmUpdatedAt || new Date(0)
-    const diffMinutes = (now - lastUpdate) / (1000 * 60) // difference in minutes
+    const now = new Date();
+    const lastUpdate = rider.fcmUpdatedAt || new Date(0);
+    const diffMinutes = (now - lastUpdate) / (1000 * 60); // difference in minutes
 
     // Update if token/device changed OR last update was more than 10 minutes ago
     if (rider.fcmToken !== fcmToken || rider.deviceId !== deviceId || diffMinutes > 10) {
-      rider.fcmToken = fcmToken
-      rider.deviceId = deviceId
-      rider.platform = platform
-      rider.fcmUpdatedAt = timestamp ? new Date(timestamp) : now
-      await rider.save()
-      console.log(`📲 Updated FCM token for rider ${riderId}`)
+      rider.fcmToken = fcmToken;
+      rider.deviceId = deviceId;
+      rider.platform = platform || "unknown";
+      rider.fcmUpdatedAt = timestamp;
+      await rider.save();
+      console.log(`📲 Updated FCM token for rider ${riderId}`);
     } else {
-      console.log(`ℹ️ FCM token and deviceId unchanged for rider ${riderId}, last updated ${diffMinutes.toFixed(1)} min ago`)
+      console.log(`ℹ️ FCM token and deviceId unchanged for rider ${riderId}, last updated ${diffMinutes.toFixed(1)} min ago`);
     }
 
     res.status(201).json({
       success: true,
       message: "FCM token updated successfully",
-    })
+    });
   } catch (error) {
-    console.error("❌ Error saving FCM token:", error)
+    console.error("❌ Error saving FCM token:", error);
     res.status(500).json({
       success: false,
       message: error.message,
-    })
+    });
   }
-}
+};
+
 
 exports.logoutRider = async (req, res) => {
   try {
