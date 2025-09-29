@@ -268,6 +268,12 @@ const RiderSchema = new Schema({
     fcmToken: {
         type: String,
     },
+   fcmUpdatedAt:{
+          type: Date,
+    },
+   deviceId:{
+                type: String,
+    },
     isBlockByAdmin: {
         type: Boolean,
         default: false

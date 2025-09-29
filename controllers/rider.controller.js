@@ -343,37 +343,54 @@ exports.login = async (req, res) => {
   }
 };
 
-
 exports.saveFcmTokenToken = async (req, res) => {
   try {
-    const riderId = req.user?.userId;
-    const { fcmToken } = req.body;
-    console.log(req.user);
-    console.log(fcmToken);
-    const partner = await Rider.findById(riderId);
-    if (!partner) {
+    const riderId = req.user?.userId
+    const { fcmToken, platform, deviceId, timestamp } = req.body
+
+    if (!fcmToken) {
+      return res.status(400).json({
+        success: false,
+        message: "FCM token is required",
+      })
+    }
+
+    const rider = await Rider.findById(riderId)
+    if (!rider) {
       return res.status(401).json({
         success: false,
-        message: "Notification Update Not done",
-      });
+        message: "Rider not found",
+      })
     }
-    if (fcmToken && fcmToken !== partner.fcmToken) {
-      partner.fcmToken = fcmToken;
+
+    const now = new Date()
+    const lastUpdate = rider.fcmUpdatedAt || new Date(0)
+    const diffMinutes = (now - lastUpdate) / (1000 * 60) // difference in minutes
+
+    // Update if token/device changed OR last update was more than 10 minutes ago
+    if (rider.fcmToken !== fcmToken || rider.deviceId !== deviceId || diffMinutes > 10) {
+      rider.fcmToken = fcmToken
+      rider.deviceId = deviceId
+      rider.platform = platform
+      rider.fcmUpdatedAt = timestamp ? new Date(timestamp) : now
+      await rider.save()
+      console.log(`📲 Updated FCM token for rider ${riderId}`)
+    } else {
+      console.log(`ℹ️ FCM token and deviceId unchanged for rider ${riderId}, last updated ${diffMinutes.toFixed(1)} min ago`)
     }
-    await partner.save();
 
     res.status(201).json({
       success: true,
-      message: "Notification Update  done",
-    });
+      message: "FCM token updated successfully",
+    })
   } catch (error) {
-    console.log(error);
+    console.error("❌ Error saving FCM token:", error)
     res.status(500).json({
       success: false,
       message: error.message,
-    });
+    })
   }
-};
+}
 
 exports.logoutRider = async (req, res) => {
   try {
