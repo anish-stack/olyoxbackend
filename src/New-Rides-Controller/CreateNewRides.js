@@ -669,6 +669,9 @@ const initiateDriverSearch = async (rideId, req, res) => {
                     } km of coordinates [${longitude}, ${latitude}]`
                 );
 
+                        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes ago
+
+
                 let riders = await RiderModel.aggregate([
                     {
                         $geoNear: {
@@ -684,6 +687,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
                     {
                         $match: {
                             isAvailable: true,
+                             lastUpdated: { $gte: tenMinutesAgo },
                             // createdAt: { $gt: new Date("2025-09-01T00:00:00.000Z") },
                             _id: { $nin: currentRide.rejected_by_drivers || [] },
                         },
@@ -3895,12 +3899,14 @@ exports.FindRiderNearByUser = async (req, res) => {
                 });
         }
 
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes ago
+
         const riders = await RiderModel.aggregate([
             {
                 $geoNear: {
                     near: {
                         type: "Point",
-                        coordinates: [lng, lat], // ⚠️ Correct order: [longitude, latitude]
+                        coordinates: [lng, lat], // [longitude, latitude]
                     },
                     distanceField: "distance",
                     maxDistance: 3000,
@@ -3910,13 +3916,13 @@ exports.FindRiderNearByUser = async (req, res) => {
             {
                 $match: {
                     isAvailable: true,
-                    // createdAt: { $gt: new Date("2025-09-01T00:00:00.000Z") },
+                    lastUpdated: { $gte: tenMinutesAgo }, // ✅ only riders updated within last 10 min
 
                     $expr: {
                         $regexMatch: {
-                            input: { $trim: { input: "$rideVehicleInfo.vehicleType" } }, // trims spaces
-                            regex: vehicleType, // your regex string
-                            options: "i", // case-insensitive
+                            input: { $trim: { input: "$rideVehicleInfo.vehicleType" } },
+                            regex: vehicleType,
+                            options: "i",
                         },
                     },
                     $or: [{ on_ride_id: null }, { on_ride_id: "" }],
@@ -3941,12 +3947,14 @@ exports.FindRiderNearByUser = async (req, res) => {
                     distance: 1,
                     isAvailable: 1,
                     lastActiveAt: 1,
+                    lastUpdated: 1,
                 },
             },
             {
                 $sort: { distance: 1 },
             },
         ]);
+
 
         console.info(`Found ${riders.length} riders within 5km.`);
 
