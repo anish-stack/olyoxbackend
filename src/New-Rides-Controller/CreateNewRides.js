@@ -684,7 +684,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
                     {
                         $match: {
                             isAvailable: true,
-                            createdAt: { $gt: new Date("2025-09-01T00:00:00.000Z") },
+                            // createdAt: { $gt: new Date("2025-09-01T00:00:00.000Z") },
                             _id: { $nin: currentRide.rejected_by_drivers || [] },
                         },
                     },
@@ -3910,7 +3910,7 @@ exports.FindRiderNearByUser = async (req, res) => {
             {
                 $match: {
                     isAvailable: true,
-                    createdAt: { $gt: new Date("2025-09-01T00:00:00.000Z") },
+                    // createdAt: { $gt: new Date("2025-09-01T00:00:00.000Z") },
 
                     $expr: {
                         $regexMatch: {
