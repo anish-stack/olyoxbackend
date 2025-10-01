@@ -1280,7 +1280,7 @@ exports.cancelRideRequest = async (req, res) => {
                     try {
                         await sendNotification.sendNotification(
                             element?.fcmToken,
-                            "Ye ride kisi aur ne le li!",
+                            "You miss this ride",
                             "Fikr mat karo, aur rides aa rahe hain aapke area me.",
                             {},
                             "ride_cancel_channel"

@@ -122,7 +122,6 @@ exports.registerRider = async (req, res) => {
 
     // Check if Aadhar already exists
     const existingAadhar = await Rider.findOne({ aadharNumber });
-    console.log("Aadhar Exists:", existingAadhar);
     if (existingAadhar) {
       return res.status(409).json({
         success: false,
@@ -807,6 +806,7 @@ exports.uploadDocuments = async (req, res) => {
           type: rider?.rideVehicleInfo?.vehicleType || "",
           numberPlate: rider?.rideVehicleInfo?.VehicleNumber?.toUpperCase() || "",
         },
+        
         isDefault: true,
         isActive: false,
         documents,

@@ -644,6 +644,7 @@ app.post('/Fetch-Current-Location', async (req, res) => {
         const response = await axios.get(
             `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${process.env.GOOGLE_MAPS_API_KEY || 'AIzaSyCBATa-tKn2Ebm1VbQ5BU8VOqda2nzkoTU'}`
         );
+        console.log("response",response.data)
 
         if (!response.data.results?.[0]) {
             return res.status(404).json({ success: false, message: 'No address found' });
