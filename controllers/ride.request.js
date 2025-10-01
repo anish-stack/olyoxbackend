@@ -444,7 +444,7 @@ exports.findRider = async (id, io, app) => {
                 params: {
                     origin,
                     destination,
-                    key: "AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8",
+                    key: "AIzaSyCr2aKtwOMiUdR0rBMpE0MCWBHvehwoOtM",
                     traffic_model: "best_guess",
                     departure_time: "now",
                     alternatives: true
@@ -1250,7 +1250,7 @@ exports.ChangeRideRequestByRider = async (io, data) => {
                 params: {
                     origin: origin,
                     destination: destination,
-                    key: 'AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8',
+                    key: 'AIzaSyCr2aKtwOMiUdR0rBMpE0MCWBHvehwoOtM',
                     traffic_model: 'best_guess',
                     departure_time: 'now',
                 },
@@ -2082,7 +2082,7 @@ const calculateRidePrice = async (origin, destination, waitingTimeInMinutes, rat
             params: {
                 origin: origin,
                 destination: destination,
-                key: 'AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8',
+                key: 'AIzaSyCr2aKtwOMiUdR0rBMpE0MCWBHvehwoOtM',
                 traffic_model: 'best_guess',
                 departure_time: 'now',
             },
@@ -2297,7 +2297,7 @@ async function getCachedOrFetchDirections(redisClient, cacheKey, originKey, dest
             params: {
                 origin: originKey,
                 destination: destinationKey,
-                key: 'AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8',
+                key: 'AIzaSyCr2aKtwOMiUdR0rBMpE0MCWBHvehwoOtM',
                 traffic_model: "best_guess",
                 departure_time: Math.floor(Date.now() / 1000),
             },
@@ -2421,7 +2421,7 @@ const calculateRidePriceForConfirmRide = async (data) => {
             params: {
                 origin: formattedOrigin,
                 destination: formattedDestination,
-                key: 'AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8',
+                key: 'AIzaSyCr2aKtwOMiUdR0rBMpE0MCWBHvehwoOtM',
                 traffic_model: "best_guess",
                 departure_time: Math.floor(Date.now() / 1000),
             },

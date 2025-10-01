@@ -55,7 +55,7 @@ exports.request_of_parcel = async (req, res) => {
         console.log("findBoysNearPickup", findBoysNearPickup)
 
         const pickupResponse = await axios.get("https://maps.googleapis.com/maps/api/geocode/json", {
-            params: { address: pickup, key: 'AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8' },
+            params: { address: pickup, key: 'AIzaSyCr2aKtwOMiUdR0rBMpE0MCWBHvehwoOtM' },
         });
 
         if (pickupResponse.data.status !== "OK") {
@@ -65,7 +65,7 @@ exports.request_of_parcel = async (req, res) => {
 
         // Geocode Dropoff Location
         const dropOffResponse = await axios.get("https://maps.googleapis.com/maps/api/geocode/json", {
-            params: { address: dropoff, key: 'AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8' },
+            params: { address: dropoff, key: 'AIzaSyCr2aKtwOMiUdR0rBMpE0MCWBHvehwoOtM' },
         });
 
         if (dropOffResponse.data.status !== "OK") {
@@ -78,7 +78,7 @@ exports.request_of_parcel = async (req, res) => {
             params: {
                 origins: `${pickupDatatwo.lat},${pickupDatatwo.lng}`,
                 destinations: `${dropOffDatatwo.lat},${dropOffDatatwo.lng}`,
-                key: 'AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8',
+                key: 'AIzaSyCr2aKtwOMiUdR0rBMpE0MCWBHvehwoOtM',
             },
         });
 

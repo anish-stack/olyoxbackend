@@ -354,7 +354,7 @@ app.post('/directions', async (req, res) => {
         }
 
         // If no cache, call Google Maps API
-        const googleMapsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${data?.pickup?.latitude},${data?.pickup?.longitude}&destination=${data?.dropoff?.latitude},${data?.dropoff?.longitude}&key=AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8`;
+        const googleMapsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${data?.pickup?.latitude},${data?.pickup?.longitude}&destination=${data?.dropoff?.latitude},${data?.dropoff?.longitude}&key=AIzaSyCr2aKtwOMiUdR0rBMpE0MCWBHvehwoOtM`;
         const apiStartTime = Date.now();
         const response = await axios.get(googleMapsUrl);
         const apiTimeTakenMs = Date.now() - apiStartTime;
