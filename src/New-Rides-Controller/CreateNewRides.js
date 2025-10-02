@@ -862,6 +862,30 @@ const initiateDriverSearch = async (rideId, req, res) => {
                     
                     for (const rider of riders) {
                         try {
+                            // Validate rider has required fields
+                            if (!rider._id) {
+                                console.warn(`Skipping rider without _id`);
+                                continue;
+                            }
+                            
+                            if (!rider.fcmToken) {
+                                console.warn(`Rider ${rider._id} has no FCM token, skipping notification`);
+                                // Track riders without FCM tokens
+                                notificationResults.push({
+                                    rider_id: rider._id,
+                                    distance_from_pickup: Math.round(rider.distance || 0),
+                                    distance_from_pickup_km: ((rider.distance || 0) / 1000).toFixed(2),
+                                    notification_time: new Date(),
+                                    notification_count: 1,
+                                    notification_failed: true,
+                                    error_message: "No FCM token available",
+                                    rider_location: rider.location || null,
+                                    search_attempt: retryCount + 1,
+                                    search_radius: currentRadius,
+                                });
+                                continue;
+                            }
+                            
                             const notificationTime = new Date();
                             
                             // Get existing notification data for this rider
@@ -898,16 +922,17 @@ const initiateDriverSearch = async (rideId, req, res) => {
                                 `Notification sent to rider ${rider._id} for ride ${ride._id}`
                             );
                             
-                            // Prepare notification tracking data
+                            // Prepare notification tracking data - only for successful notifications
                             const notificationData = {
                                 rider_id: rider._id,
-                                distance_from_pickup: Math.round(rider.distance), // distance in meters
-                                distance_from_pickup_km: (rider.distance / 1000).toFixed(2), // distance in km
+                                distance_from_pickup: Math.round(rider.distance || 0),
+                                distance_from_pickup_km: ((rider.distance || 0) / 1000).toFixed(2),
                                 notification_time: notificationTime,
                                 notification_count: notificationCount,
-                                rider_location: rider.location,
+                                rider_location: rider.location || null,
                                 search_attempt: retryCount + 1,
                                 search_radius: currentRadius,
+                                notification_failed: false,
                             };
                             
                             notificationResults.push(notificationData);
@@ -918,25 +943,42 @@ const initiateDriverSearch = async (rideId, req, res) => {
                                 err
                             );
                             
-                            // Still track failed attempts
-                            notificationResults.push({
-                                rider_id: rider._id,
-                                distance_from_pickup: Math.round(rider.distance),
-                                distance_from_pickup_km: (rider.distance / 1000).toFixed(2),
-                                notification_time: new Date(),
-                                notification_count: 1,
-                                notification_failed: true,
-                                error_message: err.message,
-                            });
+                            // Only track failed attempts if we have a valid rider_id
+                            if (rider._id) {
+                                notificationResults.push({
+                                    rider_id: rider._id,
+                                    distance_from_pickup: Math.round(rider.distance || 0),
+                                    distance_from_pickup_km: ((rider.distance || 0) / 1000).toFixed(2),
+                                    notification_time: new Date(),
+                                    notification_count: 1,
+                                    notification_failed: true,
+                                    error_message: err.message || "Unknown error",
+                                    error_code: err.code || "NOTIFICATION_ERROR",
+                                    rider_location: rider.location || null,
+                                    search_attempt: retryCount + 1,
+                                    search_radius: currentRadius,
+                                });
+                            }
                         }
                     }
                     
-                    // Update ride with notification tracking
+                    // Update ride with notification tracking - only if we have valid results
                     if (notificationResults.length > 0) {
                         try {
-                            await updateRideWithNotificationData(ride._id, notificationResults);
+                            // Filter out any results without rider_id before updating
+                            const validResults = notificationResults.filter(
+                                result => result.rider_id && mongoose.Types.ObjectId.isValid(result.rider_id)
+                            );
+                            
+                            if (validResults.length > 0) {
+                                await updateRideWithNotificationData(ride._id, validResults);
+                                console.info(`Successfully tracked ${validResults.length} notifications`);
+                            } else {
+                                console.warn("No valid notification results to save");
+                            }
                         } catch (updateErr) {
                             console.error("Failed to update notification data:", updateErr);
+                            // Log the error but don't throw to prevent blocking the flow
                         }
                     }
                     

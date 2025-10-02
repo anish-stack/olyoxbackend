@@ -293,69 +293,87 @@ const RideRequestSchema = new Schema({
         type: Boolean,
         default: true
     },
-    notified_riders: [{
-        rider_id: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'Rider',
-            required: true
+  // Add this to your RideBooking schema
+
+notified_riders: [{
+    rider_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Rider',
+        required: true,
+        index: true // Add index for faster lookups
+    },
+    distance_from_pickup: {
+        type: Number, // Distance in meters
+        required: true
+    },
+    distance_from_pickup_km: {
+        type: String, // Distance in km (formatted)
+        required: true
+    },
+    notification_time: {
+        type: Date,
+        required: true,
+        default: Date.now
+    },
+    notification_count: {
+        type: Number,
+        default: 1,
+        min: 1
+    },
+    rider_location: {
+        type: {
+            type: String,
+            enum: ['Point'],
+            default: 'Point'
         },
-        distance_from_pickup: {
-            type: Number, // Distance in meters
-            required: true
-        },
-        distance_from_pickup_km: {
-            type: String, // Distance in km (formatted)
-            required: true
-        },
-        notification_time: {
+        coordinates: {
+            type: [Number], // [longitude, latitude]
+            required: false
+        }
+    },
+    search_attempt: {
+        type: Number, // Which retry attempt this notification was sent on
+        default: 1,
+        min: 1
+    },
+    search_radius: {
+        type: Number, // Radius used for this search (in meters)
+    },
+    notification_failed: {
+        type: Boolean,
+        default: false
+    },
+    error_message: {
+        type: String,
+        required: false // Only present if notification_failed is true
+    },
+    error_code: {
+        type: String,
+        required: false // Only present if notification_failed is true
+    },
+    notification_history: [{
+        time: {
             type: Date,
-            required: true,
-            default: Date.now
+            required: true
         },
-        notification_count: {
-            type: Number,
-            default: 1
+        distance: {
+            type: Number, // Distance at time of notification
+            required: true
         },
-        rider_location: {
-            type: {
-                type: String,
-                enum: ['Point'],
-                default: 'Point'
-            },
-            coordinates: {
-                type: [Number], // [longitude, latitude]
-                required: false
-            }
+        attempt: {
+            type: Number, // Search attempt number
+            required: true
         },
-        search_attempt: {
-            type: Number, // Which retry attempt this notification was sent on
-            default: 1
-        },
-        search_radius: {
-            type: Number, // Radius used for this search (in meters)
-        },
-        notification_failed: {
+        success: {
             type: Boolean,
-            default: false
+            default: true
         },
-        error_message: {
-            type: String
-        },
-        notification_history: [{
-            time: {
-                type: Date,
-                required: true
-            },
-            distance: {
-                type: Number, // Distance at time of notification
-                required: true
-            },
-            attempt: {
-                type: Number, // Search attempt number
-                required: true
-            }
-        }]
-    }],
+        error: {
+            type: String,
+            required: false // Error message if success is false
+        }
+    }]
+}],
     total_notifications_sent: {
         type: Number,
         default: 0
