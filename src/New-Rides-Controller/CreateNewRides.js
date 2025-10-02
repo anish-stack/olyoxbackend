@@ -907,6 +907,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
                                     rideDetails: {
                                         rideId: ride._id.toString(),
                                         distance: ride?.route_info?.distance,
+                                        distance_from_pickup_km: ((rider.distance || 0) / 1000).toFixed(2),
                                         pickup: ride.pickup_address,
                                         drop: ride.drop_address,
                                         vehicleType: ride.vehicle_type,
