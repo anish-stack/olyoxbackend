@@ -705,35 +705,78 @@ const initiateDriverSearch = async (rideId, req, res) => {
 
                 console.info(`Found ${validRiders.length} riders in radius for ride ${rideId}`);
 
-                // Apply vehicle type preference filtering
+                // Apply vehicle type preference filtering with normalized comparison
                 const matchedRiders = validRiders.filter((rider) => {
-                    const driverType = rider?.rideVehicleInfo?.vehicleType?.toUpperCase()?.trim();
+                    // Normalize vehicle types for comparison (handle case variations)
+                    const normalizeVehicleType = (type) => {
+                        if (!type) return null;
+                        return type.toString().toUpperCase().trim();
+                    };
+
+                    const driverType = normalizeVehicleType(rider?.rideVehicleInfo?.vehicleType);
+                    const requestedType = normalizeVehicleType(vehicleType);
                     const prefs = rider.preferences || {};
-                    const vType = vehicleType?.toUpperCase();
+
+                    // Validation: Driver must have a vehicle type
+                    if (!driverType) {
+                        console.warn(`Rider ${rider._id} has no vehicle type, skipping`);
+                        return false;
+                    }
 
                     let decision = false;
+                    let matchReason = "";
 
-                    if (vType === "BIKE" && driverType === "BIKE") {
-                        decision = true;
-                    } else if (vType === "AUTO") {
-                        decision = true;
-                    } else if (vType === "MINI") {
-                        decision =
-                            driverType === "MINI" ||
-                            (driverType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
-                            ((driverType === "SUV" || driverType === "XL" || driverType === "SUV/XL") &&
-                                prefs.OlyoxAcceptMiniRides?.enabled);
-                    } else if (vType === "SEDAN") {
-                        decision =
-                            driverType === "SEDAN" ||
-                            ((driverType === "SUV" || driverType === "XL" || driverType === "SUV/XL") &&
-                                prefs.OlyoxAcceptSedanRides?.enabled);
-                    } else if (vType === "SUV" || vType === "SUV/XL" || vType === "XL") {
-                        decision = driverType === "SUV/XL" || driverType === "XL" || driverType === "SUV";
+                    // BIKE - exact match only
+                    if (requestedType === "BIKE") {
+                        decision = driverType === "BIKE";
+                        matchReason = decision ? "Exact bike match" : "Not a bike";
+                    }
+                    // AUTO - exact match only
+                    else if (requestedType === "AUTO") {
+                        decision = driverType === "AUTO";
+                        matchReason = decision ? "Exact auto match" : "Not an auto";
+                    }
+                    // MINI - can be fulfilled by MINI, SEDAN (with pref), or SUV/XL (with pref)
+                    else if (requestedType === "MINI") {
+                        if (driverType === "MINI") {
+                            decision = true;
+                            matchReason = "Exact mini match";
+                        } else if (driverType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled === true) {
+                            decision = true;
+                            matchReason = "Sedan accepting mini rides";
+                        } else if (["SUV", "XL", "SUV/XL"].includes(driverType) && prefs.OlyoxAcceptMiniRides?.enabled === true) {
+                            decision = true;
+                            matchReason = `${driverType} accepting mini rides`;
+                        } else {
+                            matchReason = "Vehicle type or preference mismatch";
+                        }
+                    }
+                    // SEDAN - can be fulfilled by SEDAN or SUV/XL (with pref)
+                    else if (requestedType === "SEDAN") {
+                        if (driverType === "SEDAN") {
+                            decision = true;
+                            matchReason = "Exact sedan match";
+                        } else if (["SUV", "XL", "SUV/XL"].includes(driverType) && prefs.OlyoxAcceptSedanRides?.enabled === true) {
+                            decision = true;
+                            matchReason = `${driverType} accepting sedan rides`;
+                        } else {
+                            matchReason = "Vehicle type or preference mismatch";
+                        }
+                    }
+                    // SUV/XL - exact match only (various naming conventions)
+                    else if (["SUV", "SUV/XL", "XL"].includes(requestedType)) {
+                        decision = ["SUV", "XL", "SUV/XL"].includes(driverType);
+                        matchReason = decision ? `Exact ${driverType} match` : "Not an SUV/XL";
+                    }
+                    // Unknown vehicle type
+                    else {
+                        matchReason = `Unknown requested type: ${requestedType}`;
                     }
 
                     if (decision) {
-                        console.info(`Matched: ${rider.name} (${rider._id}) - ${driverType}`);
+                        console.info(`✅ Matched: ${rider.name} (${rider._id}) - Driver: ${driverType}, Requested: ${requestedType} - ${matchReason}`);
+                    } else {
+                        console.debug(`❌ Rejected: ${rider.name} (${rider._id}) - Driver: ${driverType}, Requested: ${requestedType} - ${matchReason}`);
                     }
 
                     return decision;
@@ -870,7 +913,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
     }
 };
 
-// Optimized notification sender with proper tracking
+// Optimized notification sender with proper tracking and double validation
 const sendBatchNotifications = async (riders, ride, searchAttempt, searchRadius) => {
     const results = {
         successfulNotifications: [],
@@ -879,15 +922,60 @@ const sendBatchNotifications = async (riders, ride, searchAttempt, searchRadius)
         failCount: 0,
     };
 
+    // Normalize vehicle type helper
+    const normalizeVehicleType = (type) => {
+        if (!type) return null;
+        return type.toString().toUpperCase().trim();
+    };
+
+    const requestedVehicleType = normalizeVehicleType(ride.vehicle_type);
+
     // Send all notifications in parallel for speed
     const notificationPromises = riders.map(async (rider) => {
         try {
+            // DOUBLE VALIDATION: Check vehicle type again before sending notification
+            const driverVehicleType = normalizeVehicleType(rider?.rideVehicleInfo?.vehicleType);
+            const prefs = rider.preferences || {};
+
+            // Validate vehicle type match
+            let isValidMatch = false;
+
+            if (requestedVehicleType === "BIKE") {
+                isValidMatch = driverVehicleType === "BIKE";
+            } else if (requestedVehicleType === "AUTO") {
+                isValidMatch = driverVehicleType === "AUTO";
+            } else if (requestedVehicleType === "MINI") {
+                isValidMatch = 
+                    driverVehicleType === "MINI" ||
+                    (driverVehicleType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled === true) ||
+                    (["SUV", "XL", "SUV/XL"].includes(driverVehicleType) && prefs.OlyoxAcceptMiniRides?.enabled === true);
+            } else if (requestedVehicleType === "SEDAN") {
+                isValidMatch = 
+                    driverVehicleType === "SEDAN" ||
+                    (["SUV", "XL", "SUV/XL"].includes(driverVehicleType) && prefs.OlyoxAcceptSedanRides?.enabled === true);
+            } else if (["SUV", "SUV/XL", "XL"].includes(requestedVehicleType)) {
+                isValidMatch = ["SUV", "XL", "SUV/XL"].includes(driverVehicleType);
+            }
+
+            // Skip notification if vehicle type doesn't match
+            if (!isValidMatch) {
+                console.warn(`Skipping notification: Rider ${rider._id} vehicle type ${driverVehicleType} doesn't match requested ${requestedVehicleType}`);
+                results.failedNotifications.push({
+                    rider_id: rider._id,
+                    error: `Vehicle type mismatch: ${driverVehicleType} vs ${requestedVehicleType}`,
+                });
+                results.failCount++;
+                return;
+            }
+
+            // Check FCM token
             if (!rider.fcmToken) {
                 console.warn(`Rider ${rider._id} has no FCM token`);
                 results.failedNotifications.push({
                     rider_id: rider._id,
                     error: "No FCM token",
                 });
+                results.failCount++;
                 return;
             }
 
@@ -915,7 +1003,7 @@ const sendBatchNotifications = async (riders, ride, searchAttempt, searchRadius)
                 "ride_request_channel"
             );
 
-            console.info(`Notification sent to rider ${rider._id}`);
+            console.info(`✅ Notification sent to rider ${rider._id} (${driverVehicleType} for ${requestedVehicleType} ride)`);
 
             results.successfulNotifications.push({
                 rider_id: rider._id,
@@ -927,11 +1015,12 @@ const sendBatchNotifications = async (riders, ride, searchAttempt, searchRadius)
                 search_attempt: searchAttempt,
                 search_radius: searchRadius,
                 notification_failed: false,
+                vehicle_type: driverVehicleType,
             });
 
             results.successCount++;
         } catch (err) {
-            console.error(`Failed to send notification to rider ${rider._id}:`, err.message);
+            console.error(`❌ Failed to send notification to rider ${rider._id}:`, err.message);
             
             results.failedNotifications.push({
                 rider_id: rider._id,
@@ -942,6 +1031,8 @@ const sendBatchNotifications = async (riders, ride, searchAttempt, searchRadius)
     });
 
     await Promise.allSettled(notificationPromises);
+
+    console.info(`📊 Notification batch complete: ${results.successCount} sent, ${results.failCount} failed`);
 
     return results;
 };
@@ -957,13 +1048,43 @@ const processRidersBackground = async (rideId, riders, initialRideData) => {
     const abortController = new AbortController();
     activeNotificationLoops.set(rideId, abortController);
 
-    console.info(`Starting background notification loop for ride ${rideId}`);
+    console.info(`🔄 Starting background notification loop for ride ${rideId}`);
+
+    // Helper function to validate vehicle type match
+    const validateVehicleMatch = (driverType, requestedType, preferences) => {
+        const normalizeType = (type) => type?.toString().toUpperCase().trim();
+        const dType = normalizeType(driverType);
+        const rType = normalizeType(requestedType);
+        const prefs = preferences || {};
+
+        if (!dType || !rType) return false;
+
+        if (rType === "BIKE") return dType === "BIKE";
+        if (rType === "AUTO") return dType === "AUTO";
+        
+        if (rType === "MINI") {
+            return dType === "MINI" ||
+                   (dType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled === true) ||
+                   (["SUV", "XL", "SUV/XL"].includes(dType) && prefs.OlyoxAcceptMiniRides?.enabled === true);
+        }
+        
+        if (rType === "SEDAN") {
+            return dType === "SEDAN" ||
+                   (["SUV", "XL", "SUV/XL"].includes(dType) && prefs.OlyoxAcceptSedanRides?.enabled === true);
+        }
+        
+        if (["SUV", "SUV/XL", "XL"].includes(rType)) {
+            return ["SUV", "XL", "SUV/XL"].includes(dType);
+        }
+
+        return false;
+    };
 
     try {
         while (Date.now() - startTime < MAX_DURATION) {
             // Check if loop should be aborted
             if (abortController.signal.aborted) {
-                console.info(`Notification loop aborted for ride ${rideId}`);
+                console.info(`🛑 Notification loop aborted for ride ${rideId}`);
                 break;
             }
 
@@ -971,29 +1092,29 @@ const processRidersBackground = async (rideId, riders, initialRideData) => {
 
             // Check again after delay
             if (abortController.signal.aborted) {
-                console.info(`Notification loop aborted for ride ${rideId}`);
+                console.info(`🛑 Notification loop aborted for ride ${rideId}`);
                 break;
             }
 
             // Check ride status (use lean for performance)
             const ride = await RideBooking.findById(rideId)
-                .select('ride_status rejected_by_drivers driver')
+                .select('ride_status rejected_by_drivers driver vehicle_type')
                 .lean();
 
             if (!ride) {
-                console.warn(`Ride ${rideId} not found, stopping notifications`);
+                console.warn(`⚠️ Ride ${rideId} not found, stopping notifications`);
                 break;
             }
 
             // Stop if ride is cancelled, assigned, or completed
             if (!["pending", "searching"].includes(ride.ride_status)) {
-                console.info(`Ride ${rideId} status is ${ride.ride_status}, stopping notifications`);
+                console.info(`ℹ️ Ride ${rideId} status is ${ride.ride_status}, stopping notifications`);
                 break;
             }
 
             // Stop if driver is assigned
             if (ride.driver) {
-                console.info(`Driver assigned to ride ${rideId}, stopping notifications`);
+                console.info(`✅ Driver assigned to ride ${rideId}, stopping notifications`);
                 break;
             }
 
@@ -1002,23 +1123,39 @@ const processRidersBackground = async (rideId, riders, initialRideData) => {
                 typeof r === 'object' ? r.driver?.toString() : r.toString()
             );
 
-            // Filter out rejected drivers
-            const eligibleRiders = riders.filter(
-                r => !rejectedDriverIds.includes(r._id.toString())
-            );
+            // Filter out rejected drivers AND validate vehicle type match
+            const eligibleRiders = riders.filter(r => {
+                // Check if driver rejected
+                if (rejectedDriverIds.includes(r._id.toString())) {
+                    return false;
+                }
+
+                // Re-validate vehicle type match
+                const isValidMatch = validateVehicleMatch(
+                    r?.rideVehicleInfo?.vehicleType,
+                    ride.vehicle_type,
+                    r.preferences
+                );
+
+                if (!isValidMatch) {
+                    console.debug(`❌ Rider ${r._id} no longer matches vehicle type ${ride.vehicle_type}`);
+                }
+
+                return isValidMatch;
+            });
 
             if (eligibleRiders.length === 0) {
-                console.info(`All riders have rejected ride ${rideId}, stopping notifications`);
+                console.info(`ℹ️ No eligible riders remaining for ride ${rideId}, stopping notifications`);
                 break;
             }
 
             batchCount++;
-            console.info(`Sending batch ${batchCount} to ${eligibleRiders.length} riders`);
+            console.info(`🔔 Sending batch ${batchCount} to ${eligibleRiders.length} eligible riders`);
 
             // Send notifications (fire and forget, don't wait)
             sendBatchNotifications(eligibleRiders, initialRideData, batchCount, 0)
                 .then(results => {
-                    console.info(`Batch ${batchCount}: ${results.successCount} sent`);
+                    console.info(`✅ Batch ${batchCount}: ${results.successCount} sent, ${results.failCount} failed`);
                     
                     // Update notification count in background
                     if (results.successCount > 0) {
@@ -1032,12 +1169,12 @@ const processRidersBackground = async (rideId, riders, initialRideData) => {
                         }).catch(err => console.error('Failed to update notification count:', err));
                     }
                 })
-                .catch(err => console.error(`Batch ${batchCount} failed:`, err));
+                .catch(err => console.error(`❌ Batch ${batchCount} failed:`, err));
         }
 
-        console.info(`Completed notification loop for ride ${rideId} after ${batchCount} batches`);
+        console.info(`✅ Completed notification loop for ride ${rideId} after ${batchCount} batches`);
     } catch (error) {
-        console.error(`Background notification loop error for ride ${rideId}:`, error.message);
+        console.error(`❌ Background notification loop error for ride ${rideId}:`, error.message);
     } finally {
         // Clean up
         activeNotificationLoops.delete(rideId);
@@ -1053,6 +1190,7 @@ const stopNotificationLoop = (rideId) => {
         activeNotificationLoops.delete(rideId);
     }
 };
+
 
 const processRiders = async (redisClient, rideId, riders, rideDetails = {}) => {
     const notificationStateKey = `ride:${rideId}:notification_state`;
