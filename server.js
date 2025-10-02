@@ -845,7 +845,7 @@ app.get("/share-ride-to-loveone/:rideId", (req, res) => {
     if (!ride) return res.status(404).send("Ride not found");
 
     // Deep link to open app ride page
-    const deepLink = `http://192.168.1.15:3200/share-ride-to-loveone/${rideId}`;
+    const deepLink = `https://www.appv2.olyox.com/share-ride-to-loveone/${rideId}`;
 
     const userAgent = req.headers["user-agent"] || "";
 

@@ -605,7 +605,6 @@ const initiateDriverSearch = async (rideId, req, res) => {
     const RADIUS_INCREMENT = 500;
 
     let retryCount = 0;
-    const redisClient = getRedisClient(req);
 
     try {
         console.info(`Initiating driver search for ride: ${rideId}`);
@@ -620,62 +619,56 @@ const initiateDriverSearch = async (rideId, req, res) => {
             return { message: `Ride request is ${ride.ride_status}` };
         }
 
-        await updateRideStatus(redisClient, rideId, "searching", {
-            search_started_at: new Date(),
-            retry_count: retryCount,
+        // Update to searching status once
+        await RideBooking.findByIdAndUpdate(rideId, {
+            $set: {
+                ride_status: "searching",
+                search_started_at: new Date(),
+            }
         });
-
-        await saveRideToRedis(redisClient, rideId, ride);
-
-        let cachedRiders = await getRidersFromRedis(redisClient, rideId);
-        if (cachedRiders && cachedRiders.length > 0) {
-            console.info(
-                `Using ${cachedRiders.length} cached riders for ride ${rideId}`
-            );
-            return await processRiders(redisClient, rideId, cachedRiders);
-        }
 
         while (retryCount < MAX_RETRIES) {
             try {
-                console.info(
-                    `Driver search attempt ${retryCount + 1}/${MAX_RETRIES} for ride ${rideId}`
-                );
+                console.info(`Driver search attempt ${retryCount + 1}/${MAX_RETRIES} for ride ${rideId}`);
 
-                const currentRide = await RideBooking.findById(rideId);
+                // Fresh ride check with minimal fields
+                const currentRide = await RideBooking.findById(rideId)
+                    .select('ride_status pickup_location vehicle_type rejected_by_drivers pickup_address drop_address pricing route_info')
+                    .lean();
+
                 if (!currentRide) {
                     throw new Error("Ride not found during search");
                 }
 
                 if (!["pending", "searching"].includes(currentRide.ride_status)) {
-                    console.info(
-                        `Ride ${rideId} status changed to ${currentRide.ride_status}, stopping search`
-                    );
-                    return {
-                        message: `Ride status changed to ${currentRide.ride_status}`,
-                    };
+                    console.info(`Ride ${rideId} status changed to ${currentRide.ride_status}, stopping search`);
+                    return { message: `Ride status changed to ${currentRide.ride_status}` };
                 }
 
                 const pickupCoords = currentRide.pickup_location?.coordinates;
                 if (!pickupCoords || pickupCoords.length !== 2) {
                     throw new Error("Invalid pickup coordinates");
                 }
-                const vehicleType = ride.vehicle_type.toUpperCase();
+
+                const vehicleType = currentRide.vehicle_type.toUpperCase();
                 const [longitude, latitude] = pickupCoords;
                 const currentRadius = INITIAL_RADIUS + retryCount * RADIUS_INCREMENT;
 
-                console.info(
-                    `Searching for drivers within ${currentRadius / 1000} km of coordinates [${longitude}, ${latitude}]`
-                );
+                console.info(`Searching within ${currentRadius / 1000} km of [${longitude}, ${latitude}]`);
 
                 const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+                const currentDate = new Date();
 
-                let riders = await RiderModel.aggregate([
+                // Get rejected driver IDs (handle both object and ID formats)
+                const rejectedDriverIds = (currentRide.rejected_by_drivers || []).map(r => 
+                    typeof r === 'object' ? r.driver?.toString() : r.toString()
+                );
+
+                // Single optimized query with all filters
+                const validRiders = await RiderModel.aggregate([
                     {
                         $geoNear: {
-                            near: {
-                                type: "Point",
-                                coordinates: [longitude, latitude],
-                            },
+                            near: { type: "Point", coordinates: [longitude, latitude] },
                             distanceField: "distance",
                             maxDistance: currentRadius,
                             spherical: true,
@@ -685,167 +678,89 @@ const initiateDriverSearch = async (rideId, req, res) => {
                         $match: {
                             isAvailable: true,
                             lastUpdated: { $gte: tenMinutesAgo },
-                            _id: { $nin: currentRide.rejected_by_drivers || [] },
+                            _id: { $nin: rejectedDriverIds },
+                            on_ride_id: null,
+                            "RechargeData.expireData": { $gte: currentDate },
                         },
                     },
                     {
                         $project: {
                             name: 1,
                             phoneNumber: 1,
-                            profileImage: 1,
-                            rating: 1,
                             fcmToken: 1,
                             location: 1,
-                            "rideVehicleInfo.vehicleName": 1,
-                            "rideVehicleInfo.vehicleImage": 1,
-                            "rideVehicleInfo.VehicleNumber": 1,
-                            "rideVehicleInfo.PricePerKm": 1,
+                            rating: 1,
                             "rideVehicleInfo.vehicleType": 1,
-                            "RechargeData.expireData": 1,
+                            "rideVehicleInfo.vehicleName": 1,
+                            "rideVehicleInfo.VehicleNumber": 1,
                             preferences: 1,
-                            on_ride_id: 1,
                             distance: 1,
-                            isAvailable: 1,
-                            lastActiveAt: 1,
                         },
-                    },
-                    {
-                        $sort: { distance: 1 },
                     },
                 ]);
 
-                console.info(
-                    `Found ${riders.length} riders in radius for ride ${rideId}`
-                );
+                console.info(`Found ${validRiders.length} riders in radius for ride ${rideId}`);
 
-                const currentDate = new Date();
-
-                const preferenceFilteredRiders = riders.filter((rider) => {
-                    const driverType = rider?.rideVehicleInfo?.vehicleType?.trim();
+                // Apply vehicle type preference filtering
+                const matchedRiders = validRiders.filter((rider) => {
+                    const driverType = rider?.rideVehicleInfo?.vehicleType?.toUpperCase()?.trim();
                     const prefs = rider.preferences || {};
-
-                    console.info("--------------------------------------------------");
-                    console.info(`👤 Rider: ${rider.name || "Unnamed"} (${rider._id})`);
-                    console.info(`📌 Driver Vehicle Type: ${driverType}`);
-                    console.info(`📌 Ride Requires Vehicle Type: ${vehicleType}`);
-                    console.info(`⚙️ Preferences:`, {
-                        OlyoxAcceptMiniRides: prefs?.OlyoxAcceptMiniRides?.enabled,
-                        OlyoxAcceptSedanRides: prefs?.OlyoxAcceptSedanRides?.enabled,
-                    });
+                    const vType = vehicleType?.toUpperCase();
 
                     let decision = false;
 
-                    const vType = vehicleType?.toUpperCase();
-                    const dType = driverType?.toUpperCase();
-
-                    if (vType === "BIKE" && dType === "BIKE") {
+                    if (vType === "BIKE" && driverType === "BIKE") {
                         decision = true;
                     } else if (vType === "AUTO") {
                         decision = true;
                     } else if (vType === "MINI") {
                         decision =
-                            dType === "MINI" ||
-                            (dType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
-                            ((dType === "SUV" || dType === "XL" || dType === "SUV/XL") &&
+                            driverType === "MINI" ||
+                            (driverType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
+                            ((driverType === "SUV" || driverType === "XL" || driverType === "SUV/XL") &&
                                 prefs.OlyoxAcceptMiniRides?.enabled);
                     } else if (vType === "SEDAN") {
                         decision =
-                            dType === "SEDAN" ||
-                            ((dType === "SUV" || dType === "XL" || dType === "SUV/XL") &&
+                            driverType === "SEDAN" ||
+                            ((driverType === "SUV" || driverType === "XL" || driverType === "SUV/XL") &&
                                 prefs.OlyoxAcceptSedanRides?.enabled);
                     } else if (vType === "SUV" || vType === "SUV/XL" || vType === "XL") {
-                        decision = dType === "SUV/XL" || dType === "XL" || dType === "SUV";
-                    } else {
-                        decision = false;
+                        decision = driverType === "SUV/XL" || driverType === "XL" || driverType === "SUV";
                     }
 
-                    console.info(
-                        `✅ Decision: ${decision ? "ACCEPTED ✅" : "REJECTED ❌"}`
-                    );
-                    console.info("--------------------------------------------------");
+                    if (decision) {
+                        console.info(`✅ Matched: ${rider.name} (${rider._id}) - ${driverType}`);
+                    }
 
                     return decision;
                 });
 
-                console.info(
-                    `Matched ${preferenceFilteredRiders.length} riders after preference filter ✅`
-                );
+                console.info(`${matchedRiders.length} riders matched after preference filter`);
 
-                console.log(
-                    "preferenceFilteredRiders",
-                    preferenceFilteredRiders.length
-                );
-
-                preferenceFilteredRiders.forEach((rider) => {
-                    console.info(
-                        `✅ Rider Matched: ${rider.name || "Unnamed"} (${rider._id}) - Vehicle: ${rider?.rideVehicleInfo?.vehicleType}`
-                    );
-                });
-
-                const validRiders = preferenceFilteredRiders.filter((rider) => {
-                    try {
-                        const expireDate = rider?.RechargeData?.expireData;
-                        const hasValidRecharge =
-                            expireDate && new Date(expireDate) >= currentDate;
-                        const isFreeRider = !rider?.on_ride_id;
-                        const isAvailable = rider?.isAvailable === true;
-
-                        if (!hasValidRecharge) {
-                            console.debug(
-                                `Rider ${rider._id} filtered: recharge expired (${expireDate})`
-                            );
-                        }
-                        if (!isFreeRider) {
-                            console.debug(
-                                `Rider ${rider._id} filtered: already on ride (${rider.on_ride_id})`
-                            );
-                        }
-                        if (!isAvailable) {
-                            console.debug(`Rider ${rider._id} filtered: not available`);
-                        }
-
-                        return hasValidRecharge && isFreeRider && isAvailable;
-                    } catch (filterError) {
-                        console.warn(
-                            `Error filtering rider ${rider._id}:`,
-                            filterError.message
-                        );
-                        return false;
-                    }
-                });
-
-                console.info(
-                    `${validRiders.length} valid riders found out of ${riders.length} total riders for ride ${rideId}`
-                );
-
-                await saveRidersToRedis(redisClient, rideId, validRiders);
-                const processResult = await processRiders(
-                    redisClient,
-                    rideId,
-                    validRiders
-                );
-
-                if (validRiders.length === 0) {
+                // If no riders found, retry with larger radius
+                if (matchedRiders.length === 0) {
                     console.warn(`No valid riders found for ride ${rideId}`);
                     retryCount++;
 
-                    await updateRideStatus(redisClient, rideId, "searching", {
-                        retry_count: retryCount,
-                        search_radius: currentRadius / 1000,
-                        available_drivers: validRiders.length,
-                        last_search_at: new Date(),
+                    await RideBooking.findByIdAndUpdate(rideId, {
+                        $set: {
+                            retry_count: retryCount,
+                            search_radius: currentRadius / 1000,
+                            last_search_at: new Date(),
+                        }
                     });
 
                     if (retryCount < MAX_RETRIES) {
-                        console.info(
-                            `Waiting ${RETRY_DELAY_MS / 1000} seconds before retry...`
-                        );
+                        console.info(`Waiting ${RETRY_DELAY_MS / 1000} seconds before retry...`);
                         await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
                         continue;
                     } else {
-                        await updateRideStatus(redisClient, rideId, "cancelled", {
-                            cancellation_reason: "No drivers available",
-                            cancelled_at: new Date(),
+                        await RideBooking.findByIdAndUpdate(rideId, {
+                            $set: {
+                                ride_status: "cancelled",
+                                cancellation_reason: "No drivers available",
+                                cancelled_at: new Date(),
+                            }
                         });
                         return {
                             success: false,
@@ -854,226 +769,57 @@ const initiateDriverSearch = async (rideId, req, res) => {
                     }
                 }
 
-                // Enhanced notification sending with tracking
-                const sendRideNotifications = async (riders, ride) => {
-                    console.log("Starting to send notifications for ride:", ride._id);
-                    
-                    const notificationResults = [];
-                    
-                    for (const rider of riders) {
-                        try {
-                            // Validate rider has required fields
-                            if (!rider._id) {
-                                console.warn(`Skipping rider without _id`);
-                                continue;
-                            }
-                            
-                            if (!rider.fcmToken) {
-                                console.warn(`Rider ${rider._id} has no FCM token, skipping notification`);
-                                // Track riders without FCM tokens
-                                notificationResults.push({
-                                    rider_id: rider._id,
-                                    distance_from_pickup: Math.round(rider.distance || 0),
-                                    distance_from_pickup_km: ((rider.distance || 0) / 1000).toFixed(2),
-                                    notification_time: new Date(),
-                                    notification_count: 1,
-                                    notification_failed: true,
-                                    error_message: "No FCM token available",
-                                    rider_location: rider.location || null,
-                                    search_attempt: retryCount + 1,
-                                    search_radius: currentRadius,
-                                });
-                                continue;
-                            }
-                            
-                            const notificationTime = new Date();
-                            
-                            // Get existing notification data for this rider
-                            const existingRiderData = ride.notified_riders?.find(
-                                (nr) => nr.rider_id?.toString() === rider._id.toString()
-                            );
-                            
-                            const notificationCount = existingRiderData 
-                                ? existingRiderData.notification_count + 1 
-                                : 1;
-                            
-                            // Send notification
-                            await sendNotification.sendNotification(
-                                rider.fcmToken,
-                                "New Ride Available",
-                                "A new ride request is waiting! Please open the app to accept.",
-                                {
-                                    event: "NEW_RIDE",
-                                    rideDetails: {
-                                        rideId: ride._id.toString(),
-                                        distance: ride?.route_info?.distance,
-                                        distance_from_pickup_km: ((rider.distance || 0) / 1000).toFixed(2),
-                                        pickup: ride.pickup_address,
-                                        drop: ride.drop_address,
-                                        vehicleType: ride.vehicle_type,
-                                        pricing: ride.pricing,
-                                    },
-                                    screen: "RideRequest",
-                                    riderId: rider._id,
-                                },
-                                "ride_request_channel"
-                            );
-                            
-                            console.info(
-                                `Notification sent to rider ${rider._id} for ride ${ride._id}`
-                            );
-                            
-                            // Prepare notification tracking data - only for successful notifications
-                            const notificationData = {
-                                rider_id: rider._id,
-                                distance_from_pickup: Math.round(rider.distance || 0),
-                                distance_from_pickup_km: ((rider.distance || 0) / 1000).toFixed(2),
-                                notification_time: notificationTime,
-                                notification_count: notificationCount,
-                                rider_location: rider.location || null,
-                                search_attempt: retryCount + 1,
-                                search_radius: currentRadius,
-                                notification_failed: false,
-                            };
-                            
-                            notificationResults.push(notificationData);
-                            
-                        } catch (err) {
-                            console.error(
-                                `Failed to send notification to rider ${rider._id}:`,
-                                err
-                            );
-                            
-                            // Only track failed attempts if we have a valid rider_id
-                            if (rider._id) {
-                                notificationResults.push({
-                                    rider_id: rider._id,
-                                    distance_from_pickup: Math.round(rider.distance || 0),
-                                    distance_from_pickup_km: ((rider.distance || 0) / 1000).toFixed(2),
-                                    notification_time: new Date(),
-                                    notification_count: 1,
-                                    notification_failed: true,
-                                    error_message: err.message || "Unknown error",
-                                    error_code: err.code || "NOTIFICATION_ERROR",
-                                    rider_location: rider.location || null,
-                                    search_attempt: retryCount + 1,
-                                    search_radius: currentRadius,
-                                });
-                            }
-                        }
-                    }
-                    
-                    // Update ride with notification tracking - only if we have valid results
-                    if (notificationResults.length > 0) {
-                        try {
-                            // Filter out any results without rider_id before updating
-                            const validResults = notificationResults.filter(
-                                result => result.rider_id && mongoose.Types.ObjectId.isValid(result.rider_id)
-                            );
-                            
-                            if (validResults.length > 0) {
-                                await updateRideWithNotificationData(ride._id, validResults);
-                                console.info(`Successfully tracked ${validResults.length} notifications`);
-                            } else {
-                                console.warn("No valid notification results to save");
-                            }
-                        } catch (updateErr) {
-                            console.error("Failed to update notification data:", updateErr);
-                            // Log the error but don't throw to prevent blocking the flow
-                        }
-                    }
-                    
-                    return notificationResults;
-                };
-
-                // Helper function to update ride with notification data
-                const updateRideWithNotificationData = async (rideId, notificationData) => {
-                    try {
-                        const updateOperations = notificationData.map((data) => ({
-                            updateOne: {
-                                filter: { 
-                                    _id: rideId,
-                                    "notified_riders.rider_id": { $ne: data.rider_id }
-                                },
-                                update: {
-                                    $push: {
-                                        notified_riders: data
-                                    }
-                                }
-                            }
-                        }));
-                        
-                        // For riders already in the array, update their data
-                        const incrementOperations = notificationData.map((data) => ({
-                            updateOne: {
-                                filter: { 
-                                    _id: rideId,
-                                    "notified_riders.rider_id": data.rider_id
-                                },
-                                update: {
-                                    $set: {
-                                        "notified_riders.$.notification_time": data.notification_time,
-                                        "notified_riders.$.notification_count": data.notification_count,
-                                        "notified_riders.$.distance_from_pickup": data.distance_from_pickup,
-                                        "notified_riders.$.distance_from_pickup_km": data.distance_from_pickup_km,
-                                        "notified_riders.$.search_attempt": data.search_attempt,
-                                    },
-                                    $push: {
-                                        "notified_riders.$.notification_history": {
-                                            time: data.notification_time,
-                                            distance: data.distance_from_pickup,
-                                            attempt: data.search_attempt,
-                                        }
-                                    }
-                                }
-                            }
-                        }));
-                        
-                        // Execute both operations
-                        if (updateOperations.length > 0) {
-                            await RideBooking.bulkWrite(updateOperations);
-                        }
-                        if (incrementOperations.length > 0) {
-                            await RideBooking.bulkWrite(incrementOperations);
-                        }
-                        
-                        console.info(`Updated notification data for ${notificationData.length} riders`);
-                    } catch (err) {
-                        console.error("Error updating ride with notification data:", err);
-                        throw err;
-                    }
-                };
-
-                // Fire-and-forget notification with tracking
-                const notifyRiders = (riders, ride) => {
-                    sendRideNotifications(riders, ride).catch((err) => {
-                        console.error("Unexpected error in notification flow:", err);
-                    });
-                };
-
-                // Trigger notifications
-                notifyRiders(validRiders, currentRide);
-
-                console.info(`Driver search process completed for ride ${rideId}`);
-
-                return processResult;
-            } catch (searchError) {
-                console.error(
-                    `Driver search attempt ${retryCount + 1} failed:`,
-                    searchError.message
+                // Send notifications and track in single operation
+                const notificationResults = await sendBatchNotifications(
+                    matchedRiders,
+                    currentRide,
+                    retryCount + 1,
+                    currentRadius
                 );
+
+                // Single bulk update for all notification tracking
+                if (notificationResults.successfulNotifications.length > 0) {
+                    await RideBooking.findByIdAndUpdate(rideId, {
+                        $push: {
+                            notified_riders: {
+                                $each: notificationResults.successfulNotifications
+                            }
+                        },
+                        $set: {
+                            last_notification_sent_at: new Date(),
+                        }
+                    });
+                }
+
+                console.info(
+                    `✅ Sent ${notificationResults.successCount}/${matchedRiders.length} notifications for ride ${rideId}`
+                );
+
+                // Start background notification loop
+                processRidersBackground(rideId, matchedRiders, currentRide);
+
+                return {
+                    success: true,
+                    message: "Driver search initiated",
+                    riders_notified: notificationResults.successCount,
+                    total_riders: matchedRiders.length,
+                };
+
+            } catch (searchError) {
+                console.error(`Driver search attempt ${retryCount + 1} failed:`, searchError.message);
                 retryCount++;
 
                 if (retryCount < MAX_RETRIES) {
-                    console.info(
-                        `Waiting ${RETRY_DELAY_MS / 1000} seconds before retry...`
-                    );
+                    console.info(`Waiting ${RETRY_DELAY_MS / 1000} seconds before retry...`);
                     await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
                 } else {
-                    await updateRideStatus(redisClient, rideId, "cancelled", {
-                        cancellation_reason: "Driver search failed after maximum retries",
-                        cancelled_at: new Date(),
-                        final_retry_count: retryCount,
+                    await RideBooking.findByIdAndUpdate(rideId, {
+                        $set: {
+                            ride_status: "cancelled",
+                            cancellation_reason: "Driver search failed after maximum retries",
+                            cancelled_at: new Date(),
+                            final_retry_count: retryCount,
+                        }
                     });
                     return {
                         success: false,
@@ -1083,28 +829,30 @@ const initiateDriverSearch = async (rideId, req, res) => {
             }
         }
 
-        await updateRideStatus(redisClient, rideId, "cancelled", {
-            cancellation_reason: "Driver search failed after maximum retries",
-            cancelled_at: new Date(),
-            final_retry_count: retryCount,
+        await RideBooking.findByIdAndUpdate(rideId, {
+            $set: {
+                ride_status: "cancelled",
+                cancellation_reason: "Driver search failed after maximum retries",
+                cancelled_at: new Date(),
+                final_retry_count: retryCount,
+            }
         });
 
         return {
             success: false,
             message: "Driver search failed after maximum retries",
         };
+
     } catch (error) {
         console.error("Driver search initiation failed:", error.message);
 
         try {
-            await updateRideStatus(redisClient, rideId, "cancelled", {
-                cancellation_reason: "Driver search error: " + error.message,
-                cancelled_at: new Date(),
-                last_error: {
-                    message: error.message,
-                    code: "DRIVER_SEARCH_FAILED",
-                    occurred_at: new Date(),
-                },
+            await RideBooking.findByIdAndUpdate(rideId, {
+                $set: {
+                    ride_status: "cancelled",
+                    cancellation_reason: "Driver search error: " + error.message,
+                    cancelled_at: new Date(),
+                }
             });
         } catch (updateError) {
             console.error("Failed to update ride with error:", updateError.message);
@@ -1113,6 +861,155 @@ const initiateDriverSearch = async (rideId, req, res) => {
         throw error;
     }
 };
+
+// Optimized notification sender with proper tracking
+const sendBatchNotifications = async (riders, ride, searchAttempt, searchRadius) => {
+    const results = {
+        successfulNotifications: [],
+        failedNotifications: [],
+        successCount: 0,
+        failCount: 0,
+    };
+
+    // Send all notifications in parallel for speed
+    const notificationPromises = riders.map(async (rider) => {
+        try {
+            if (!rider.fcmToken) {
+                console.warn(`Rider ${rider._id} has no FCM token`);
+                results.failedNotifications.push({
+                    rider_id: rider._id,
+                    error: "No FCM token",
+                });
+                return;
+            }
+
+            const notificationTime = new Date();
+            const distanceKm = ((rider.distance || 0) / 1000).toFixed(2);
+
+            await sendNotification.sendNotification(
+                rider.fcmToken,
+                "New Ride Available",
+                "A new ride request is waiting! Please open the app to accept.",
+                {
+                    event: "NEW_RIDE",
+                    rideDetails: {
+                        rideId: ride._id.toString(),
+                        distance: ride?.route_info?.distance,
+                        distance_from_pickup_km: distanceKm,
+                        pickup: ride.pickup_address,
+                        drop: ride.drop_address,
+                        vehicleType: ride.vehicle_type,
+                        pricing: ride.pricing,
+                    },
+                    screen: "RideRequest",
+                    riderId: rider._id.toString(),
+                },
+                "ride_request_channel"
+            );
+
+            console.info(`✅ Notification sent to rider ${rider._id}`);
+
+            results.successfulNotifications.push({
+                rider_id: rider._id,
+                distance_from_pickup: Math.round(rider.distance || 0),
+                distance_from_pickup_km: distanceKm,
+                notification_time: notificationTime,
+                notification_count: 1,
+                rider_location: rider.location || null,
+                search_attempt: searchAttempt,
+                search_radius: searchRadius,
+                notification_failed: false,
+            });
+
+            results.successCount++;
+        } catch (err) {
+            console.error(`❌ Failed to send notification to rider ${rider._id}:`, err.message);
+            
+            results.failedNotifications.push({
+                rider_id: rider._id,
+                error: err.message,
+            });
+            results.failCount++;
+        }
+    });
+
+    await Promise.allSettled(notificationPromises);
+
+    return results;
+};
+
+// Background process for repeated notifications (without Redis)
+const processRidersBackground = async (rideId, riders, initialRideData) => {
+    const MAX_DURATION = 120000; // 2 minutes
+    const NOTIFICATION_INTERVAL = 5000; // 5 seconds
+    const startTime = Date.now();
+    let batchCount = 1; // Already sent first batch
+
+    console.info(`🔄 Starting background notification loop for ride ${rideId}`);
+
+    try {
+        while (Date.now() - startTime < MAX_DURATION) {
+            await new Promise(resolve => setTimeout(resolve, NOTIFICATION_INTERVAL));
+
+            // Check ride status (use lean for performance)
+            const ride = await RideBooking.findById(rideId)
+                .select('ride_status rejected_by_drivers')
+                .lean();
+
+            if (!ride) {
+                console.warn(`⚠️ Ride ${rideId} not found, stopping notifications`);
+                break;
+            }
+
+            if (!["pending", "searching"].includes(ride.ride_status)) {
+                console.info(`ℹ️ Ride ${rideId} status is ${ride.ride_status}, stopping notifications`);
+                break;
+            }
+
+            // Get fresh list of rejected drivers
+            const rejectedDriverIds = (ride.rejected_by_drivers || []).map(r => 
+                typeof r === 'object' ? r.driver?.toString() : r.toString()
+            );
+
+            // Filter out rejected drivers
+            const eligibleRiders = riders.filter(
+                r => !rejectedDriverIds.includes(r._id.toString())
+            );
+
+            if (eligibleRiders.length === 0) {
+                console.info(`ℹ️ All riders have rejected ride ${rideId}, stopping notifications`);
+                break;
+            }
+
+            batchCount++;
+            console.info(`🔔 Sending batch ${batchCount} to ${eligibleRiders.length} riders`);
+
+            // Send notifications (fire and forget, don't wait)
+            sendBatchNotifications(eligibleRiders, initialRideData, batchCount, 0)
+                .then(results => {
+                    console.info(`✅ Batch ${batchCount}: ${results.successCount} sent`);
+                    
+                    // Update notification count in background
+                    if (results.successfulNotifications.length > 0) {
+                        RideBooking.findByIdAndUpdate(rideId, {
+                            $inc: {
+                                total_notifications_sent: results.successCount
+                            },
+                            $set: {
+                                last_notification_sent_at: new Date(),
+                            }
+                        }).catch(err => console.error('Failed to update notification count:', err));
+                    }
+                })
+                .catch(err => console.error(`❌ Batch ${batchCount} failed:`, err));
+        }
+
+        console.info(`✅ Completed notification loop for ride ${rideId} after ${batchCount} batches`);
+    } catch (error) {
+        console.error(`❌ Background notification loop error for ride ${rideId}:`, error.message);
+    }
+};
+
 const processRiders = async (redisClient, rideId, riders, rideDetails = {}) => {
     const notificationStateKey = `ride:${rideId}:notification_state`;
     let notificationsSentCount = 0;
