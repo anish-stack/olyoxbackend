@@ -3153,14 +3153,15 @@ exports.AdminChangeCurrentRiderRideStatus = async (req, res) => {
 
                 if (driver?.fcmToken) {
                     await sendNotification.sendNotification(
-                        driver.fcmToken,
-                        "Ride Cancelled",
-                        "The ride has been cancelled. Awaiting next request.",
-                        {
-                            event: "RIDE_CANCELLED_DRIVER",
-                            rideId: foundRide._id,
-                        }
-                    );
+                    driver.fcmToken,
+                    "You Miss The Ride",
+                    "Hum apke pass or bhi ride laa rhe h jldi jldi ...",
+                    {
+                        event: "RIDE_CANCELLED_DRIVER",
+                        rideId: foundRide._id,
+                    },
+                    "ride_cancel_channel"
+                );
                 }
 
                 // Reset current ride
