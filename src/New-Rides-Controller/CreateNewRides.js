@@ -1381,16 +1381,16 @@ exports.cancelRideRequest = async (req, res) => {
                 }
 
                 try {
-                   await sendNotification.sendNotification(
-                rider.fcmToken,
-                    "You Miss The Ride",
-                    "Hum apke pass or bhi ride laa rhe h jldi jldi ...",
-                    {
-                        event: "RIDE_CANCELLED_DRIVER",
-                        rideId: rideId,
-                    },
-                    "ride_cancel_channel"
-                );
+                    await sendNotification.sendNotification(
+                        rider.fcmToken,
+                       "You Miss The Ride",
+                        "Hum apke pass or bhi ride laa rhe h jldi jldi ...",
+                        {
+                            event: "RIDE_CANCELLED",
+                            rideId: rideId,
+                        },
+                        "ride_cancel_channel"
+                    );
                     console.log(`Cancellation notification sent to rider ${rider.name || rider._id}`);
                 } catch (err) {
                     console.error(`Failed to send cancellation notification to rider ${rider._id}:`, err.message);
