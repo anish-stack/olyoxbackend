@@ -294,8 +294,67 @@ const RideRequestSchema = new Schema({
         default: true
     },
     notified_riders: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Rider'
+        rider_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Rider',
+            required: true
+        },
+        distance_from_pickup: {
+            type: Number, // Distance in meters
+            required: true
+        },
+        distance_from_pickup_km: {
+            type: String, // Distance in km (formatted)
+            required: true
+        },
+        notification_time: {
+            type: Date,
+            required: true,
+            default: Date.now
+        },
+        notification_count: {
+            type: Number,
+            default: 1
+        },
+        rider_location: {
+            type: {
+                type: String,
+                enum: ['Point'],
+                default: 'Point'
+            },
+            coordinates: {
+                type: [Number], // [longitude, latitude]
+                required: false
+            }
+        },
+        search_attempt: {
+            type: Number, // Which retry attempt this notification was sent on
+            default: 1
+        },
+        search_radius: {
+            type: Number, // Radius used for this search (in meters)
+        },
+        notification_failed: {
+            type: Boolean,
+            default: false
+        },
+        error_message: {
+            type: String
+        },
+        notification_history: [{
+            time: {
+                type: Date,
+                required: true
+            },
+            distance: {
+                type: Number, // Distance at time of notification
+                required: true
+            },
+            attempt: {
+                type: Number, // Search attempt number
+                required: true
+            }
+        }]
     }],
     total_notifications_sent: {
         type: Number,

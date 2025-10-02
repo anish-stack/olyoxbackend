@@ -353,7 +353,7 @@ exports.saveFcmTokenToken = async (req, res) => {
         message: "FCM token is required",
       });
     }
-
+console.log("Mai fcm aa rha hu",fcmToken)
     // Set default values if missing
     deviceId = deviceId || "unknown";
     timestamp = timestamp ? new Date(timestamp) : new Date();

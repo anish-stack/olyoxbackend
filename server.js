@@ -354,7 +354,7 @@ app.post('/directions', async (req, res) => {
         }
 
         // If no cache, call Google Maps API
-        const googleMapsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${data?.pickup?.latitude},${data?.pickup?.longitude}&destination=${data?.dropoff?.latitude},${data?.dropoff?.longitude}&key=AIzaSyCr2aKtwOMiUdR0rBMpE0MCWBHvehwoOtM`;
+        const googleMapsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${data?.pickup?.latitude},${data?.pickup?.longitude}&destination=${data?.dropoff?.latitude},${data?.dropoff?.longitude}&key=${process.env.GOOGLE_MAP_KEY}`;
         const apiStartTime = Date.now();
         const response = await axios.get(googleMapsUrl);
         const apiTimeTakenMs = Date.now() - apiStartTime;
@@ -453,7 +453,7 @@ app.post('/webhook/cab-receive-location', Protect, async (req, res) => {
     try {
         const riderId = req.user?.userId;
         const { latitude, longitude, accuracy, speed, timestamp, platform } = req.body;
-
+        console.log("Bhai Mai aa gya hu ,",req.body)
         if (!riderId) return Protect(req, res);
 
         const now = timestamp || Date.now();
@@ -845,7 +845,7 @@ app.get("/share-ride-to-loveone/:rideId", (req, res) => {
     if (!ride) return res.status(404).send("Ride not found");
 
     // Deep link to open app ride page
-    const deepLink = `https://www.appv2.olyox.com/share-ride-to-loveone/${rideId}`;
+    const deepLink = `http://192.168.1.15:3200/share-ride-to-loveone/${rideId}`;
 
     const userAgent = req.headers["user-agent"] || "";
 
