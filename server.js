@@ -450,99 +450,60 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 }
 
 app.post('/webhook/cab-receive-location', Protect, async (req, res) => {
-    try {
-        const riderId = req.user?.userId;
-        const { latitude, longitude, accuracy, speed, timestamp, platform } = req.body;
-        console.log("Bhai Mai aa gya hu ,",req.body)
-        if (!riderId) return Protect(req, res);
+  try {
+    const riderId = req.user?.userId;
+    const { latitude, longitude, accuracy, speed, timestamp, platform } = req.body;
+    console.log("Bhai Mai aa gya hu,", req.body);
 
-        const now = timestamp || Date.now();
+    if (!riderId) return Protect(req, res);
 
-        // ✅ Redis cache
-        const locationData = {
-            riderId,
-            latitude,
-            longitude,
-            accuracy,
-            speed,
-            platform: platform || 'unknown',
-            timestamp: now,
-        };
+    const now = timestamp || Date.now();
 
-        await pubClient.setEx(
-            `rider:location:${riderId}`,
-            GEO_UPDATE_TTL,
-            JSON.stringify(locationData)
-        );
+    // ✅ Redis cache
+    const locationData = {
+      riderId,
+      latitude,
+      longitude,
+      accuracy,
+      speed,
+      platform: platform || 'unknown',
+      timestamp: now,
+    };
 
-        console.log(`📦 Cached in Redis for rider ${riderId}:`);
+    await pubClient.setEx(
+      `rider:location:${riderId}`,
+      GEO_UPDATE_TTL,
+      JSON.stringify(locationData)
+    );
 
-        // ✅ Accuracy filter
-        // if (accuracy && accuracy > 10) {
-        //     //   console.log(`⏩ Skip DB update for ${riderId}: poor accuracy (${accuracy}m)`);
-        //     return res.status(200).json({
-        //         message: "Location cached (DB skipped due to accuracy)",
-        //         dbUpdated: false,
-        //         data: locationData,
-        //     });
-        // }
+    console.log(`📦 Cached in Redis for rider ${riderId}:`, locationData);
 
-        // ✅ Check previous location (skip if moved <20m)
-        const prev = await RiderModel.findById(riderId, { location: 1 }).lean();
-        if (prev?.location?.coordinates?.length === 2) {
-            const [prevLng, prevLat] = prev.location.coordinates;
-            const distance = haversineDistance(prevLat, prevLng, latitude, longitude);
+    // ✅ DB update (always update, no filters)
+    const updatedDoc = await RiderModel.findOneAndUpdate(
+      { _id: riderId },
+      {
+        location: { type: "Point", coordinates: [longitude, latitude] },
+        lastUpdated: new Date(now),
+      },
+      { upsert: true, new: true }
+    );
 
-            if (distance < 20) {
-                // console.log(`⏩ Skip DB update for ${riderId}: moved only ${distance.toFixed(1)}m`);
-                return res.status(200).json({
-                    message: "Location cached (DB skipped due to low movement)",
-                    dbUpdated: false,
-                    data: locationData,
-                });
-            }
-        }
+    console.log(`💾 DB updated for rider ${riderId}:`, {
+      name: updatedDoc?.name,
+      coords: updatedDoc?.location?.coordinates
+    });
 
-        // // ✅ Speed convert (m/s → km/h)
-        // let speedKmh = null;
-        // if (typeof speed === "number") {
-        //     speedKmh = (speed * 3.6).toFixed(2);
-        // }
-
-        // ✅ DB update
-        const updatedDoc = await RiderModel.findOneAndUpdate(
-            { _id: riderId },
-            {
-                location: { type: "Point", coordinates: [longitude, latitude] },
-                lastUpdated: new Date(now)
-            },
-            { upsert: true, new: true }
-        );
-
-        if (updatedDoc) {
-            console.log(`💾 DB updated for rider ${riderId}:`, {
-                name: updatedDoc.name,
-                coords: updatedDoc.location?.coordinates
-            });
-
-            return res.status(200).json({
-                message: "Location cached and updated successfully",
-                dbUpdated: true,
-                data: locationData,
-            });
-        } else {
-            console.log(`⚠️ Rider ${riderId} not found in DB`);
-            return res.status(200).json({
-                message: "Location cached (DB not found)",
-                dbUpdated: false,
-                data: locationData,
-            });
-        }
-    } catch (err) {
-        console.error("❌ Error handling location update:", err.message);
-        res.status(500).json({ error: "Internal server error" });
-    }
+    return res.status(200).json({
+      message: "Location cached and updated successfully",
+      dbUpdated: !!updatedDoc,
+      data: locationData,
+    });
+  } catch (err) {
+    console.error("❌ Error handling location update:", err.message);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 });
+
 
 app.post('/webhook/receive-location', Protect, async (req, res) => {
     try {

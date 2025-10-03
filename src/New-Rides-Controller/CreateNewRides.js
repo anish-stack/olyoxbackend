@@ -4068,106 +4068,119 @@ exports.RateYourRider = async (req, res) => {
 };
 
 exports.FindRiderNearByUser = async (req, res) => {
-    try {
-        const { lat, lng, vehicleType } = req.body;
+  try {
+    const { lat, lng, vehicleType } = req.body;
 
-        if (!lat || !lng || !vehicleType) {
-            return res
-                .status(400)
-                .json({
-                    success: false,
-                    message: "lat, lng, and vehicleType are required.",
-                });
-        }
-
-        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes ago
-
-        const riders = await RiderModel.aggregate([
-            {
-                $geoNear: {
-                    near: {
-                        type: "Point",
-                        coordinates: [lng, lat], // [longitude, latitude]
-                    },
-                    distanceField: "distance",
-                    maxDistance: 3000,
-                    spherical: true,
-                },
-            },
-            {
-                $match: {
-                    isAvailable: true,
-                    lastUpdated: { $gte: tenMinutesAgo }, // ✅ only riders updated within last 10 min
-
-                    $expr: {
-                        $regexMatch: {
-                            input: { $trim: { input: "$rideVehicleInfo.vehicleType" } },
-                            regex: vehicleType,
-                            options: "i",
-                        },
-                    },
-                    $or: [{ on_ride_id: null }, { on_ride_id: "" }],
-                },
-            },
-            {
-                $project: {
-                    name: 1,
-                    phoneNumber: 1,
-                    profileImage: 1,
-                    rating: 1,
-                    fcmToken: 1,
-                    location: 1,
-                    "rideVehicleInfo.vehicleName": 1,
-                    "rideVehicleInfo.vehicleImage": 1,
-                    "rideVehicleInfo.VehicleNumber": 1,
-                    "rideVehicleInfo.PricePerKm": 1,
-                    "rideVehicleInfo.vehicleType": 1,
-                    "RechargeData.expireData": 1,
-                    on_ride_id: 1,
-                    location: 1,
-                    distance: 1,
-                    isAvailable: 1,
-                    lastActiveAt: 1,
-                    lastUpdated: 1,
-                },
-            },
-            {
-                $sort: { distance: 1 },
-            },
-        ]);
-
-
-        console.info(`Found ${riders.length} riders within 5km.`);
-
-        const currentDate = new Date();
-
-        const validRiders = riders.filter((rider) => {
-            const expireDate = rider?.RechargeData?.expireData;
-            const hasValidRecharge =
-                expireDate && new Date(expireDate) >= currentDate;
-
-            if (!hasValidRecharge) {
-                console.debug(
-                    `Rider ${rider._id} skipped due to expired recharge (${expireDate})`
-                );
-            }
-
-            return hasValidRecharge;
-        });
-
-        console.info(`Found ${validRiders.length} validRiders riders within 5km.`);
-
-        return res.status(200).json({
-            success: true,
-            count: validRiders.length,
-            data: validRiders,
-        });
-    } catch (error) {
-        console.error("Error finding nearby riders:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Server error while finding nearby riders.",
-            error: error.message,
-        });
+    if (!lat || !lng || !vehicleType) {
+      return res.status(400).json({
+        success: false,
+        message: "lat, lng, and vehicleType are required.",
+      });
     }
+
+    const tenMinutesAgo = new Date(Date.now() - 1 * 60 * 1000); // 10 minutes ago
+
+    const riders = await RiderModel.aggregate([
+      {
+        $geoNear: {
+          near: { type: "Point", coordinates: [lng, lat] },
+          distanceField: "distance",
+          maxDistance: 3000,
+          spherical: true,
+        },
+      },
+      {
+        $match: {
+          isAvailable: true,
+          lastUpdated: { $gte: tenMinutesAgo },
+          $or: [{ on_ride_id: null }, { on_ride_id: "" }],
+        },
+      },
+      {
+        $project: {
+          name: 1,
+          phoneNumber: 1,
+          profileImage: 1,
+          rating: 1,
+          fcmToken: 1,
+          location: 1,
+          "rideVehicleInfo.vehicleName": 1,
+          "rideVehicleInfo.vehicleImage": 1,
+          "rideVehicleInfo.VehicleNumber": 1,
+          "rideVehicleInfo.PricePerKm": 1,
+          "rideVehicleInfo.vehicleType": 1,
+          "RechargeData.expireData": 1,
+          on_ride_id: 1,
+          lastActiveAt: 1,
+          lastUpdated: 1,
+          preferences: 1,
+        },
+      },
+      { $sort: { distance: 1 } },
+    ]);
+
+    console.info(`Found ${riders.length} riders within 3km.`);
+
+    const currentDate = new Date();
+
+    const validRiders = riders.filter((rider) => {
+      // ✅ Check recharge validity
+      const expireDate = rider?.RechargeData?.expireData;
+      if (!expireDate || new Date(expireDate) < currentDate) {
+        console.debug(`Rider ${rider._id} skipped due to expired recharge (${expireDate})`);
+        return false;
+      }
+
+      // ✅ Vehicle type and preference filtering
+      const normalizeVehicleType = (type) => type?.toString().toUpperCase().trim() || null;
+      const driverType = normalizeVehicleType(rider?.rideVehicleInfo?.vehicleType);
+      const requestedType = normalizeVehicleType(vehicleType);
+      const prefs = rider.preferences || {};
+
+      if (!driverType) {
+        console.warn(`Rider ${rider._id} has no vehicle type, skipping`);
+        return false;
+      }
+
+      let decision = false;
+
+      if (requestedType === "BIKE") {
+        decision = driverType === "BIKE";
+      } else if (requestedType === "AUTO") {
+        decision = driverType === "AUTO";
+      } else if (requestedType === "MINI") {
+        if (driverType === "MINI") decision = true;
+        else if (driverType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) decision = true;
+        else if (["SUV", "XL", "SUV/XL"].includes(driverType) && prefs.OlyoxAcceptMiniRides?.enabled) decision = true;
+      } else if (requestedType === "SEDAN") {
+        if (driverType === "SEDAN") decision = true;
+        else if (["SUV", "XL", "SUV/XL"].includes(driverType) && prefs.OlyoxAcceptSedanRides?.enabled) decision = true;
+      } else if (["SUV", "SUV/XL", "XL"].includes(requestedType)) {
+        decision = ["SUV", "XL", "SUV/XL"].includes(driverType);
+      }
+
+      if (decision) {
+        console.info(`✅ Matched: ${rider.name} (${rider._id}) - Driver: ${driverType}, Requested: ${requestedType}`);
+      } else {
+        console.debug(`❌ Rejected: ${rider.name} (${rider._id}) - Driver: ${driverType}, Requested: ${requestedType}`);
+      }
+
+      return decision;
+    });
+
+    console.info(`Found ${validRiders.length} valid riders within 3km after filtering.`);
+
+    return res.status(200).json({
+      success: true,
+      count: validRiders.length,
+      data: validRiders,
+    });
+  } catch (error) {
+    console.error("Error finding nearby riders:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while finding nearby riders.",
+      error: error.message,
+    });
+  }
 };
