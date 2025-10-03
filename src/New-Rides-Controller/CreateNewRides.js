@@ -4085,7 +4085,7 @@ exports.FindRiderNearByUser = async (req, res) => {
         $geoNear: {
           near: { type: "Point", coordinates: [lng, lat] },
           distanceField: "distance",
-          maxDistance: 3000,
+          maxDistance: 1500,
           spherical: true,
         },
       },
