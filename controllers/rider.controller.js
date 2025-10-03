@@ -979,13 +979,9 @@ exports.getMyAllDetails = async (req, res) => {
       },
     });
 
-    console.log("📊 Today's Completed Rides:", todayCompletedRides.length);
-    console.log("📅 Fcm Token:", driver?.fcmToken);
     const todayEarnings = todayCompletedRides.reduce((sum, ride) => {
       return sum + Number(ride?.pricing?.total_fare || 0);
     }, 0);
-
-    console.log("📊 Today's Earnings:", todayEarnings);
 
     const todayTrips = todayCompletedRides.length;
     const timestamp = new Date().toISOString();
@@ -1000,12 +996,13 @@ exports.getMyAllDetails = async (req, res) => {
       loggedInHours: totalHours,
       currentDate: todayIST,
       location: driver.location?.coordinates,
-
-      earnings: todayEarnings || 0,
-      trips: todayTrips || 0,
+      earnings: todayEarnings,
+      trips: todayTrips,
       hours: formattedHours,
+      points: driver.points || 0,
       lastUpdated: timestamp,
     });
+
     return res.status(200).json({
       isOnRide: !!driver.on_ride_id,
       isAvailable: driver.isAvailable,
@@ -1017,10 +1014,11 @@ exports.getMyAllDetails = async (req, res) => {
       currentDate: todayIST,
       location: driver.location?.coordinates,
 
-      // ✅ New Fields
+      // ✅ Today-specific fields
       earnings: todayEarnings || 0,
       trips: todayTrips || 0,
       hours: formattedHours,
+      points: driver.points || 0,
       lastUpdated: timestamp,
     });
   } catch (error) {
@@ -1028,6 +1026,7 @@ exports.getMyAllDetails = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
 
 exports.getMyAllRides = async (req, res) => {
   try {
