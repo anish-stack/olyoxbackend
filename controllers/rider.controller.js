@@ -353,7 +353,7 @@ exports.saveFcmTokenToken = async (req, res) => {
         message: "FCM token is required",
       });
     }
-console.log("Mai fcm aa rha hu",fcmToken)
+    console.log("Mai fcm aa rha hu", fcmToken)
     // Set default values if missing
     deviceId = deviceId || "unknown";
     timestamp = timestamp ? new Date(timestamp) : new Date();
@@ -806,7 +806,7 @@ exports.uploadDocuments = async (req, res) => {
           type: rider?.rideVehicleInfo?.vehicleType || "",
           numberPlate: rider?.rideVehicleInfo?.VehicleNumber?.toUpperCase() || "",
         },
-        
+
         isDefault: true,
         isActive: false,
         documents,
@@ -1448,6 +1448,65 @@ exports.updateRiderDocumentVerify = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Rider not found",
+      });
+    }
+
+    const riderPhone = rider.phone;
+
+    try {
+      const fetchWebVendorResponse = await axios.get(
+        `https://www.webapi.olyox.com/api/v1/get_vendor_by_number/${riderPhone}`,
+        { timeout: 5000 } // Add timeout to prevent hanging
+      );
+
+      // Validate response status and data
+      if (!fetchWebVendorResponse?.data?.data || !Array.isArray(fetchWebVendorResponse.data.data) || fetchWebVendorResponse.data.data.length === 0) {
+        console.log("❌ Web Vendor not found for phone:", riderPhone);
+        return res.status(400).json({
+          success: false,
+          message: 'Web Vendor not found',
+        });
+      }
+
+      const webVendor = fetchWebVendorResponse.data.data[0]; // Access the first vendor
+      const webVendorId = webVendor._id;
+
+      if (!webVendorId) {
+        console.log("❌ Web Vendor ID is missing in response:", fetchWebVendorResponse.data);
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid Web Vendor data: ID missing',
+        });
+      }
+
+      console.log("✅ Web Vendor found:", { phone: riderPhone, webVendorId });
+
+      // Proceed with document verification
+      const verifyDocumentResponse = await axios.post(
+        `https://www.webapi.olyox.com/api/v1/verify_document?id=${webVendorId}`,
+        {},
+        { timeout: 5000 }
+      );
+
+      // Validate verification response
+      if (!verifyDocumentResponse?.data?.success) {
+        console.log("❌ Document verification failed for Web Vendor ID:", webVendorId);
+        return res.status(400).json({
+          success: false,
+          message: 'Document verification failed',
+        });
+      }
+
+      console.log("✅ Document verified successfully for Web Vendor ID:", webVendorId);
+    } catch (error) {
+      console.error("🔥 Error in Web Vendor API interaction:", {
+        message: error.message,
+        response: error.response?.data,
+        phone: riderPhone,
+      });
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to interact with Web Vendor API',
       });
     }
 
