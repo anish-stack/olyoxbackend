@@ -1,5 +1,5 @@
 const express = require('express');
-const { registerRider, getAllRiders, changeLocation, login, resendOtp, verifyOtp, uploadDocuments, details, getMyAllDetails, getMyAllRides, toggleWorkStatusOfRider, verifyDocument, uploadPaymentQr, getMySessionsByUserId, riderDocumentsVerify, updateBlockStatus, getSingleRider, updateRiderDetails, updateRiderDocumentVerify, logoutRider, deleteRider, AdmintoggleWorkStatusOfRider, saveFcmTokenToken, assignFreeRechargeToRider, addOnVehicle, getMyAddOnVehicle, updateDriverVehicleAddsOn, updateVehicleDetailsForDriver } = require('../controllers/rider.controller');
+const { registerRider, getAllRiders, changeLocation, login, resendOtp, verifyOtp, uploadDocuments, details, getMyAllDetails, getMyAllRides, toggleWorkStatusOfRider, verifyDocument, uploadPaymentQr, getMySessionsByUserId, riderDocumentsVerify, updateBlockStatus, getSingleRider, updateRiderDetails, updateRiderDocumentVerify, logoutRider, deleteRider, AdmintoggleWorkStatusOfRider, saveFcmTokenToken, assignFreeRechargeToRider, addOnVehicle, getMyAddOnVehicle, updateDriverVehicleAddsOn, updateVehicleDetailsForDriver, getAddOnVehicleAdmin, approveVehicleDocument, getAllAddOnVehicleAdmin } = require('../controllers/rider.controller');
 const { calculateRidePriceForUser, rideEndByFallBack } = require('../controllers/ride.request');
 
 const router = express.Router();
@@ -56,7 +56,7 @@ router.put('/updateRiderBlock/:id', updateBlockStatus)
 router.post('/update-fcm', Protect, saveFcmTokenToken)
 router.get('/ride-status/:rideId', ride_status_after_booking)
 
-router.get('/getMyAllDetails', Protect, getMyAllDetails);
+router.get('/getMyAllDetails', getMyAllDetails);
 router.get('/getMyAllRides', Protect, getMyAllRides);
 router.post('/toggleWorkStatusOfRider', Protect, toggleWorkStatusOfRider);
 router.post('/AdmintoggleWorkStatusOfRider/:id', AdmintoggleWorkStatusOfRider);
@@ -91,6 +91,10 @@ router.post('/add-more-vehicle', Protect,upload.array('documents'), addOnVehicle
 router.get('/get-vehicles-details', Protect, getMyAddOnVehicle)
 router.post('/change-vehicle-for-driver',Protect,updateVehicleDetailsForDriver)
 
+router.post('/get_add_on_vehicle_Admin/:id',getAddOnVehicleAdmin)
+router.get('/get_all_add_on_vehicle',getAllAddOnVehicleAdmin)
+
 router.get('/update',updateDriverVehicleAddsOn)
+router.put('/vehicles/:vehicleId/documents/:documentType/approve',approveVehicleDocument)
 
 module.exports = router;

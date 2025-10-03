@@ -11,6 +11,7 @@ const momentTz = require("moment-timezone");
 const VehicleAdds = require("../models/AddNewVheicleForDriver");
 const fs = require("fs");
 const path = require("path");
+const mongoose = require('mongoose');
 
 const Bonus_Model = require("../models/Bonus_Model/Bonus_Model");
 const Parcel_Request = require("../models/Parcel_Models/Parcel_Request");
@@ -18,6 +19,7 @@ const { sendDltMessage } = require("../utils/DltMessageSend");
 const { checkBhAndDoRechargeOnApp } = require("../PaymentWithWebDb/razarpay");
 const NewRideModelModel = require("../src/New-Rides-Controller/NewRideModel.model");
 const sendNotification = require("../utils/sendNotification");
+const SendWhatsAppMessageNormal = require("../utils/normalWhatsapp");
 cloudinary.config({
   cloud_name: "daxbcusb5",
   api_key: "984861767987573",
@@ -916,7 +918,7 @@ exports.details = async (req, res) => {
 
 exports.getMyAllDetails = async (req, res) => {
   try {
-    const user_id = req.user?.userId;
+    const { user_id } = req.query
     if (!user_id) {
       return res.status(400).json({ message: "User ID is required" });
     }
@@ -2139,6 +2141,83 @@ exports.getMyAddOnVehicle = async (req, res) => {
   }
 };
 
+exports.getAddOnVehicleAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const findDetails = await VehicleAdds.find({ riderId: id }).populate('riderId');
+    if (!findDetails) {
+      return res.status(400).json({
+        success: false,
+        message: 'No Add On Vehicle founded by this rider id'
+      })
+    }
+    return res.status(200).json({
+      success: true,
+      data: findDetails
+    })
+  } catch (error) {
+    console.log("Internal server error", error)
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    })
+  }
+}
+
+exports.getAllAddOnVehicleAdmin = async (req, res) => {
+  try {
+    // Extract query parameters
+    const { page = 1, limit = 10, search = '' } = req.query;
+
+    // Convert page and limit to numbers
+    const currentPage = parseInt(page, 10);
+    const itemsPerPage = parseInt(limit, 10);
+
+    // Build search query
+    let searchQuery = {};
+    if (search) {
+      searchQuery = {
+        $or: [
+          { vehicleName: { $regex: search, $options: 'i' } }, // Case-insensitive search on vehicleName
+          { vehicleType: { $regex: search, $options: 'i' } }, // Add other fields as needed
+        ],
+      };
+    }
+
+    // Fetch vehicles with pagination and search
+    const findDetails = await VehicleAdds.find(searchQuery)
+      .populate('riderId')
+      .skip((currentPage - 1) * itemsPerPage)
+      .limit(itemsPerPage);
+
+    // Get total count for pagination
+    const totalItems = await VehicleAdds.countDocuments(searchQuery);
+    const totalPages = Math.ceil(totalItems / itemsPerPage);
+
+    if (!findDetails || findDetails.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No add-on vehicles found',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Vehicles found',
+      data: findDetails,
+      totalPages,
+      currentPage,
+      totalItems,
+    });
+  } catch (error) {
+    console.error('Internal server error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error in fetching add-on vehicles for admin',
+    });
+  }
+};
+
 exports.updateVehicleDetailsForDriver = async (req, res) => {
   try {
     const userId = req.user?.userId;
@@ -2289,6 +2368,114 @@ exports.updateDriverVehicleAddsOn = async (req, res) => {
       success: false,
       message: "Internal Server Error",
       error: error.message,
+    });
+  }
+};
+
+// Controller to approve a specific document and update vehicle approval status
+exports.approveVehicleDocument = async (req, res) => {
+  try {
+    const { vehicleId, documentType } = req.params;
+    const { status, note } = req.body; // Status: "approved" or "rejected", note: optional
+
+    // Validate inputs
+    if (!mongoose.Types.ObjectId.isValid(vehicleId)) {
+      console.log('❌ Invalid vehicle ID:', vehicleId);
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid vehicle ID',
+      });
+    }
+
+    if (!['rc', 'pollution', 'aadharFront', 'aadharBack', 'permit', 'licence', 'insurance', 'panCard'].includes(documentType)) {
+      console.log('❌ Invalid document type:', documentType);
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid document type',
+      });
+    }
+
+    if (!['approved', 'rejected'].includes(status)) {
+      console.log('❌ Invalid status:', status);
+      return res.status(400).json({
+        success: false,
+        message: 'Status must be "approved" or "rejected"',
+      });
+    }
+
+    // Find the vehicle
+    const vehicle = await VehicleAdds.findById(vehicleId).populate('riderId', 'name phone');
+    if (!vehicle) {
+      console.log('❌ Vehicle not found with ID:', vehicleId);
+      return res.status(404).json({
+        success: false,
+        message: 'Vehicle not found',
+      });
+    }
+
+    // Update the specific document's status and note
+    if (vehicle.documents[documentType]) {
+      vehicle.documents[documentType].status = status;
+      if (note) vehicle.documents[documentType].note = note;
+      console.log(`📌 Updated ${documentType} status to:`, status, note ? `with note: ${note}` : '');
+    } else {
+      console.log('❌ Document type not found in vehicle:', documentType);
+      return res.status(400).json({
+        success: false,
+        message: `Document type ${documentType} not found`,
+      });
+    }
+
+    // Check if all required documents are approved
+    const requiredDocuments = ['rc', 'pollution', 'aadharFront', 'aadharBack', 'permit', 'licence', 'insurance', 'panCard'];
+    const allDocumentsApproved = requiredDocuments.every(
+      (doc) => vehicle.documents[doc]?.status === 'approved'
+    );
+
+    // Update vehicleApprovedForRunning status
+    if (allDocumentsApproved) {
+      vehicle.vehicleApprovedForRunning.status = 'approved';
+      vehicle.vehicleApprovedForRunning.date = new Date();
+      vehicle.isActive = true;
+      console.log('✅ All documents approved, vehicle approved for running:', vehicleId);
+
+      // Send WhatsApp notification to rider
+      const rider = vehicle.riderId;
+      if (rider?.phone) {
+        await SendWhatsAppMessageNormal(
+          `🎉 Dear ${rider.name}, all documents for your vehicle (Number Plate: ${vehicle.vehicleDetails.numberPlate}) have been approved! 🚗
+
+          ✅ Vehicle Status: Approved
+          ✅ Approved On: ${new Date().toLocaleDateString('en-GB')}
+
+          You are now ready to start providing services. Stay safe and drive with pride! 🚀
+          — Team Support`,
+          rider.phone
+        );
+        console.log('📨 WhatsApp approval message sent to:', rider.phone);
+      }
+    } else {
+      vehicle.vehicleApprovedForRunning.status = 'pending';
+      console.log('⏳ Not all documents approved, vehicle status set to pending:', vehicleId);
+    }
+
+    // Save the updated vehicle
+    const updatedVehicle = await vehicle.save();
+    console.log('💾 Vehicle saved successfully:', updatedVehicle._id);
+
+    return res.status(200).json({
+      success: true,
+      message: `Document ${documentType} ${status} successfully`,
+      data: updatedVehicle,
+    });
+  } catch (error) {
+    console.error('🔥 Error in approveVehicleDocument:', {
+      message: error.message,
+      stack: error.stack,
+    });
+    return res.status(500).json({
+      success: false,
+      message: 'Something went wrong while approving the document',
     });
   }
 };
