@@ -2178,17 +2178,33 @@ exports.getAllAddOnVehicleAdmin = async (req, res) => {
     if (search) {
       searchQuery = {
         $or: [
-          { vehicleName: { $regex: search, $options: 'i' } }, // Case-insensitive search on vehicleName
-          { vehicleType: { $regex: search, $options: 'i' } }, // Add other fields as needed
+          { 'vehicleDetails.name': { $regex: search.trim(), $options: 'i' } },
+          { 'vehicleDetails.type': { $regex: search.trim(), $options: 'i' } },
+          { 'vehicleDetails.numberPlate': { $regex: search.trim(), $options: 'i' } },
+          {
+            riderId: {
+              $in: await Rider.find({
+                $or: [
+                  { name: { $regex: search.trim(), $options: 'i' } },
+                  { phone: { $regex: search.trim(), $options: 'i' } },
+                  { BH: { $regex: search.trim(), $options: 'i' } },
+                ],
+              }).distinct('_id'),
+            },
+          },
         ],
       };
     }
 
+    console.log('Search Query:', searchQuery); // Debug log
+
     // Fetch vehicles with pagination and search
     const findDetails = await VehicleAdds.find(searchQuery)
-      .populate('riderId')
+      .populate('riderId', 'name phone BH')
       .skip((currentPage - 1) * itemsPerPage)
       .limit(itemsPerPage);
+
+    console.log('Find Details:', findDetails); // Debug log
 
     // Get total count for pagination
     const totalItems = await VehicleAdds.countDocuments(searchQuery);
