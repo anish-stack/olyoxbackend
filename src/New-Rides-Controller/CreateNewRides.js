@@ -2726,7 +2726,7 @@ const handleRideAcceptance = async (
                 "This ride is not available for you, but stay active for upcoming rides.",
               screen: "RiderDashboard",
             },
-            "ride_reject_channel"
+            "ride_cancel_channel"
           );
         } catch (notificationError) {
           console.warn(
