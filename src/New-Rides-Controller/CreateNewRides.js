@@ -161,7 +161,7 @@ exports.NewcreateRequest = async (req, res) => {
 
         if (!isFake) {
             findUser = await User.findById(user).populate("currentRide");
-            
+
             if (!findUser) {
                 return res.status(404).json({
                     success: false,
@@ -193,7 +193,7 @@ exports.NewcreateRequest = async (req, res) => {
         let routeInfo = {};
         try {
             const routeData = await getRouteFromAPI(pickupLocation, dropLocation);
-            
+
             if (routeData) {
                 routeInfo = {
                     distance: routeData.distance,
@@ -212,7 +212,7 @@ exports.NewcreateRequest = async (req, res) => {
                 dropLocation.latitude,
                 dropLocation.longitude
             );
-            
+
             routeInfo = {
                 distance: straightLineDistance,
                 duration: Math.round(straightLineDistance * 3),
@@ -353,8 +353,8 @@ exports.NewcreateRequest = async (req, res) => {
 
         return res.status(201).json({
             success: true,
-            message: isFake 
-                ? "Test ride created successfully! Finding a driver for you..." 
+            message: isFake
+                ? "Test ride created successfully! Finding a driver for you..."
                 : "Your ride request has been created! We're finding the best driver for you...",
             data: responseData,
         });
@@ -396,7 +396,7 @@ exports.NewcreateRequest = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Something went wrong while creating your ride. Please try again",
-            ...(process.env.NODE_ENV === "development" && { 
+            ...(process.env.NODE_ENV === "development" && {
                 details: error.message,
             }),
         });
@@ -684,7 +684,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
                 const currentDate = new Date();
 
                 // Get rejected driver IDs (handle both object and ID formats)
-                const rejectedDriverIds = (currentRide.rejected_by_drivers || []).map(r => 
+                const rejectedDriverIds = (currentRide.rejected_by_drivers || []).map(r =>
                     typeof r === 'object' ? r.driver?.toString() : r.toString()
                 );
 
@@ -965,12 +965,12 @@ const sendBatchNotifications = async (riders, ride, searchAttempt, searchRadius)
             } else if (requestedVehicleType === "AUTO") {
                 isValidMatch = driverVehicleType === "AUTO";
             } else if (requestedVehicleType === "MINI") {
-                isValidMatch = 
+                isValidMatch =
                     driverVehicleType === "MINI" ||
                     (driverVehicleType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled === true) ||
                     (["SUV", "XL", "SUV/XL"].includes(driverVehicleType) && prefs.OlyoxAcceptMiniRides?.enabled === true);
             } else if (requestedVehicleType === "SEDAN") {
-                isValidMatch = 
+                isValidMatch =
                     driverVehicleType === "SEDAN" ||
                     (["SUV", "XL", "SUV/XL"].includes(driverVehicleType) && prefs.OlyoxAcceptSedanRides?.enabled === true);
             } else if (["SUV", "SUV/XL", "XL"].includes(requestedVehicleType)) {
@@ -1041,7 +1041,7 @@ const sendBatchNotifications = async (riders, ride, searchAttempt, searchRadius)
             results.successCount++;
         } catch (err) {
             console.error(`❌ Failed to send notification to rider ${rider._id}:`, err.message);
-            
+
             results.failedNotifications.push({
                 rider_id: rider._id,
                 error: err.message,
@@ -1081,18 +1081,18 @@ const processRidersBackground = async (rideId, riders, initialRideData) => {
 
         if (rType === "BIKE") return dType === "BIKE";
         if (rType === "AUTO") return dType === "AUTO";
-        
+
         if (rType === "MINI") {
             return dType === "MINI" ||
-                   (dType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled === true) ||
-                   (["SUV", "XL", "SUV/XL"].includes(dType) && prefs.OlyoxAcceptMiniRides?.enabled === true);
+                (dType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled === true) ||
+                (["SUV", "XL", "SUV/XL"].includes(dType) && prefs.OlyoxAcceptMiniRides?.enabled === true);
         }
-        
+
         if (rType === "SEDAN") {
             return dType === "SEDAN" ||
-                   (["SUV", "XL", "SUV/XL"].includes(dType) && prefs.OlyoxAcceptSedanRides?.enabled === true);
+                (["SUV", "XL", "SUV/XL"].includes(dType) && prefs.OlyoxAcceptSedanRides?.enabled === true);
         }
-        
+
         if (["SUV", "SUV/XL", "XL"].includes(rType)) {
             return ["SUV", "XL", "SUV/XL"].includes(dType);
         }
@@ -1139,7 +1139,7 @@ const processRidersBackground = async (rideId, riders, initialRideData) => {
             }
 
             // Get fresh list of rejected drivers
-            const rejectedDriverIds = (ride.rejected_by_drivers || []).map(r => 
+            const rejectedDriverIds = (ride.rejected_by_drivers || []).map(r =>
                 typeof r === 'object' ? r.driver?.toString() : r.toString()
             );
 
@@ -1176,7 +1176,7 @@ const processRidersBackground = async (rideId, riders, initialRideData) => {
             sendBatchNotifications(eligibleRiders, initialRideData, batchCount, 0)
                 .then(results => {
                     console.info(`✅ Batch ${batchCount}: ${results.successCount} sent, ${results.failCount} failed`);
-                    
+
                     // Update notification count in background
                     if (results.successCount > 0) {
                         RideBooking.findByIdAndUpdate(rideId, {
@@ -1514,7 +1514,7 @@ exports.cancelRideRequest = async (req, res) => {
 
         // Get notified riders BEFORE updating ride status
         const notifiedRiderIds = foundRide.notified_riders || [];
-        
+
         // Cancel the ride first
         foundRide.ride_status = "cancelled";
         foundRide.cancellation_reason = "User cancelled the ride request";
@@ -1541,7 +1541,7 @@ exports.cancelRideRequest = async (req, res) => {
                 try {
                     await sendNotification.sendNotification(
                         rider.fcmToken,
-                       "You Miss The Ride",
+                        "You Miss The Ride",
                         "Hum apke pass or bhi ride laa rhe h jldi jldi ...",
                         {
                             event: "RIDE_CANCELLED",
@@ -1574,16 +1574,16 @@ exports.cancelRideRequest = async (req, res) => {
             await foundRide.driver.save();
         }
 
-        return res.status(200).json({ 
-            success: true, 
+        return res.status(200).json({
+            success: true,
             message: "Ride cancelled successfully.",
-            notifications_sent: notifiedRiderIds.length 
+            notifications_sent: notifiedRiderIds.length
         });
 
     } catch (error) {
         console.error("Error cancelling ride request:", error);
-        return res.status(500).json({ 
-            message: "Server error while cancelling ride request." 
+        return res.status(500).json({
+            message: "Server error while cancelling ride request."
         });
     }
 };
@@ -1638,9 +1638,8 @@ exports.ride_status_after_booking = async (req, res) => {
                 responsePayload.rideDetails = ride;
                 break;
             case "cancelled":
-                responsePayload.message = `This ride has been cancelled${
-                    ride.cancelled_by ? ` by ${ride.cancelled_by}` : ""
-                }.`;
+                responsePayload.message = `This ride has been cancelled${ride.cancelled_by ? ` by ${ride.cancelled_by}` : ""
+                    }.`;
                 responsePayload.rideDetails = ride;
                 break;
             default:
@@ -1653,8 +1652,8 @@ exports.ride_status_after_booking = async (req, res) => {
         if (error.name === "CastError") {
             return res.status(400).json({ message: "Invalid Ride ID format." });
         }
-        return res.status(500).json({ 
-            message: "Server error while fetching ride status." 
+        return res.status(500).json({
+            message: "Server error while fetching ride status."
         });
     }
 };
@@ -2387,7 +2386,7 @@ exports.riderActionAcceptOrRejectRideVia = async (req, res) => {
                 message: "We couldn't find your driver account",
             });
         }
-        
+
         if (!rider.isAvailable || rider.on_ride_id) {
             return res.status(400).json({
                 success: false,
@@ -2404,7 +2403,7 @@ exports.riderActionAcceptOrRejectRideVia = async (req, res) => {
                 message: "This ride request is no longer available",
             });
         }
-        
+
         if (ride.ride_status !== "searching") {
             return res.status(400).json({
                 success: false,
@@ -2589,14 +2588,16 @@ const handleRideAcceptance = async (
                 try {
                     await sendNotification.sendNotification(
                         rider.fcmToken,
-                        "Ride Cancelled",
-                        "Sorry, this ride request has been cancelled",
+                        "Missed Ride – More Coming Soon",
+                        "You missed this ride as another driver accepted it first. Don’t worry, more ride requests are on the way with Olyox!",
                         {
                             event: "FAKE_RIDE_CANCELLED",
                             rideId: rideId,
-                            message: "This ride is no longer available",
+                            message: "This ride is no longer available, but stay active for upcoming rides.",
                             screen: "RiderDashboard",
-                        }
+                        },
+                        "ride_cancel_channel"
+
                     );
                 } catch (notificationError) {
                     console.warn("Failed to send fake ride notification:", notificationError.message);
@@ -3232,15 +3233,15 @@ exports.AdminChangeCurrentRiderRideStatus = async (req, res) => {
 
                 if (driver?.fcmToken) {
                     await sendNotification.sendNotification(
-                    driver.fcmToken,
-                    "You Miss The Ride",
-                    "Hum apke pass or bhi ride laa rhe h jldi jldi ...",
-                    {
-                        event: "RIDE_CANCELLED_DRIVER",
-                        rideId: foundRide._id,
-                    },
-                    "ride_cancel_channel"
-                );
+                        driver.fcmToken,
+                        "You Miss The Ride",
+                        "Hum apke pass or bhi ride laa rhe h jldi jldi ...",
+                        {
+                            event: "RIDE_CANCELLED_DRIVER",
+                            rideId: foundRide._id,
+                        },
+                        "ride_cancel_channel"
+                    );
                 }
 
                 // Reset current ride
@@ -4009,119 +4010,119 @@ exports.RateYourRider = async (req, res) => {
 };
 
 exports.FindRiderNearByUser = async (req, res) => {
-  try {
-    const { lat, lng, vehicleType } = req.body;
+    try {
+        const { lat, lng, vehicleType } = req.body;
 
-    if (!lat || !lng || !vehicleType) {
-      return res.status(400).json({
-        success: false,
-        message: "lat, lng, and vehicleType are required.",
-      });
+        if (!lat || !lng || !vehicleType) {
+            return res.status(400).json({
+                success: false,
+                message: "lat, lng, and vehicleType are required.",
+            });
+        }
+
+        const tenMinutesAgo = new Date(Date.now() - 1 * 60 * 1000); // 10 minutes ago
+
+        const riders = await RiderModel.aggregate([
+            {
+                $geoNear: {
+                    near: { type: "Point", coordinates: [lng, lat] },
+                    distanceField: "distance",
+                    maxDistance: 1500,
+                    spherical: true,
+                },
+            },
+            {
+                $match: {
+                    isAvailable: true,
+                    lastUpdated: { $gte: tenMinutesAgo },
+                    $or: [{ on_ride_id: null }, { on_ride_id: "" }],
+                },
+            },
+            {
+                $project: {
+                    name: 1,
+                    phoneNumber: 1,
+                    profileImage: 1,
+                    rating: 1,
+                    fcmToken: 1,
+                    location: 1,
+                    "rideVehicleInfo.vehicleName": 1,
+                    "rideVehicleInfo.vehicleImage": 1,
+                    "rideVehicleInfo.VehicleNumber": 1,
+                    "rideVehicleInfo.PricePerKm": 1,
+                    "rideVehicleInfo.vehicleType": 1,
+                    "RechargeData.expireData": 1,
+                    on_ride_id: 1,
+                    lastActiveAt: 1,
+                    lastUpdated: 1,
+                    preferences: 1,
+                },
+            },
+            { $sort: { distance: 1 } },
+        ]);
+
+        console.info(`Found ${riders.length} riders within 3km.`);
+
+        const currentDate = new Date();
+
+        const validRiders = riders.filter((rider) => {
+            // ✅ Check recharge validity
+            const expireDate = rider?.RechargeData?.expireData;
+            if (!expireDate || new Date(expireDate) < currentDate) {
+                console.debug(`Rider ${rider._id} skipped due to expired recharge (${expireDate})`);
+                return false;
+            }
+
+            // ✅ Vehicle type and preference filtering
+            const normalizeVehicleType = (type) => type?.toString().toUpperCase().trim() || null;
+            const driverType = normalizeVehicleType(rider?.rideVehicleInfo?.vehicleType);
+            const requestedType = normalizeVehicleType(vehicleType);
+            const prefs = rider.preferences || {};
+
+            if (!driverType) {
+                console.warn(`Rider ${rider._id} has no vehicle type, skipping`);
+                return false;
+            }
+
+            let decision = false;
+
+            if (requestedType === "BIKE") {
+                decision = driverType === "BIKE";
+            } else if (requestedType === "AUTO") {
+                decision = driverType === "AUTO";
+            } else if (requestedType === "MINI") {
+                if (driverType === "MINI") decision = true;
+                else if (driverType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) decision = true;
+                else if (["SUV", "XL", "SUV/XL"].includes(driverType) && prefs.OlyoxAcceptMiniRides?.enabled) decision = true;
+            } else if (requestedType === "SEDAN") {
+                if (driverType === "SEDAN") decision = true;
+                else if (["SUV", "XL", "SUV/XL"].includes(driverType) && prefs.OlyoxAcceptSedanRides?.enabled) decision = true;
+            } else if (["SUV", "SUV/XL", "XL"].includes(requestedType)) {
+                decision = ["SUV", "XL", "SUV/XL"].includes(driverType);
+            }
+
+            if (decision) {
+                console.info(`✅ Matched: ${rider.name} (${rider._id}) - Driver: ${driverType}, Requested: ${requestedType}`);
+            } else {
+                console.debug(`❌ Rejected: ${rider.name} (${rider._id}) - Driver: ${driverType}, Requested: ${requestedType}`);
+            }
+
+            return decision;
+        });
+
+        console.info(`Found ${validRiders.length} valid riders within 3km after filtering.`);
+
+        return res.status(200).json({
+            success: true,
+            count: validRiders.length,
+            data: validRiders,
+        });
+    } catch (error) {
+        console.error("Error finding nearby riders:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Server error while finding nearby riders.",
+            error: error.message,
+        });
     }
-
-    const tenMinutesAgo = new Date(Date.now() - 1 * 60 * 1000); // 10 minutes ago
-
-    const riders = await RiderModel.aggregate([
-      {
-        $geoNear: {
-          near: { type: "Point", coordinates: [lng, lat] },
-          distanceField: "distance",
-          maxDistance: 1500,
-          spherical: true,
-        },
-      },
-      {
-        $match: {
-          isAvailable: true,
-          lastUpdated: { $gte: tenMinutesAgo },
-          $or: [{ on_ride_id: null }, { on_ride_id: "" }],
-        },
-      },
-      {
-        $project: {
-          name: 1,
-          phoneNumber: 1,
-          profileImage: 1,
-          rating: 1,
-          fcmToken: 1,
-          location: 1,
-          "rideVehicleInfo.vehicleName": 1,
-          "rideVehicleInfo.vehicleImage": 1,
-          "rideVehicleInfo.VehicleNumber": 1,
-          "rideVehicleInfo.PricePerKm": 1,
-          "rideVehicleInfo.vehicleType": 1,
-          "RechargeData.expireData": 1,
-          on_ride_id: 1,
-          lastActiveAt: 1,
-          lastUpdated: 1,
-          preferences: 1,
-        },
-      },
-      { $sort: { distance: 1 } },
-    ]);
-
-    console.info(`Found ${riders.length} riders within 3km.`);
-
-    const currentDate = new Date();
-
-    const validRiders = riders.filter((rider) => {
-      // ✅ Check recharge validity
-      const expireDate = rider?.RechargeData?.expireData;
-      if (!expireDate || new Date(expireDate) < currentDate) {
-        console.debug(`Rider ${rider._id} skipped due to expired recharge (${expireDate})`);
-        return false;
-      }
-
-      // ✅ Vehicle type and preference filtering
-      const normalizeVehicleType = (type) => type?.toString().toUpperCase().trim() || null;
-      const driverType = normalizeVehicleType(rider?.rideVehicleInfo?.vehicleType);
-      const requestedType = normalizeVehicleType(vehicleType);
-      const prefs = rider.preferences || {};
-
-      if (!driverType) {
-        console.warn(`Rider ${rider._id} has no vehicle type, skipping`);
-        return false;
-      }
-
-      let decision = false;
-
-      if (requestedType === "BIKE") {
-        decision = driverType === "BIKE";
-      } else if (requestedType === "AUTO") {
-        decision = driverType === "AUTO";
-      } else if (requestedType === "MINI") {
-        if (driverType === "MINI") decision = true;
-        else if (driverType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) decision = true;
-        else if (["SUV", "XL", "SUV/XL"].includes(driverType) && prefs.OlyoxAcceptMiniRides?.enabled) decision = true;
-      } else if (requestedType === "SEDAN") {
-        if (driverType === "SEDAN") decision = true;
-        else if (["SUV", "XL", "SUV/XL"].includes(driverType) && prefs.OlyoxAcceptSedanRides?.enabled) decision = true;
-      } else if (["SUV", "SUV/XL", "XL"].includes(requestedType)) {
-        decision = ["SUV", "XL", "SUV/XL"].includes(driverType);
-      }
-
-      if (decision) {
-        console.info(`✅ Matched: ${rider.name} (${rider._id}) - Driver: ${driverType}, Requested: ${requestedType}`);
-      } else {
-        console.debug(`❌ Rejected: ${rider.name} (${rider._id}) - Driver: ${driverType}, Requested: ${requestedType}`);
-      }
-
-      return decision;
-    });
-
-    console.info(`Found ${validRiders.length} valid riders within 3km after filtering.`);
-
-    return res.status(200).json({
-      success: true,
-      count: validRiders.length,
-      data: validRiders,
-    });
-  } catch (error) {
-    console.error("Error finding nearby riders:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Server error while finding nearby riders.",
-      error: error.message,
-    });
-  }
 };
