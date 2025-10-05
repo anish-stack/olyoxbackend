@@ -193,11 +193,9 @@ exports.getRiders = async (req, res) => {
             );
         }
 
-        // Select only required fields using .select()
-        const selectFields = '_id name phone location RechargeData createdAt isAvailable on_ride_id';
-
+  
         let riders = await Rider.find(filter)
-            .select(selectFields)
+            .select('_id name phone location RechargeData createdAt rideVehicleInfo lastUpdated isAvailable on_ride_id')
             .sort({ createdAt: -1 })
             .lean();
 
@@ -227,6 +225,10 @@ exports.getRiders = async (req, res) => {
             phone: r.phone,
             location: r.location || null,
             rechargeData: r.RechargeData || null,
+           rideVehicleInfo: r.rideVehicleInfo || null,
+           lastUpdated: r.lastUpdated || null,
+
+
             createdAt: r.createdAt,
             isAvailable: r.isAvailable,
             on_ride_id: r.on_ride_id || null,
