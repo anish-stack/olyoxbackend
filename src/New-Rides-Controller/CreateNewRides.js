@@ -289,7 +289,7 @@ exports.NewcreateRequest = async (req, res) => {
             auto_increase_radius: true,
             retry_count: 0,
             rejected_by_drivers: [],
-            is_fake: isFake,
+            isFake: isFake,
         };
 
         // Add user reference or fake rider details
@@ -2559,7 +2559,7 @@ const handleRideAcceptance = async (
         }
 
         // ===== FAKE RIDE HANDLING =====
-        if (currentRide.is_fake === true) {
+        if (currentRide.isFake === true) {
             console.info(`Fake ride accepted by driver ${riderId}, auto-cancelling ride ${rideId}`);
 
             // Update ride to cancelled immediately
