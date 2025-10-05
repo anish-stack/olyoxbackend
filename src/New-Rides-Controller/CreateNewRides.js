@@ -2740,7 +2740,7 @@ const handleRideAcceptance = async (
         `Driver ${riderId} added to rejected list for ride ${rideId}`
       );
 
-      return res.status(200).json({
+      return res.status(404).json({
         success: false,
         message:
           "This ride is not available for you, but other rides are coming.",
@@ -2884,6 +2884,7 @@ const handleRideAcceptance = async (
         eta: 5,
       },
     });
+
   } catch (error) {
     console.error("Ride acceptance error:", error.message);
     return res.status(500).json({
