@@ -2617,6 +2617,7 @@ const handleRideRejection = async (
                     rejected_by_drivers: {
                         driver: rider._id,
                         rejected_at: new Date(),
+                          byFake: false,
                     },
                 },
             },
@@ -2702,6 +2703,7 @@ const handleRideAcceptance = async (
                         rejected_by_drivers: {
                             driver: rider._id,
                             rejected_at: new Date(),
+                            byFake: true
                         },
                     },
                     $set: { updated_at: new Date() },

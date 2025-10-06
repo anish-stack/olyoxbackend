@@ -143,7 +143,7 @@ const RideRequestSchema = new Schema({
             default: null
         }
     },
-    
+
     ride_status: {
         type: String,
         enum: ['pending', 'searching', 'driver_assigned', 'driver_arrived', 'in_progress', 'completed', 'cancelled'],
@@ -269,6 +269,10 @@ const RideRequestSchema = new Schema({
         rejected_at: {
             type: Date,
             default: Date.now
+        },
+        byFake: {
+            type: Boolean,
+            default: false
         }
 
     }],
