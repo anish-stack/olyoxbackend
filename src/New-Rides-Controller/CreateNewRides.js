@@ -729,7 +729,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
                     } km of [${longitude}, ${latitude}]`
                 );
 
-                const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+                const tenMinutesAgo = new Date(Date.now() - 20 * 60 * 1000);
                 const currentDate = new Date();
 
                 // Get rejected driver IDs (handle both object and ID formats)
@@ -4150,7 +4150,7 @@ exports.FindRiderNearByUser = async (req, res) => {
             });
         }
 
-        const tenMinutesAgo = new Date(Date.now() - 1 * 60 * 1000); // 10 minutes ago
+        const tenMinutesAgo = new Date(Date.now() - 20 * 60 * 1000); // 10 minutes ago
 
         const riders = await RiderModel.aggregate([
             {
