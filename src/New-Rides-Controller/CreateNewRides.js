@@ -97,6 +97,7 @@ exports.NewcreateRequest = async (req, res) => {
             !currentLocation ||
             !vehicleType
         ) {
+            console.error("Please fill in all the required fields to book your ride")
             return res.status(400).json({
                 success: false,
                 message: "Please fill in all the required fields to book your ride",
@@ -113,6 +114,8 @@ exports.NewcreateRequest = async (req, res) => {
 
         // Validation: Fake rider requirements
         if (isFake && (!fakeRiderName || !fakeRiderPhone)) {
+            console.error("Fake rider needs a name and phone number to proceed")
+
             return res.status(400).json({
                 success: false,
                 message: "Fake rider needs a name and phone number to proceed",
@@ -121,6 +124,8 @@ exports.NewcreateRequest = async (req, res) => {
 
         // Validation: Real rider must have user
         if (!isFake && !user) {
+            console.error("Please log in to book a ride")
+
             return res.status(401).json({
                 success: false,
                 message: "Please log in to book a ride",
@@ -131,6 +136,8 @@ exports.NewcreateRequest = async (req, res) => {
 
         // Validate fare structure
         if (fare && typeof fare !== "object") {
+            console.error("Oops! The fare information seems incorrect. Please try again")
+
             return res.status(400).json({
                 success: false,
                 message: "Oops! The fare information seems incorrect. Please try again",
@@ -140,6 +147,8 @@ exports.NewcreateRequest = async (req, res) => {
         // Coordinate validation helper
         const validateCoordinates = (coords, fieldName) => {
             if (!coords?.longitude || !coords?.latitude) {
+                console.error(`We couldn't get the ${fieldName} location. Please select it again`)
+
                 throw new Error(
                     `We couldn't get the ${fieldName} location. Please select it again`
                 );
@@ -164,6 +173,8 @@ exports.NewcreateRequest = async (req, res) => {
         // Validate scheduled time
         if (scheduledAt) {
             const scheduledDate = new Date(scheduledAt);
+            console.error(`schedule`)
+
             if (isNaN(scheduledDate.getTime())) {
                 return res.status(400).json({
                     success: false,
@@ -187,6 +198,8 @@ exports.NewcreateRequest = async (req, res) => {
             findUser = await User.findById(user).populate("currentRide");
 
             if (!findUser) {
+                            console.error(`We couldn't find your account. Please log in again`)
+
                 return res.status(404).json({
                     success: false,
                     message: "We couldn't find your account. Please log in again",
@@ -226,6 +239,8 @@ exports.NewcreateRequest = async (req, res) => {
                     waypoints: routeData.waypoints || [],
                 };
             } else {
+                            console.error(`No route data received`)
+
                 throw new Error("No route data received");
             }
         } catch (error) {
@@ -2617,7 +2632,7 @@ const handleRideRejection = async (
                     rejected_by_drivers: {
                         driver: rider._id,
                         rejected_at: new Date(),
-                          byFake: false,
+                        byFake: false,
                     },
                 },
             },
