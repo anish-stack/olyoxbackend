@@ -8,7 +8,9 @@ const { bookIntercityRide, getBookingDetailsById, getAvailableRides, acceptRide,
 const { getAllRides } = require('../../controllers/ride.request');
 const NewRoutes = express.Router()
 
-NewRoutes.post('/new-ride', NewcreateRequest)
+NewRoutes.post('/new-ride',Protect, NewcreateRequest)
+NewRoutes.post('/new-ride-fake', NewcreateRequest)
+
 NewRoutes.post('/new-price-calculations', calculateRidePriceForUser)
 NewRoutes.get('/status/:rideId', ride_status_after_booking)
 NewRoutes.post('/find-rider-near-user', FindRiderNearByUser)

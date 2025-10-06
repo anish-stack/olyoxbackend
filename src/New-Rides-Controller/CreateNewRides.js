@@ -88,6 +88,7 @@ exports.NewcreateRequest = async (req, res) => {
             fakeRiderPhone = null,
         } = req.body;
 
+        console.log("New Booking come",req.body)
         // Validation: Required fields
         if (
             !pickupLocation ||
