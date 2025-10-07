@@ -1375,92 +1375,100 @@ exports.RejectRide = async (req, res) => {
 // ===== ADMIN/GENERAL FUNCTIONS =====
 
 exports.IntercityRideAll = async (req, res) => {
-    const startTime = Date.now(); // Start time tracking
-    console.log("Start time",startTime)
-    try {
-        const {
-            originCity,
-            destinationCity,
-            departureDate,
-            status,
-            passengerId,
-            driverId,
-            page = 1,
-            limit = 10
-        } = req.query;
+  const startTime = Date.now(); // Start time tracking
+  console.log("Start time", startTime);
+  try {
+    const {
+      originCity,
+      destinationCity,
+      departureDate,
+      status,
+      passengerId,
+      driverId,
+      searchTerm, // Add searchTerm to query parameters
+      page = 1,
+      limit = 10
+    } = req.query;
 
-        let query = {};
+    let query = {};
 
-        // Optimized filtering
-        if (originCity) {
-            query['route.origin.city'] = { $regex: new RegExp(`^${originCity}`, 'i') }; // Prefix regex for index usage
-        }
-
-        if (destinationCity) {
-            query['route.destination.city'] = { $regex: new RegExp(`^${destinationCity}`, 'i') };
-        }
-
-        if (departureDate) {
-            const startOfDay = new Date(departureDate);
-            startOfDay.setHours(0, 0, 0, 0);
-            const endOfDay = new Date(departureDate);
-            endOfDay.setHours(23, 59, 59, 999);
-
-            query['schedule.departureTime'] = {
-                $gte: startOfDay,
-                $lte: endOfDay
-            };
-        }
-
-        if (status) query.status = status;
-        if (passengerId) query.passengerId = passengerId;
-        if (driverId) query.driverId = driverId;
-
-        const skip = (page - 1) * limit;
-
-        // Run count + query in parallel to reduce response time
-        const [rides, totalRides] = await Promise.all([
-            IntercityRide.find(query)
-                .populate('driverId', 'name phone email rating vehicle')
-                .populate('passengerId', 'name number email createdAt platform')
-                .select('-messageSendToDriver')
-                .sort({ 'schedule.departureTime': -1 })
-                .skip(skip)
-                .limit(parseInt(limit))
-                .lean(),
-            IntercityRide.countDocuments(query)
-        ]);
-
-        const endTime = Date.now(); // End time
-        const executionTime = endTime - startTime; // ms
-
-        return res.status(200).json({
-            success: true,
-            rides,
-            pagination: {
-                currentPage: parseInt(page),
-                totalPages: Math.ceil(totalRides / limit),
-                totalRides,
-                hasNext: skip + rides.length < totalRides,
-                hasPrev: page > 1
-            },
-            executionTime: `${executionTime} ms` // ⏱ show time taken
-        });
-            console.log("End time",executionTime)
-
-
-    } catch (error) {
-        console.error('Error getting rides:', error);
-        const endTime = Date.now();
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to fetch rides',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-            executionTime: `${endTime - startTime} ms`
-        });
+    // Optimized filtering
+    if (originCity) {
+      query['route.origin.city'] = { $regex: new RegExp(`^${originCity}`, 'i') }; // Prefix regex for index usage
     }
-};
 
+    if (destinationCity) {
+      query['route.destination.city'] = { $regex: new RegExp(`^${destinationCity}`, 'i') };
+    }
+
+    if (departureDate) {
+      const startOfDay = new Date(departureDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(departureDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      query['schedule.departureTime'] = {
+        $gte: startOfDay,
+        $lte: endOfDay
+      };
+    }
+
+    if (status) query.status = status;
+    if (passengerId) query.passengerId = passengerId;
+    if (driverId) query.driverId = driverId;
+
+    // Add search term filtering
+    if (searchTerm) {
+      query.$or = [
+        { 'passengerId.name': { $regex: new RegExp(searchTerm, 'i') } },
+        { 'passengerId.number': { $regex: new RegExp(searchTerm, 'i') } },
+        { rideId: { $regex: new RegExp(searchTerm, 'i') } },
+        { 'route.origin.address': { $regex: new RegExp(searchTerm, 'i') } },
+        { 'route.destination.address': { $regex: new RegExp(searchTerm, 'i') } }
+      ];
+    }
+
+    const skip = (page - 1) * limit;
+
+    // Run count + query in parallel to reduce response time
+    const [rides, totalRides] = await Promise.all([
+      IntercityRide.find(query)
+        .populate('driverId', 'name phone email rating vehicle')
+        .populate('passengerId', 'name number email createdAt platform')
+        .select('-messageSendToDriver')
+        .sort({ 'schedule.departureTime': -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      IntercityRide.countDocuments(query)
+    ]);
+
+    const endTime = Date.now(); // End time
+    const executionTime = endTime - startTime; // ms
+
+    return res.status(200).json({
+      success: true,
+      rides,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalRides / limit),
+        totalRides,
+        hasNext: skip + rides.length < totalRides,
+        hasPrev: page > 1
+      },
+      executionTime: `${executionTime} ms` // ⏱ show time taken
+    });
+  } catch (error) {
+    console.error('Error getting rides:', error);
+    const endTime = Date.now();
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch rides',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      executionTime: `${endTime - startTime} ms`
+    });
+  }
+};
 
 
 exports.paymentCollect = async (req, res) => {
