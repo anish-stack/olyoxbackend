@@ -159,7 +159,7 @@ exports.updateRiderPreferences = async (req, res) => {
                 // Send push notification
                 console.log('Sending notification to rider:', rider.fcmToken);
                 const notificationMessage = `Your ride preferences have been updated successfully.`;
-                await sendNotification.sendNotification(rider.fcmToken, 'Preferences Updated', notificationMessage, {}, 'app_notification_channel');
+                // await sendNotification.sendNotification(rider.fcmToken, 'Preferences Updated', notificationMessage, {}, 'app_notification_channel');
 
                 // Send WhatsApp notification if enabled
                 if (rider.notificationSettings?.smsNotifications) {

@@ -1,5 +1,5 @@
 const express = require('express');
-const { registerRider, getAllRiders, changeLocation, login, resendOtp, verifyOtp, uploadDocuments, details, getMyAllDetails, getMyAllRides, toggleWorkStatusOfRider, verifyDocument, uploadPaymentQr, getMySessionsByUserId, riderDocumentsVerify, updateBlockStatus, getSingleRider, updateRiderDetails, updateRiderDocumentVerify, logoutRider, deleteRider, AdmintoggleWorkStatusOfRider, saveFcmTokenToken, assignFreeRechargeToRider, addOnVehicle, getMyAddOnVehicle, updateDriverVehicleAddsOn, updateVehicleDetailsForDriver, getAddOnVehicleAdmin, approveVehicleDocument, getAllAddOnVehicleAdmin } = require('../controllers/rider.controller');
+const { registerRider, getAllRiders, changeLocation, login, resendOtp, verifyOtp, uploadDocuments, details, getMyAllDetails, getMyAllRides, toggleWorkStatusOfRider, verifyDocument, uploadPaymentQr, getMySessionsByUserId, riderDocumentsVerify, updateBlockStatus, getSingleRider, updateRiderDetails, updateRiderDocumentVerify, logoutRider, deleteRider, AdmintoggleWorkStatusOfRider, saveFcmTokenToken, assignFreeRechargeToRider, addOnVehicle, getMyAddOnVehicle, updateDriverVehicleAddsOn, updateVehicleDetailsForDriver, getAddOnVehicleAdmin, approveVehicleDocument, getAllAddOnVehicleAdmin, updateRiderProfileCompleted } = require('../controllers/rider.controller');
 const { calculateRidePriceForUser, rideEndByFallBack } = require('../controllers/ride.request');
 
 const router = express.Router();
@@ -96,5 +96,7 @@ router.get('/get_all_add_on_vehicle',getAllAddOnVehicleAdmin)
 
 router.get('/update',updateDriverVehicleAddsOn)
 router.put('/vehicles/:vehicleId/documents/:documentType/approve',approveVehicleDocument)
+
+router.put('/update_rider_Profile_completed/:id',updateRiderProfileCompleted)
 
 module.exports = router;

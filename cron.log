@@ -570,3 +570,69 @@
 [2025-10-06T00:00:06.907Z] 🔄 Trying fallback GET method...
 [2025-10-06T00:00:07.099Z] ✅ WhatsApp fallback message sent successfully (GET method)
 [2025-10-06T00:00:07.100Z] 📊 Fallback API Response: {"status":"success","msg":"submitted successfully","statuscode":200,"requestid":"eGCflEKqwznv","msgcount":1,"msgcost":1}
+[2025-10-06T10:00:02.965Z] 🚀 Starting Daily Healthcheck - 10/6/2025, 10:00:02 AM
+[2025-10-06T10:00:03.159Z] 💾 System Memory: Mem:            31Gi       5.7Gi        17Gi       124Mi       9.1Gi        25Gi
+[2025-10-06T10:00:03.159Z] 💿 Disk Usage: /dev/sda1       387G   13G  374G   4% /
+[2025-10-06T10:00:03.173Z] ❌ Error fetching PM2 list: Command failed: /root/.nvm/versions/node/v22.20.0/bin/pm2 jlist
+/usr/bin/env: ‘node’: No such file or directory
+
+[2025-10-06T10:00:03.174Z] 🔍 Checking MongoDB Atlas connection...
+[2025-10-06T10:00:03.174Z] ❌ MongoDB Atlas URI not set (MONGO_URI missing in .env)
+[2025-10-06T10:00:03.174Z] 🔌 MongoDB connection closed
+[2025-10-06T10:00:03.202Z] 🔍 Checking Redis connection...
+[2025-10-06T10:00:03.336Z] ✅ Redis is UP - Response: PONG
+[2025-10-06T10:00:03.372Z] 💾 Redis Memory Usage: 3.88M
+[2025-10-06T10:00:03.400Z] 🔢 Redis has 174 keys before flush
+[2025-10-06T10:00:03.475Z] ♻️ Redis cache flushed (reset complete)
+[2025-10-06T10:00:03.497Z] ✅ Healthcheck completed in 0.65s
+[2025-10-06T10:00:03.497Z] 📊 Summary: 2 successful checks, 1 errors
+[2025-10-06T10:00:03.497Z] ===================================================
+[2025-10-06T10:00:03.503Z] 📱 Sending WhatsApp notification...
+[2025-10-06T10:00:04.173Z] ❌ WhatsApp POST failed: AxiosError: Request failed with status code 400
+[2025-10-06T10:00:04.174Z] 🔄 Trying fallback GET method...
+[2025-10-06T10:00:04.299Z] ✅ WhatsApp fallback message sent successfully (GET method)
+[2025-10-06T10:00:04.300Z] 📊 Fallback API Response: {"status":"success","msg":"submitted successfully","statuscode":200,"requestid":"bWejjaASNuQU","msgcount":1,"msgcost":1}
+[2025-10-06T20:00:03.616Z] 🚀 Starting Daily Healthcheck - 10/6/2025, 8:00:03 PM
+[2025-10-06T20:00:03.661Z] 💾 System Memory: Mem:            31Gi       3.1Gi        19Gi       124Mi       9.4Gi        28Gi
+[2025-10-06T20:00:03.662Z] 💿 Disk Usage: /dev/sda1       387G   14G  374G   4% /
+[2025-10-06T20:00:03.678Z] ❌ Error fetching PM2 list: Command failed: /root/.nvm/versions/node/v22.20.0/bin/pm2 jlist
+/usr/bin/env: ‘node’: No such file or directory
+
+[2025-10-06T20:00:03.678Z] 🔍 Checking MongoDB Atlas connection...
+[2025-10-06T20:00:03.678Z] ❌ MongoDB Atlas URI not set (MONGO_URI missing in .env)
+[2025-10-06T20:00:03.679Z] 🔌 MongoDB connection closed
+[2025-10-06T20:00:03.679Z] 🔍 Checking Redis connection...
+[2025-10-06T20:00:03.765Z] ✅ Redis is UP - Response: PONG
+[2025-10-06T20:00:03.771Z] 💾 Redis Memory Usage: 4.10M
+[2025-10-06T20:00:03.775Z] 🔢 Redis has 79 keys before flush
+[2025-10-06T20:00:03.804Z] ♻️ Redis cache flushed (reset complete)
+[2025-10-06T20:00:03.806Z] ✅ Healthcheck completed in 0.21s
+[2025-10-06T20:00:03.806Z] 📊 Summary: 2 successful checks, 1 errors
+[2025-10-06T20:00:03.806Z] ===================================================
+[2025-10-06T20:00:03.806Z] 📱 Sending WhatsApp notification...
+[2025-10-06T20:00:04.230Z] ❌ WhatsApp POST failed: AxiosError: Request failed with status code 400
+[2025-10-06T20:00:04.230Z] 🔄 Trying fallback GET method...
+[2025-10-06T20:00:04.365Z] ✅ WhatsApp fallback message sent successfully (GET method)
+[2025-10-06T20:00:04.366Z] 📊 Fallback API Response: {"status":"success","msg":"submitted successfully","statuscode":200,"requestid":"bCILgyezdko6","msgcount":1,"msgcost":1}
+[2025-10-07T00:00:04.206Z] 🚀 Starting Daily Healthcheck - 10/7/2025, 12:00:04 AM
+[2025-10-07T00:00:05.245Z] 💾 System Memory: Mem:            31Gi       3.2Gi        19Gi       124Mi       9.4Gi        28Gi
+[2025-10-07T00:00:05.246Z] 💿 Disk Usage: /dev/sda1       387G   14G  374G   4% /
+[2025-10-07T00:00:05.384Z] ❌ Error fetching PM2 list: Command failed: /root/.nvm/versions/node/v22.20.0/bin/pm2 jlist
+/usr/bin/env: ‘node’: No such file or directory
+
+[2025-10-07T00:00:05.385Z] 🔍 Checking MongoDB Atlas connection...
+[2025-10-07T00:00:05.385Z] ❌ MongoDB Atlas URI not set (MONGO_URI missing in .env)
+[2025-10-07T00:00:05.386Z] 🔌 MongoDB connection closed
+[2025-10-07T00:00:05.386Z] 🔍 Checking Redis connection...
+[2025-10-07T00:00:05.492Z] ✅ Redis is UP - Response: PONG
+[2025-10-07T00:00:05.493Z] 💾 Redis Memory Usage: 2.31M
+[2025-10-07T00:00:05.494Z] 🔢 Redis has 38 keys before flush
+[2025-10-07T00:00:05.715Z] ♻️ Redis cache flushed (reset complete)
+[2025-10-07T00:00:05.757Z] ✅ Healthcheck completed in 1.65s
+[2025-10-07T00:00:05.767Z] 📊 Summary: 2 successful checks, 1 errors
+[2025-10-07T00:00:05.780Z] ===================================================
+[2025-10-07T00:00:05.797Z] 📱 Sending WhatsApp notification...
+[2025-10-07T00:00:06.622Z] ❌ WhatsApp POST failed: AxiosError: Request failed with status code 400
+[2025-10-07T00:00:06.622Z] 🔄 Trying fallback GET method...
+[2025-10-07T00:00:06.850Z] ✅ WhatsApp fallback message sent successfully (GET method)
+[2025-10-07T00:00:06.863Z] 📊 Fallback API Response: {"status":"success","msg":"submitted successfully","statuscode":200,"requestid":"4N9WM3es8Ep6","msgcount":1,"msgcost":1}

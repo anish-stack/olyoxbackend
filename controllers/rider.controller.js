@@ -2495,3 +2495,48 @@ exports.approveVehicleDocument = async (req, res) => {
     });
   }
 };
+
+exports.updateRiderProfileCompleted = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate the ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid Rider ID',
+      });
+    }
+
+    // Find the rider
+    const findRider = await Rider.findById(id);
+    if (!findRider) {
+      return res.status(404).json({
+        success: false,
+        message: 'No rider found with this ID',
+      });
+    }
+
+    // Toggle the fields
+    findRider.isProfileComplete = !findRider.isProfileComplete;
+    findRider.isDocumentUpload = !findRider.isDocumentUpload;
+
+    await findRider.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Rider profile flags toggled successfully',
+      data: {
+        isProfileComplete: findRider.isProfileComplete,
+        isDocumentUpload: findRider.isDocumentUpload,
+      },
+    });
+
+  } catch (error) {
+    console.error("Internal server error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error in updating rider profile',
+    });
+  }
+};
