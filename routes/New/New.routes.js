@@ -1,6 +1,6 @@
 
 const express = require('express');
-const { NewcreateRequest, BookingDetailsAdmin, ride_status_after_booking, riderFetchPoolingForNewRides, riderActionAcceptOrRejectRide, ride_status_after_booking_for_drivers, changeCurrentRiderRideStatus, verifyRideOtp, collectPayment, cancelRideByPoll, RateYourRider, cancelRideRequest, FetchAllBookedRides, AdminChangeCurrentRiderRideStatus, FindRiderNearByUser, riderActionAcceptOrRejectRideVia } = require('../../src/New-Rides-Controller/CreateNewRides');
+const { NewcreateRequest, BookingDetailsAdmin, ride_status_after_booking, riderFetchPoolingForNewRides, riderActionAcceptOrRejectRide, ride_status_after_booking_for_drivers, changeCurrentRiderRideStatus, verifyRideOtp, collectPayment, cancelRideByPoll, RateYourRider, cancelRideRequest, FetchAllBookedRides, AdminChangeCurrentRiderRideStatus, FindRiderNearByUser, riderActionAcceptOrRejectRideVia, findMyRideNewMode } = require('../../src/New-Rides-Controller/CreateNewRides');
 const Protect = require('../../middleware/Auth');
 const { calculateRidePriceForUser } = require('../../src/New-Rides-Controller/FindPrice');
 const { updateRiderPreferences, getRiderPreferences } = require('../../src/New-Rides-Controller/V3/RIderPrefrencesUpdate');
@@ -58,4 +58,8 @@ NewRoutes.post('/rate-your-ride-intercity', rateYourInterCity)
 
 
 NewRoutes.get('/get-all-intercity-rides', IntercityRideAll)
+NewRoutes.get('/get-all-rides-user/:id',findMyRideNewMode)
+
+
+
 module.exports = NewRoutes;

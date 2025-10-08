@@ -9,6 +9,7 @@ const sendNotification = require("../../utils/sendNotification");
 const cron = require("node-cron");
 
 const jwt = require("jsonwebtoken");
+const IntercityRide = require("../../models/v3 models/IntercityRides");
 
 const scheduleRideCancellationCheck = async (redisClient, rideId) => {
     const CANCELLATION_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
@@ -199,7 +200,7 @@ exports.NewcreateRequest = async (req, res) => {
             findUser = await User.findById(user).populate("currentRide");
 
             if (!findUser) {
-                            console.error(`We couldn't find your account. Please log in again`)
+                console.error(`We couldn't find your account. Please log in again`)
 
                 return res.status(404).json({
                     success: false,
@@ -240,7 +241,7 @@ exports.NewcreateRequest = async (req, res) => {
                     waypoints: routeData.waypoints || [],
                 };
             } else {
-                            console.error(`No route data received`)
+                console.error(`No route data received`)
 
                 throw new Error("No route data received");
             }
@@ -4293,4 +4294,58 @@ exports.FindRiderNearByUser = async (req, res) => {
             error: error.message,
         });
     }
+};
+
+
+exports.findMyRideNewMode = async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    // Fetch Normal Rides
+    const normalRides = await RideBooking.find({ user: userId })
+      .select("-rejected_by_drivers -notified_riders -user -route_info")
+      .sort({ created: -1 });
+
+    // Fetch Intercity Rides
+    const intercityRides = await IntercityRide.find({ passengerId: userId })
+      .select("-rejectedByDrivers -reviews -messageSendToDriver")
+      .sort({ createdAt: -1 });
+
+    // Prioritize active rides within each category
+    const priorityStatuses = ['driver_assigned', 'in_progress', 'driver_reached', 'otp_verify', 'ride_in_progress'];
+
+    const sortByStatusAndDate = (rides) =>
+      rides.sort((a, b) => {
+        const aPriority = priorityStatuses.includes(a.rideStatus) ? 1 : 0;
+        const bPriority = priorityStatuses.includes(b.rideStatus) ? 1 : 0;
+        return (
+          bPriority - aPriority ||
+          new Date(b.createdAt || b.created) - new Date(a.createdAt || a.created)
+        );
+      });
+
+    const sortedNormalRides = sortByStatusAndDate(normalRides);
+    const sortedIntercityRides = sortByStatusAndDate(intercityRides);
+
+    return res.status(200).json({
+      success: true,
+      message: "Rides fetched successfully",
+      normalRides: sortedNormalRides,
+      intercityRides: sortedIntercityRides,
+    });
+  } catch (error) {
+    console.error("Error fetching rides:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
 };
