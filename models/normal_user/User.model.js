@@ -95,7 +95,10 @@ const userSchema = new mongoose.Schema({
             utm_medium: { type: String },
         }
     },
+    deviceId:{
+                type: String
 
+    },
     fcmToken: {
         type: String
     },

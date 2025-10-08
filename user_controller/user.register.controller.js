@@ -562,7 +562,7 @@ exports.updateProfileDetails = async (req, res) => {
 
 exports.updateFcmAndDetails = async (req, res) => {
   try {
-    const { notificationPermission, whatsapp_notification, fcmToken, AppVersion } = req.body || {};
+    const { notificationPermission, whatsapp_notification, fcmToken, AppVersion ,deviceId} = req.body || {};
 
     // Get user data from req.user
     const userData = Array.isArray(req.user.user)
@@ -596,8 +596,12 @@ exports.updateFcmAndDetails = async (req, res) => {
 
     if (fcmToken) {
       user.fcmToken = fcmToken
+      user.fcmUpdated = new Date()
     }
 
+    if(deviceId){
+      user.deviceId=deviceId
+    }
     if (AppVersion) {
       user.AppVersion = AppVersion;
     }
