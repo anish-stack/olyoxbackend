@@ -55,6 +55,14 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: 'Please enter your email address',
     },
+    notificationPermission: {
+        type: Boolean,
+        default: false
+    },
+    whatsapp_notification: {
+        type: Boolean,
+        default: false
+    },
     name: {
         type: String,
         default: 'Guest',
@@ -90,6 +98,13 @@ const userSchema = new mongoose.Schema({
 
     fcmToken: {
         type: String
+    },
+    fcmUpdated: {
+        type: Date
+    },
+    AppVersion: {
+        type: String
+
     }
 }, { timestamps: true });
 

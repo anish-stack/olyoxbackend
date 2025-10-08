@@ -489,7 +489,7 @@ exports.getAllUser = async (req, res) => {
 exports.updateProfileDetails = async (req, res) => {
   try {
     const file = req.file || {};
-    const { name, email } = req.body || {};
+    const { name, email  } = req.body || {};
 
     const userData = Array.isArray(req.user.user)
       ? req.user.user[0]
@@ -559,6 +559,67 @@ exports.updateProfileDetails = async (req, res) => {
     });
   }
 };
+
+exports.updateFcmAndDetails = async (req, res) => {
+  try {
+    const { notificationPermission, whatsapp_notification, fcmToken, AppVersion } = req.body || {};
+
+    // Get user data from req.user
+    const userData = Array.isArray(req.user.user)
+      ? req.user.user[0]
+      : req.user.user;
+
+    if (!userData?._id) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID not found",
+      });
+    }
+
+    // Find the user in the database
+    const user = await User.findById(userData._id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found. Please register first.",
+      });
+    }
+
+    // Update user fields if provided
+    if (notificationPermission !== undefined) {
+      user.notificationPermission = notificationPermission;
+    }
+
+    if (whatsapp_notification !== undefined) {
+      user.whatsapp_notification = whatsapp_notification;
+    }
+
+    if (fcmToken) {
+      user.fcmToken = fcmToken
+    }
+
+    if (AppVersion) {
+      user.AppVersion = AppVersion;
+    }
+
+    // Save updated user details
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      user,
+    });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
 
 exports.updateBlockStatus = async (req, res) => {
   try {

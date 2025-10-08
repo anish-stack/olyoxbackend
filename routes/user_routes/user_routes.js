@@ -1,5 +1,5 @@
 const express = require('express');
-const { createUser, verify_user, resendOtp,fine_me, login, findAllOrders, updateProfileDetails, getAllUser, updateBlockStatus, deleteMyAccount } = require('../../user_controller/user.register.controller');
+const { createUser, verify_user, resendOtp,fine_me, login, findAllOrders, updateProfileDetails, getAllUser, updateBlockStatus, deleteMyAccount, updateFcmAndDetails } = require('../../user_controller/user.register.controller');
 
 const Protect = require('../../middleware/Auth');
 const upload = require('../../middleware/multer');
@@ -15,7 +15,7 @@ users.post('/delete-my-account/:id', deleteMyAccount)
 users.get('/find_me',Protect, fine_me)
 users.get('/find-Orders-details',Protect, findAllOrders)
 users.post('/update-profile',Protect,upload.single('image'), updateProfileDetails)
-
+users.post('/update-settings-user',Protect,updateFcmAndDetails)
 // router.get('/find-Orders-details', Protect, findAllOrders);
 
 users.get('/get_all_user',getAllUser)
