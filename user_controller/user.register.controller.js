@@ -13,22 +13,22 @@ const NewRideModelModel = require("../src/New-Rides-Controller/NewRideModel.mode
 
 exports.createUser = async (req, res) => {
   try {
-    const { number, email, name, referral, platform, campaign } = req.body;
+    const { number, email, name, referral, platform, campaign, latitude, longitude } = req.body;
+
+    if (!number) {
+      return res.status(400).json({ message: "Please provide your mobile number.", status: 400 });
+    }
 
     // Generate OTP
     let otp = generateOtp();
-    const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
 
-    // Special number for testing
-    if (number == 7217619794) {
-      otp = 123456;
-    }
+    if (number === "7217619794") otp = "123456"; // Test number
 
     // Check if user exists
-    let user = await User.findOne({ number }).lean();
+    let user = await User.findOne({ number });
 
     if (user) {
-      // Prepare update data
       const updateData = {
         otp,
         otpExpiresAt,
@@ -37,12 +37,15 @@ exports.createUser = async (req, res) => {
         platform: platform || "android",
       };
 
-      // Apply referral code if not already applied
-      if (referral && !user.appliedReferralCode) {
-        updateData.appliedReferralCode = referral;
+      if (latitude && longitude) {
+        updateData.location = {
+          type: "Point",
+          coordinates: [parseFloat(longitude), parseFloat(latitude)],
+        };
       }
 
-      // Only set install_referrer if it doesn't exist
+      if (referral && !user.appliedReferralCode) updateData.appliedReferralCode = referral;
+
       if (campaign && !user.install_referrer) {
         updateData.install_referrer = {
           raw: campaign,
@@ -50,66 +53,61 @@ exports.createUser = async (req, res) => {
         };
       }
 
-      // Update user
       await User.updateOne({ number }, { $set: updateData });
 
       const message = user.isOtpVerify
-        ? `Hi there! Your OTP is: ${otp}. Please verify it.`
-        : `Hi there!
+        ? `Your OTP is: ${otp}. Please verify it to continue.`
+        : `Welcome to Olyox!\n\nYour OTP is: ${otp}. Verify it to start your journey with us.`;
 
-Welcome to Olyox – your all-in-one app for rides, food delivery, heavy vehicles, hotels, and more!
-
-Here’s your OTP: ${otp}
-
-Please verify it to kickstart your Olyox journey.`;
-
-      // Send WhatsApp message asynchronously
       SendWhatsAppMessageUser(message, number, otp).catch(console.error);
 
       return res.status(200).json({
-        message: "OTP sent successfully",
+        message: "OTP has been sent to your number. Please check WhatsApp.",
         status: 200,
       });
     }
 
     // Create new user
-    const newUser = await User.create({
+    const newUserData = {
       number,
-      email,
-      name,
+      email: email || "Please enter your email address",
+      name: name || "Guest",
       otp,
       platform: platform || "android",
       otpExpiresAt,
+      ...(latitude && longitude
+        ? { location: { type: "Point", coordinates: [parseFloat(longitude), parseFloat(latitude)] } }
+        : {}),
       ...(referral ? { appliedReferralCode: referral } : {}),
       ...(campaign
-        ? {
-            install_referrer: {
-              raw: campaign,
-              parsed: Object.fromEntries(new URLSearchParams(campaign)),
-            },
-          }
+        ? { install_referrer: { raw: campaign, parsed: Object.fromEntries(new URLSearchParams(campaign)) } }
         : {}),
-    });
+    };
 
-    const newUserMessage = `Hi there!
+    const newUser = await User.create(newUserData);
 
-Welcome to Olyox – your all-in-one app for rides, food delivery, heavy vehicles, hotels, and more!
+    const newUserMessage = `Welcome to Olyox!\n\nYour OTP is: ${otp}. Please verify it to get started.`;
 
-Here’s your OTP: ${otp}`;
-
-    // Send WhatsApp message asynchronously
     SendWhatsAppMessage(newUserMessage, number, otp).catch(console.error);
 
     return res.status(201).json({
-      message: "User created successfully. OTP sent.",
+      message: "Account created successfully. OTP has been sent to your number.",
       user: newUser,
       status: 201,
     });
+
   } catch (error) {
     console.error("Error in createUser:", error);
+
+    // User-friendly messages
+    let friendlyMessage = "Something went wrong. Please try again later.";
+
+    if (error.code === 11000 && error.keyPattern && error.keyPattern.number) {
+      friendlyMessage = "This mobile number is already registered.";
+    }
+
     return res.status(500).json({
-      message: "An error occurred",
-      error: error.message,
+      message: friendlyMessage,
       status: 500,
     });
   }
