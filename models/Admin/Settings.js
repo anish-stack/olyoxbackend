@@ -100,6 +100,12 @@ const SettingsSchema = new mongoose.Schema({
     appVersionOnAndroidDriver: {
         type: String
 
+    },
+    support_number_driver:{
+        type:String
+    },
+    whatsappNumber: {
+        type: String
     }
 }, { timestamps: true });
 
