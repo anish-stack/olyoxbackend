@@ -32,13 +32,47 @@ exports.getSetting = async (req, res) => {
 exports.updateSetting = async (req, res) => {
     try {
         const data = req.body;
+
+        // Define required fields
+        const requiredFields = ['appName', 'appUrl', 'adminEmail'];
+        const errors = [];
+
+        // Check required fields
+        requiredFields.forEach((field) => {
+            if (!data[field]) {
+                errors.push(`${field} is required`);
+            }
+        });
+
+        // Validate number fields
+        const numberFields = [
+            'ride_percentage_off',
+            'BasicFare',
+            'BasicFarePerKm',
+            'RainModeFareOnEveryThreeKm',
+            'foodDeliveryPrice',
+            'trafficDurationPricePerMinute',
+            'waitingTimeInMinutes',
+            'first_recharge_commisons',
+            'second_recharge_commisons',
+        ];
+        numberFields.forEach((field) => {
+            if (data[field] !== undefined && (typeof data[field] !== 'number' || isNaN(data[field]))) {
+                errors.push(`${field} must be a valid number`);
+            }
+        });
+
+        if (errors.length > 0) {
+            return res.status(400).json({ success: false, message: errors.join(', ') });
+        }
+
         const setting = await settings.findOneAndUpdate({}, data, { new: true, upsert: true });
         res.status(200).json({
             success: true,
             message: 'Setting updated successfully',
-            data: setting
+            data: setting,
         });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ success: false, message: error.message });
     }
 };
