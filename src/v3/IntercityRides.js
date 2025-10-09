@@ -1952,7 +1952,7 @@ cron.schedule("*/9 * * * *", async () => {
                 ).toLocaleString()}\n\n👉 Open *Olyox Driver App* for more details.\n*Please check the Reservation rides section to accept this ride.*`;
 
                 try {
-                    // await SendWhatsAppMessageNormal(msg, d.phone);
+                    await SendWhatsAppMessageNormal(msg, d.phone);
                     // console.log(`✅ Message sent to ${d.name} (${d.phone})`);
 
                     // Log in ride.messageSendToDriver
