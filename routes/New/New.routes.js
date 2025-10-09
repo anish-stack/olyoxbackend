@@ -8,7 +8,7 @@ const { bookIntercityRide, getBookingDetailsById, getAvailableRides, acceptRide,
 const { getAllRides } = require('../../controllers/ride.request');
 const NewRoutes = express.Router()
 
-NewRoutes.post('/new-ride',Protect, NewcreateRequest)
+NewRoutes.post('/new-ride', Protect, NewcreateRequest)
 NewRoutes.post('/new-ride-fake', NewcreateRequest)
 
 NewRoutes.post('/new-price-calculations', calculateRidePriceForUser)
@@ -58,7 +58,7 @@ NewRoutes.post('/rate-your-ride-intercity', rateYourInterCity)
 
 
 NewRoutes.get('/get-all-intercity-rides', IntercityRideAll)
-NewRoutes.get('/get-all-rides-user/:id',findMyRideNewMode)
+NewRoutes.get('/get-all-rides-user/:id', findMyRideNewMode)
 
 
 

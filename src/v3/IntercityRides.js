@@ -250,13 +250,26 @@ exports.bookIntercityRide = async (req, res) => {
         const arrivalTime = new Date(departureTime.getTime() + (duration * 60000));
 
         // Validate vehicle type
-        const validVehicleTypes = ['SEDAN', 'MINI', 'SUV', 'HATCHBACK', 'SUV / XL ', 'XL'];
-        if (!vehicle.name || !validVehicleTypes.includes(vehicle.name.toUpperCase())) {
-            return res.status(400).json({
-                success: false,
-                message: `Invalid vehicle type. Must be one of: ${validVehicleTypes.join(', ')}`
-            });
-        }
+ // Validate vehicle type
+const validVehicleTypes = ['SEDAN', 'MINI', 'SUV', 'HATCHBACK', 'SUV/XL', 'XL'];
+
+if (!vehicle.name) {
+  return res.status(400).json({
+    success: false,
+    message: "Vehicle name is required.",
+  });
+}
+
+// Trim whitespace and convert to uppercase
+const vehicleName = vehicle.name.trim().toUpperCase();
+
+if (!validVehicleTypes.includes(vehicleName)) {
+  return res.status(400).json({
+    success: false,
+    message: `Invalid vehicle type. Must be one of: ${validVehicleTypes.join(', ')}`,
+  });
+}
+
 
         // Create ride object
         const newRide = new IntercityRide({

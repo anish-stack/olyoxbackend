@@ -296,9 +296,7 @@ exports.fine_me = async (req, res) => {
     }
 
     // Fetch user from the database
-    const user = await User.findById({ _id: userData._id }).populate(
-      "IntercityRide"
-    );
+    const user = await User.findById({ _id: userData._id }).populate("IntercityRide");
     if (!user) {
       return res.status(404).json({
         message: "User not found. Please register first.",
