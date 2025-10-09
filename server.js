@@ -453,7 +453,7 @@ app.post('/webhook/cab-receive-location', Protect, async (req, res) => {
   try {
     const riderId = req.user?.userId;
     const { latitude, longitude, accuracy, speed, timestamp, platform } = req.body;
-    console.log("Bhai Mai aa gya hu,", req.body);
+    // console.log("Bhai Mai aa gya hu,", req.body);
 
     if (!riderId) return Protect(req, res);
 
@@ -476,7 +476,7 @@ app.post('/webhook/cab-receive-location', Protect, async (req, res) => {
       JSON.stringify(locationData)
     );
 
-    console.log(`📦 Cached in Redis for rider ${riderId}:`, locationData);
+    // console.log(`📦 Cached in Redis for rider ${riderId}:`, locationData);
 
     // ✅ DB update (always update, no filters)
     const updatedDoc = await RiderModel.findOneAndUpdate(
@@ -488,10 +488,10 @@ app.post('/webhook/cab-receive-location', Protect, async (req, res) => {
       { upsert: true, new: true }
     );
 
-    console.log(`💾 DB updated for rider ${riderId}:`, {
-      name: updatedDoc?.name,
-      coords: updatedDoc?.location?.coordinates
-    });
+    // console.log(`💾 DB updated for rider ${riderId}:`, {
+    //   name: updatedDoc?.name,
+    //   coords: updatedDoc?.location?.coordinates
+    // });
 
     return res.status(200).json({
       message: "Location cached and updated successfully",

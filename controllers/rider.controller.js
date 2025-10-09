@@ -1606,8 +1606,10 @@ exports.updateRiderDocumentVerify = async (req, res) => {
 
 exports.updateRiderDetails = async (req, res) => {
   try {
+    console.log('i am in update rider')
     const { id } = req.params;
-    const { name, phone, rideVehicleInfo } = req.body;
+    const { name, phone, rideVehicleInfo, category } = req.body;
+    console.log("name, phone, rideVehicleInfo, category",name, phone, rideVehicleInfo, category)
 
     // Find the existing rider
     const existingData = await Rider.findById(id);
@@ -1622,6 +1624,7 @@ exports.updateRiderDetails = async (req, res) => {
     // Update basic details if provided
     if (name) existingData.name = name;
     if (phone) existingData.phone = phone;
+    if (category) existingData.category = category;
 
     // Update ride vehicle details if provided
     if (rideVehicleInfo) {
