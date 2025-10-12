@@ -1460,6 +1460,8 @@ exports.updateRiderDocumentVerify = async (req, res) => {
         { timeout: 5000 } // Add timeout to prevent hanging
       );
 
+      console.log("fetchWebVendorResponse",fetchWebVendorResponse.data)
+
       // Validate response status and data
       if (!fetchWebVendorResponse?.data?.data || !Array.isArray(fetchWebVendorResponse.data.data) || fetchWebVendorResponse.data.data.length === 0) {
         console.log("❌ Web Vendor not found for phone:", riderPhone);

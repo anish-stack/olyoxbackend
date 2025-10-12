@@ -12,6 +12,7 @@ const razorpayInstance = new Razorpay({
 const settings = require('../models/Admin/Settings');
 const { createRechargeLogs } = require('../Admin Controllers/Bugs/rechargeLogs');
 const PersonalCoupons = require('../models/Admin/PersonalCoupons');
+const RiderReffer = require('../models/RiderReffer.Model')
 
 // console.log("process.env.RAZORPAY_KEY_ID",process.env.RAZORPAY_KEY_ID)
 // console.log("process.env.RAZORPAY_KEY_SECRET",process.env.RAZORPAY_KEY_SECRET)
@@ -184,7 +185,6 @@ exports.make_recharge = async (req, res) => {
     }
 };
 
-
 exports.verify_recharge = async (req, res) => {
     console.log("Starting recharge verification process");
     try {
@@ -231,7 +231,6 @@ exports.verify_recharge = async (req, res) => {
 
         if (!isSignatureValid) {
             console.log("Invalid Razorpay payment signature");
-            // Even if signature is invalid, we'll show a success message but log the issue
             console.warn("⚠️ Proceeding despite invalid signature");
         }
 
@@ -286,11 +285,94 @@ exports.verify_recharge = async (req, res) => {
             return res.status(404).json({ message: 'User not found.' });
         }
 
+        console.log("user find bu recharge", user)
+
         const isFirstRecharge = !user?.payment_id;
         console.log("Is this the first recharge for the user?", isFirstRecharge);
+        const riderPhone = user?.number;
 
-        // Step 6: Calculate plan end date
-        console.log("Step 6: Calculating plan end date");
+        // Step 6: Handle referral logic for first recharge
+        let webVendorParentBH;
+        if (isFirstRecharge) {
+            console.log("Handling referral logic for first recharge");
+            try {
+                const fetchWebVendorResponse = await axios.get(
+                    `https://www.webapi.olyox.com/api/v1/get_vendor_by_number/${riderPhone}`,
+                    { timeout: 5000 }
+                );
+
+                if (!fetchWebVendorResponse?.data?.data || !Array.isArray(fetchWebVendorResponse.data.data) || fetchWebVendorResponse.data.data.length === 0) {
+                    console.log("❌ Web Vendor not found for phone:", riderPhone);
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Web Vendor not found',
+                    });
+                }
+
+                const webVendor = fetchWebVendorResponse.data.data[0];
+                webVendorParentBH = webVendor?.referral_code_which_applied;
+
+                if (!webVendorParentBH) {
+                    console.log("❌ Web Vendor ID is missing in response:", fetchWebVendorResponse.data);
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Invalid Web Vendor data: ID missing',
+                    });
+                }
+
+                // Check RiderReffer for webVendorParentBH
+                let riderRefer = await RiderReffer.findOne({ riderBH: webVendorParentBH });
+                let walletAmountToAdd = 50; // Default amount per referral
+                let bonusApplied = false;
+
+                if (!riderRefer) {
+                    console.log("Creating new RiderReffer entry for:", webVendorParentBH);
+                    riderRefer = new RiderReffer({
+                        riderBH: webVendorParentBH,
+                        referCount: 0,
+                        lastResetDate: new Date(new Date().setHours(0, 0, 0, 0))
+                    });
+                }
+
+                // Increment refer count
+                const newReferCount = await riderRefer.incrementReferCount();
+                console.log("New refer count for", webVendorParentBH, ":", newReferCount);
+
+                // Check if refer count hits 15 for the bonus
+                if (newReferCount === 15) {
+                    walletAmountToAdd += 250; // Add 250 extra for reaching 15 referrals
+                    bonusApplied = true;
+                    console.log("Applying 250 bonus for reaching 15 referrals");
+                } else if (newReferCount > 15) {
+                    console.log("Refer count above 15, applying standard 50 rupees");
+                }
+                console.log("walletAmountToAdd", walletAmountToAdd)
+                // Update wallet via API
+                try {
+                    const newWalletAmount = walletAmountToAdd;
+                    await axios.put('https://www.webapi.olyox.com/api/v1/rider_reffer_wallet', {
+                        riderBH: webVendorParentBH,
+                        walletAmount: newWalletAmount
+                    });
+                    console.log(`Wallet updated for ${webVendorParentBH}: +${walletAmountToAdd} rupees (Total: ${newWalletAmount})`);
+
+                } catch (walletError) {
+                    console.error("Error updating wallet:", walletError.message);
+                    console.log("Error updating wallet logs:", walletError)
+                    // Log error but continue with recharge process
+                }
+
+                await riderRefer.save();
+                console.log("RiderReffer updated successfully", { referCount: newReferCount, bonusApplied });
+
+            } catch (error) {
+                console.error("Error in referral processing:", error.message);
+                // Continue with recharge process even if referral fails
+            }
+        }
+
+        // Step 7: Calculate plan end date
+        console.log("Step 7: Calculating plan end date");
         const endDate = new Date();
         const { whatIsThis, validityDays } = plan;
         console.log("Plan validity type:", whatIsThis, "days/units:", validityDays);
@@ -314,8 +396,8 @@ exports.verify_recharge = async (req, res) => {
         }
         console.log("Calculated end date:", endDate);
 
-        // Step 7: Update recharge data
-        console.log("Step 7: Updating recharge data");
+        // Step 8: Update recharge data
+        console.log("Step 8: Updating recharge data");
         try {
             rechargeData.razorpay_payment_id = razorpay_payment_id;
             rechargeData.razorpay_status = 'paid';
@@ -327,8 +409,8 @@ exports.verify_recharge = async (req, res) => {
             console.error("Error updating recharge data:", updateError);
         }
 
-        // Step 8: Handle referral update
-        console.log("Step 8: Handling referral update", user);
+        // Step 9: Handle referral update
+        console.log("Step 9: Handling referral update", user);
         try {
             const referral = await ActiveReferral_Model.findOne({ contactNumber: user.number });
             console.log("Referral found:", referral ? "Yes" : "No");
@@ -342,8 +424,8 @@ exports.verify_recharge = async (req, res) => {
             console.error("Error handling referral update:", referralError);
         }
 
-        // Step 9: Update user info
-        console.log("Step 9: Updating user info");
+        // Step 10: Update user info
+        console.log("Step 10: Updating user info");
         try {
             user.payment_id = rechargeData?._id;
             user.recharge += 1;
@@ -355,8 +437,8 @@ exports.verify_recharge = async (req, res) => {
             console.error("Error updating user info:", userUpdateError);
         }
 
-        // Step 10: Trigger approval API
-        console.log("Step 10: Triggering approval API");
+        // Step 11: Trigger approval API
+        console.log("Step 11: Triggering approval API");
         try {
             const approvalUrl = `https://webapi.olyox.com/api/v1/approve_recharge?_id=${rechargeData?._id}`;
             console.log("Calling approval API:", approvalUrl);
@@ -394,8 +476,8 @@ exports.verify_recharge = async (req, res) => {
             console.error("Error saving recharge data:", saveError);
         }
 
-        // Step 11: Update external recharge details
-        console.log("Step 11: Updating external recharge details");
+        // Step 12: Update external recharge details
+        console.log("Step 12: Updating external recharge details");
         let updateResult;
         const camelCaseKeys = (obj) => {
             if (Array.isArray(obj)) {
@@ -411,10 +493,8 @@ exports.verify_recharge = async (req, res) => {
         };
 
         try {
-            // Safely extract ._doc if it's a Mongoose document
             const rawPlan = plan?._doc ? plan._doc : plan;
             const normalizedPlan = camelCaseKeys(rawPlan);
-
 
             updateResult = await updateRechargeDetails({
                 rechargePlan: normalizedPlan.title,
@@ -429,24 +509,23 @@ exports.verify_recharge = async (req, res) => {
             console.error("Error updating external recharge details:", externalUpdateError);
         }
 
-
-
         if (updateResult && !updateResult?.success) {
             console.warn("Failed to update external recharge details");
-            // We continue despite this error to ensure user gets success message
         }
+
         if (rechargeData?.isCouponApplied) {
-            const foundCop = await PersonalCoupons.findOne({ code: rechargeData?.couponCode })
+            const foundCop = await PersonalCoupons.findOne({ code: rechargeData?.couponCode });
             if (!foundCop) {
-
+                console.error("Coupon not found:", rechargeData?.couponCode);
+            } else {
+                foundCop.isUsed = true;
+                console.log("Coupon updated:", foundCop);
+                await foundCop.save();
             }
-            foundCop.isUsed = true
-            console.log("foundCop updated", foundCop)
-            await foundCop.save()
         }
-        // Step 12: Send WhatsApp notifications
-        console.log("Step 12: Sending WhatsApp notifications");
 
+        // Step 13: Send WhatsApp notifications
+        console.log("Step 13: Sending WhatsApp notifications");
         try {
             const vendorMessage = `Dear ${user.name},\n\n✅ Your recharge is successful!\nPlan: ${plan.title}\nAmount: ₹${plan.price}\nTransaction ID: ${razorpay_payment_id}\n\nThank you for choosing us!`;
             await SendWhatsAppMessage(vendorMessage, user.number);
@@ -468,10 +547,7 @@ exports.verify_recharge = async (req, res) => {
 
     } catch (error) {
         console.error("Critical error in recharge verification:", error);
-        // Even if there's an error, we'll show a success message to the user
-        // but log the issue for admin review
         try {
-            // Send alert to admin
             const errorMessage = `🚨 CRITICAL ERROR in recharge verification\n\nError: ${error.message}\n\nPlease check logs urgently.`;
             await SendWhatsAppMessage(errorMessage, process.env.ADMIN_WHATSAPP_NUMBER);
             console.log("Critical error alert sent to admin");
