@@ -24,6 +24,33 @@ const LocationSchema = new Schema({
 }, { _id: false });
 
 
+
+
+const chatSchema = new Schema(
+    {
+        from: { type: Schema.Types.ObjectId, ref: "User", required: true },
+        fromType: { type: String, enum: ["driver", "user"], required: true },
+        to: { type: Schema.Types.ObjectId, ref: "User" },
+        message: {
+            type: String,
+            required: true,
+            trim: true,
+        },
+        type: {
+            type: String,
+            enum: ["text", "image", "video", "audio", "file"],
+            default: "text",
+        },
+        seen: {
+            type: Boolean,
+            default: false,
+        },
+    },
+    { timestamps: true } // automatically adds createdAt & updatedAt
+);
+
+
+
 const AddressSchema = new Schema({
     formatted_address: { type: String, trim: true },
     street_number: { type: String, trim: true },
@@ -143,6 +170,8 @@ const RideRequestSchema = new Schema({
             default: null
         }
     },
+
+    chat: [chatSchema],
 
     ride_status: {
         type: String,

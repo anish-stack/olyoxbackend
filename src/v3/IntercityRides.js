@@ -1848,135 +1848,135 @@ exports.rateYourInterCity = async (req, res) => {
     }
 };
 
-cron.schedule("*/9 * * * *", async () => {
-    try {
-        const now = new Date();
-        const invalidStatuses = [
-            "driver_assigned",
-            "driver_reached",
-            "otp_verify",
-            "ride_in_progress",
-            "completed",
-            "cancelled",
-            "delayed",
-        ];
+// cron.schedule("*/9 * * * *", async () => {
+//     try {
+//         const now = new Date();
+//         const invalidStatuses = [
+//             "driver_assigned",
+//             "driver_reached",
+//             "otp_verify",
+//             "ride_in_progress",
+//             "completed",
+//             "cancelled",
+//             "delayed",
+//         ];
 
-        const rides = await IntercityRide.find({
-            status: { $nin: invalidStatuses },
-        });
+//         const rides = await IntercityRide.find({
+//             status: { $nin: invalidStatuses },
+//         });
 
-        if (!rides.length) {
-            // console.log("✅ No rides to cancel. All clean.");
-            return;
-        }
+//         if (!rides.length) {
+//             // console.log("✅ No rides to cancel. All clean.");
+//             return;
+//         }
 
-        for (const ride of rides) {
-            // ✅ Origin safe check
-            const origin = getLatLngSafe(ride.route?.origin);
-            if (!origin) {
-                console.log(`⚠️ Skipping ride ${ride._id} - Invalid origin coords`);
-                continue;
-            }
+//         for (const ride of rides) {
+//             // ✅ Origin safe check
+//             const origin = getLatLngSafe(ride.route?.origin);
+//             if (!origin) {
+//                 console.log(`⚠️ Skipping ride ${ride._id} - Invalid origin coords`);
+//                 continue;
+//             }
 
-            const vehicleType = ride.vehicle?.type;
-            const rejectedByDrivers = ride.rejectedByDrivers || [];
-            const messageLog = ride.messageSendToDriver || [];
+//             const vehicleType = ride.vehicle?.type;
+//             const rejectedByDrivers = ride.rejectedByDrivers || [];
+//             const messageLog = ride.messageSendToDriver || [];
 
-            // Eligible drivers
-            const drivers = await driver
-                .find({
-                    "preferences.OlyoxIntercity.enabled": true,
-                    _id: { $nin: rejectedByDrivers },
-                })
-                .select("-activityLog");
+//             // Eligible drivers
+//             const drivers = await driver
+//                 .find({
+//                     "preferences.OlyoxIntercity.enabled": true,
+//                     _id: { $nin: rejectedByDrivers },
+//                 })
+//                 .select("-activityLog");
 
-            // Active recharge filter
-            const driversAfterRecharge = drivers.filter((d) => {
-                const expireDate = d?.RechargeData?.expireData;
-                return expireDate && new Date(expireDate) >= now;
-            });
+//             // Active recharge filter
+//             const driversAfterRecharge = drivers.filter((d) => {
+//                 const expireDate = d?.RechargeData?.expireData;
+//                 return expireDate && new Date(expireDate) >= now;
+//             });
 
-            let validDrivers = [];
+//             let validDrivers = [];
 
-            for (const d of driversAfterRecharge) {
-                // ✅ Driver safe check
-                const driver = getLatLngSafe(d);
-                if (!driver) {
-                    // console.log(`⚠️ Skipping driver ${d._id} - Invalid driver coords`);
-                    continue;
-                }
+//             for (const d of driversAfterRecharge) {
+//                 // ✅ Driver safe check
+//                 const driver = getLatLngSafe(d);
+//                 if (!driver) {
+//                     // console.log(`⚠️ Skipping driver ${d._id} - Invalid driver coords`);
+//                     continue;
+//                 }
 
-                // Distance filter
-                const distance = calculateDistance(origin.lat, origin.lng, driver.lat, driver.lng);
-                if (distance > 5) continue;
+//                 // Distance filter
+//                 const distance = calculateDistance(origin.lat, origin.lng, driver.lat, driver.lng);
+//                 if (distance > 5) continue;
 
-                // Vehicle compatibility check
-                const driverVehicle = d.rideVehicleInfo?.vehicleType;
-                let vehicleOk = false;
+//                 // Vehicle compatibility check
+//                 const driverVehicle = d.rideVehicleInfo?.vehicleType;
+//                 let vehicleOk = false;
 
-                if (driverVehicle === vehicleType) {
-                    vehicleOk = true;
-                } else if (
-                    vehicleType === "SEDAN" &&
-                    ["SUV", "XL", "SUV/XL", "MINI"].includes(driverVehicle) &&
-                    (d.preferences?.OlyoxAcceptSedanRides || d.preferences?.OlyoxIntercity)
-                ) {
-                    vehicleOk = true;
-                } else if (
-                    vehicleType === "MINI" &&
-                    ["SEDAN", "SUV", "XL", "SUV/XL"].includes(driverVehicle) &&
-                    (d.preferences?.OlyoxAcceptMiniRides || d.preferences?.OlyoxIntercity)
-                ) {
-                    vehicleOk = true;
-                }
+//                 if (driverVehicle === vehicleType) {
+//                     vehicleOk = true;
+//                 } else if (
+//                     vehicleType === "SEDAN" &&
+//                     ["SUV", "XL", "SUV/XL", "MINI"].includes(driverVehicle) &&
+//                     (d.preferences?.OlyoxAcceptSedanRides || d.preferences?.OlyoxIntercity)
+//                 ) {
+//                     vehicleOk = true;
+//                 } else if (
+//                     vehicleType === "MINI" &&
+//                     ["SEDAN", "SUV", "XL", "SUV/XL"].includes(driverVehicle) &&
+//                     (d.preferences?.OlyoxAcceptMiniRides || d.preferences?.OlyoxIntercity)
+//                 ) {
+//                     vehicleOk = true;
+//                 }
 
-                if (!vehicleOk) continue;
+//                 if (!vehicleOk) continue;
 
-                // ✅ Duplicate message prevention
-                const lastMessage = messageLog.find(
-                    (m) => m.driver_id.toString() === d._id.toString()
-                );
-                if (lastMessage) {
-                    const diffMinutes = (now - new Date(lastMessage.at_time)) / (1000 * 60);
-                    if (diffMinutes < 5) {
-                        console.log(
-                            `⏳ Skipping message to ${d.name} (sent ${diffMinutes.toFixed(1)} min ago)`
-                        );
-                        continue;
-                    }
-                }
+//                 // ✅ Duplicate message prevention
+//                 const lastMessage = messageLog.find(
+//                     (m) => m.driver_id.toString() === d._id.toString()
+//                 );
+//                 if (lastMessage) {
+//                     const diffMinutes = (now - new Date(lastMessage.at_time)) / (1000 * 60);
+//                     if (diffMinutes < 5) {
+//                         console.log(
+//                             `⏳ Skipping message to ${d.name} (sent ${diffMinutes.toFixed(1)} min ago)`
+//                         );
+//                         continue;
+//                     }
+//                 }
 
-                // ✅ Prepare WhatsApp message
-                const msg = `🚖 *New Intercity Ride Available* 🚖\n\n📍 *Pickup*: ${ride.route.origin.address}\n📍 *Drop*: ${ride.route.destination.address}\n\n📏 *Distance*: ${ride.route.distance} km\n💰 *Price*: ₹${ride.pricing.totalPrice}\n🕒 *Departure*: ${new Date(
-                    ride.schedule.departureTime
-                ).toLocaleString()}\n\n👉 Open *Olyox Driver App* for more details.\n*Please check the Reservation rides section to accept this ride.*`;
+//                 // ✅ Prepare WhatsApp message
+//                 const msg = `🚖 *New Intercity Ride Available* 🚖\n\n📍 *Pickup*: ${ride.route.origin.address}\n📍 *Drop*: ${ride.route.destination.address}\n\n📏 *Distance*: ${ride.route.distance} km\n💰 *Price*: ₹${ride.pricing.totalPrice}\n🕒 *Departure*: ${new Date(
+//                     ride.schedule.departureTime
+//                 ).toLocaleString()}\n\n👉 Open *Olyox Driver App* for more details.\n*Please check the Reservation rides section to accept this ride.*`;
 
-                try {
-                    await SendWhatsAppMessageNormal(msg, d.phone);
-                    // console.log(`✅ Message sent to ${d.name} (${d.phone})`);
+//                 try {
+//                     await SendWhatsAppMessageNormal(msg, d.phone);
+//                     // console.log(`✅ Message sent to ${d.name} (${d.phone})`);
 
-                    // Log in ride.messageSendToDriver
-                    ride.messageSendToDriver.push({
-                        driver_id: d._id,
-                        at_time: new Date(),
-                    });
+//                     // Log in ride.messageSendToDriver
+//                     ride.messageSendToDriver.push({
+//                         driver_id: d._id,
+//                         at_time: new Date(),
+//                     });
 
-                    await ride.save();
-                } catch (error) {
-                    console.error(`❌ Failed to send message to ${d.name}`, error);
-                }
+//                     await ride.save();
+//                 } catch (error) {
+//                     console.error(`❌ Failed to send message to ${d.name}`, error);
+//                 }
 
-                validDrivers.push(d);
-            }
+//                 validDrivers.push(d);
+//             }
 
-            if (validDrivers.length > 0) {
-                // console.log(`🚀 Ride ${ride._id} matched with ${validDrivers.length} drivers`);
-            }
-        }
-    } catch (error) {
-        console.error("❌ Error in intercity ride cron:", error);
-    }
-});
+//             if (validDrivers.length > 0) {
+//                 // console.log(`🚀 Ride ${ride._id} matched with ${validDrivers.length} drivers`);
+//             }
+//         }
+//     } catch (error) {
+//         console.error("❌ Error in intercity ride cron:", error);
+//     }
+// });
 
 // 🔧 Helper
 function getLatLngSafe(obj) {

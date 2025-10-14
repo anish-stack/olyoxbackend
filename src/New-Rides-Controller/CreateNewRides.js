@@ -89,7 +89,7 @@ exports.NewcreateRequest = async (req, res) => {
             fakeRiderPhone = null,
         } = req.body;
 
-        console.log("New Booking come",req.body)
+        console.log("New Booking come", req.body)
         // Validation: Required fields
         if (
             !pickupLocation ||
@@ -682,7 +682,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
     const RADIUS_INCREMENT = 500;
 
     let retryCount = 0;
-
+    const io = req.app.get('io');
     try {
         console.info(`Initiating driver search for ride: ${rideId}`);
 
@@ -928,6 +928,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
 
                 // Send notifications and track in single operation
                 const notificationResults = await sendBatchNotifications(
+                    io,
                     matchedRiders,
                     currentRide,
                     retryCount + 1,
@@ -1027,6 +1028,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
 
 // Optimized notification sender with proper tracking and double validation
 const sendBatchNotifications = async (
+    io,
     riders,
     ride,
     searchAttempt,
@@ -1126,6 +1128,24 @@ const sendBatchNotifications = async (
                 },
                 "ride_request_channel"
             );
+         
+            const detailsOfRide = {
+                rideId: ride._id.toString(),
+                distance: ride?.route_info?.distance,
+                distance_from_pickup_km: distanceKm,
+                pickup: ride.pickup_address?.formatted_address,
+                drop: ride.drop_address?.formatted_address,
+                status: ride.rideStatus,
+                vehicleType: ride.vehicle_type,
+                pricing: ride.pricing?.total_fare,
+               distanceKm:distanceKm,
+            }
+            if (io) {
+                console.log("Io is avaibale")
+                const socketsInRoom = await io.in(`driver:${rider._id}`).allSockets();
+                console.log('Sockets in room:', socketsInRoom);
+                io.to(`driver:${rider?._id}`).emit('new_ride_request', detailsOfRide);
+            }
 
             console.info(
                 `✅ Notification sent to rider ${rider._id} (${driverVehicleType} for ${requestedVehicleType} ride)`
@@ -1603,6 +1623,8 @@ const processRiders = async (redisClient, rideId, riders, rideDetails = {}) => {
 };
 
 exports.cancelRideRequest = async (req, res) => {
+    const io = req.app.get("io");
+
     try {
         const rideId = req.params.rideId;
 
@@ -1618,12 +1640,15 @@ exports.cancelRideRequest = async (req, res) => {
             return res.status(404).json({ message: "Ride not found." });
         }
 
+        console.log("🛑 [CANCEL REQUEST] Ride found:", {
+            id: foundRide._id,
+            status: foundRide.ride_status,
+            driver: foundRide.driver?._id,
+            user: foundRide.user?._id,
+        });
+
         // Only allow cancellation for specific statuses
-        if (
-            !["pending", "searching", "driver_assigned"].includes(
-                foundRide.ride_status
-            )
-        ) {
+        if (!["pending", "searching", "driver_assigned"].includes(foundRide.ride_status)) {
             let message = "";
             switch (foundRide.ride_status) {
                 case "driver_arrived":
@@ -1641,40 +1666,65 @@ exports.cancelRideRequest = async (req, res) => {
                 default:
                     message = "Ride cannot be cancelled at this stage.";
             }
+            console.warn("⚠️ [CANCEL BLOCKED] Reason:", message);
             return res.status(400).json({ success: false, message });
         }
 
-        // CRITICAL: Stop all background notification loops immediately
-        stopNotificationLoop(rideId);
-        console.info(`Stopped notification loop for cancelled ride ${rideId}`);
-
-        // Get notified riders BEFORE updating ride status
+        // Get notified riders BEFORE anything else
         const notifiedRiderIds = foundRide.notified_riders || [];
 
-        // Cancel the ride first
+        // Stop background notification loop
+        console.log("🧠 Stopping notification loop for ride:", rideId);
+        stopNotificationLoop(rideId);
+
+        // Emit socket event to clear request (for all notified riders)
+        if (io) {
+            if (Array.isArray(notifiedRiderIds) && notifiedRiderIds.length > 0) {
+                const notifiedRiders = await RiderModel.find({
+                    _id: { $in: notifiedRiderIds.map((nr) => nr.rider_id || nr) },
+                }).select("_id name");
+
+                if (notifiedRiders.length > 0) {
+                    console.log(`👥 Found ${notifiedRiders.length} notified riders. Sending clear_ride_request...`);
+                    notifiedRiders.forEach((rider) => {
+                        console.log(`➡️ Emitting to Rider Channel: rider:${rider._id}`);
+                        io.to(`driver:${rider._id}`).emit("clear_ride_request", {
+                            rideId: foundRide._id,
+                            role: "rider",
+                        });
+                    });
+                } else {
+                    console.log("ℹ️ No notified riders found in DB.");
+                }
+            } else {
+                console.log("ℹ️ No notified rider IDs in ride data.");
+            }
+        } else {
+            console.error("❌ [IO ERROR] io instance not found in app");
+        }
+
+        // Cancel the ride
         foundRide.ride_status = "cancelled";
         foundRide.cancellation_reason = "User cancelled the ride request";
         foundRide.cancelled_by = "user";
         foundRide.cancelled_at = new Date();
         await foundRide.save();
 
-        // Send cancellation notifications to riders (only if they were notified)
-        if (Array.isArray(notifiedRiderIds) && notifiedRiderIds.length > 0) {
-            console.log(
-                `Sending cancellation notifications to ${notifiedRiderIds.length} riders`
-            );
+        console.log("✅ [RIDE CANCELLED] Ride marked as cancelled:", foundRide._id);
 
-            // Get rider details for FCM tokens
+        // Send cancellation notifications to riders
+        if (Array.isArray(notifiedRiderIds) && notifiedRiderIds.length > 0) {
+            console.log(`📩 Sending cancellation notifications to ${notifiedRiderIds.length} notified riders...`);
+
             const riders = await RiderModel.find({
                 _id: { $in: notifiedRiderIds.map((nr) => nr.rider_id || nr) },
             })
                 .select("fcmToken name _id")
                 .lean();
 
-            // Send notifications in parallel (faster)
             const notificationPromises = riders.map(async (rider) => {
                 if (!rider.fcmToken) {
-                    console.warn(`Rider ${rider._id} has no FCM token`);
+                    console.warn(`⚠️ Rider ${rider._id} has no FCM token`);
                     return;
                 }
 
@@ -1689,34 +1739,31 @@ exports.cancelRideRequest = async (req, res) => {
                         },
                         "ride_cancel_channel"
                     );
-                    console.log(
-                        `Cancellation notification sent to rider ${rider.name || rider._id}`
-                    );
+                    console.log(`✅ FCM sent to rider ${rider.name || rider._id}`);
                 } catch (err) {
-                    console.error(
-                        `Failed to send cancellation notification to rider ${rider._id}:`,
-                        err.message
-                    );
+                    console.error(`❌ Failed to send FCM to rider ${rider._id}:`, err.message);
                 }
             });
 
-            // Wait for all notifications to complete (with timeout)
             await Promise.race([
                 Promise.allSettled(notificationPromises),
-                new Promise((resolve) => setTimeout(resolve, 5000)), // 5 second timeout
+                new Promise((resolve) => setTimeout(resolve, 5000)),
             ]);
+        } else {
+            console.log("ℹ️ No notified riders to alert.");
         }
 
-        // Clear user's current ride
+        // Clear current ride references
         if (foundRide.user) {
             foundRide.user.currentRide = null;
             await foundRide.user.save();
+            console.log(`👤 Cleared currentRide for user ${foundRide.user._id}`);
         }
 
-        // Clear driver's ride if assigned
         if (foundRide.driver) {
             foundRide.driver.on_ride_id = null;
             await foundRide.driver.save();
+            console.log(`🚗 Cleared on_ride_id for driver ${foundRide.driver._id}`);
         }
 
         return res.status(200).json({
@@ -1725,12 +1772,13 @@ exports.cancelRideRequest = async (req, res) => {
             notifications_sent: notifiedRiderIds.length,
         });
     } catch (error) {
-        console.error("Error cancelling ride request:", error);
+        console.error("💥 Error cancelling ride request:", error);
         return res.status(500).json({
             message: "Server error while cancelling ride request.",
         });
     }
 };
+
 
 exports.ride_status_after_booking = async (req, res) => {
     try {
@@ -1783,6 +1831,7 @@ exports.ride_status_after_booking = async (req, res) => {
                 responsePayload.rideDetails = ride;
                 break;
             case "cancelled":
+
                 responsePayload.message = `This ride has been cancelled${ride.cancelled_by ? ` by ${ride.cancelled_by}` : ""
                     }.`;
                 responsePayload.rideDetails = ride;
@@ -1803,418 +1852,569 @@ exports.ride_status_after_booking = async (req, res) => {
     }
 };
 
+// exports.riderFetchPoolingForNewRides = async (req, res) => {
+//     try {
+//         const { id: riderId } = req.params;
+//         // console.log("=== STARTING RIDE FETCH FOR RIDER ===");
+//         // console.log("Rider ID:", riderId);
+
+//         if (!riderId) {
+//             // console.log("ERROR: No rider ID provided");
+//             return res.status(400).json({ message: "Rider ID is required." });
+//         }
+
+//         const foundRiderDetails = await RiderModel.findOne({ _id: riderId });
+//         console.log("Found rider details:", foundRiderDetails ? "YES" : "NO");
+//         if (!foundRiderDetails) {
+//             // console.log("ERROR: Rider not found in database");
+//             return res.status(404).json({ message: "Rider not found." });
+//         }
+
+//         console.log("Rider availability:", foundRiderDetails.isAvailable);
+//         if (!foundRiderDetails.isAvailable) {
+//             // console.log("ERROR: Rider is not available");
+//             return res
+//                 .status(400)
+//                 .json({ message: "Rider is not available for new rides." });
+//         }
+
+//         // console.log(
+//         //     "Rider vehicle type:",
+//         //     foundRiderDetails.rideVehicleInfo.vehicleType
+//         // );
+//         // console.log(
+//         //     "Rider location:",
+//         //     JSON.stringify(foundRiderDetails.location, null, 2)
+//         // );
+
+//         // Check if rider has location data
+//         if (
+//             !foundRiderDetails.location ||
+//             !foundRiderDetails.location.coordinates ||
+//             foundRiderDetails.location.coordinates.length !== 2
+//         ) {
+//             // console.log("ERROR: Rider location data is missing or invalid");
+//             return res
+//                 .status(400)
+//                 .json({ message: "Rider location data is required." });
+//         }
+
+//         const riderLat = foundRiderDetails.location.coordinates[1]; // Latitude
+//         const riderLng = foundRiderDetails.location.coordinates[0]; // Longitude
+//         // console.log("Rider coordinates - Lat:", riderLat, "Lng:", riderLng);
+
+//         const redisClient = getRedisClient(req);
+//         let availableRides = [];
+
+//         // Time cutoff: 4 minutes ago (240 seconds)
+//         const now = new Date();
+//         const cutoffTime = new Date(now.getTime() - 240 * 1000);
+//         // console.log("Current time:", now);
+//         // console.log("Cutoff time:", cutoffTime);
+
+//         // Helper function to calculate distance between two points (Haversine formula)
+//         const calculateDistance = (lat1, lng1, lat2, lng2) => {
+//             // console.log(`--- CALCULATING DISTANCE ---`);
+//             // console.log(`Point 1 (Rider): Lat ${lat1}, Lng ${lng1}`);
+//             // console.log(`Point 2 (Pickup): Lat ${lat2}, Lng ${lng2}`);
+
+//             const R = 6371; // Radius of the Earth in kilometers
+//             const dLat = ((lat2 - lat1) * Math.PI) / 180;
+//             const dLng = ((lng2 - lng1) * Math.PI) / 180;
+//             const a =
+//                 Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+//                 Math.cos((lat1 * Math.PI) / 180) *
+//                 Math.cos((lat2 * Math.PI) / 180) *
+//                 Math.sin(dLng / 2) *
+//                 Math.sin(dLng / 2);
+//             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+//             const distance = R * c; // Distance in kilometers
+
+//             // console.log(`Calculated distance: ${distance.toFixed(2)} km`);
+//             return distance;
+//         };
+
+//         // Helper function to check if ride is within acceptable distance (e.g., 5km)
+//         const isRideNearby = (
+//             ridePickupLocation,
+//             riderLat,
+//             riderLng,
+//             maxDistanceKm = 5
+//         ) => {
+//             // console.log(`--- CHECKING RIDE PROXIMITY ---`);
+//             // console.log(
+//             //     "Ride pickup location:",
+//             //     JSON.stringify(ridePickupLocation, null, 2)
+//             // );
+
+//             if (
+//                 !ridePickupLocation ||
+//                 !ridePickupLocation.coordinates ||
+//                 ridePickupLocation.coordinates.length !== 2
+//             ) {
+//                 // console.log("Ride pickup location is invalid - SKIPPING RIDE");
+//                 return false;
+//             }
+
+//             const pickupLat = ridePickupLocation.coordinates[1]; // Latitude
+//             const pickupLng = ridePickupLocation.coordinates[0]; // Longitude
+//             // console.log("Pickup coordinates - Lat:", pickupLat, "Lng:", pickupLng);
+
+//             const distance = calculateDistance(
+//                 riderLat,
+//                 riderLng,
+//                 pickupLat,
+//                 pickupLng
+//             );
+//             const isNearby = distance <= maxDistanceKm;
+
+//             // console.log(
+//             //     `Distance: ${distance.toFixed(
+//             //         2
+//             //     )}km, Max allowed: ${maxDistanceKm}km, Is nearby: ${isNearby}`
+//             // );
+//             return isNearby;
+//         };
+
+//         // Helper function to check if rider is rejected
+//         const isRiderRejected = (rejectedDrivers, riderId) => {
+//             // console.log("--- CHECKING REJECTION ---");
+//             // console.log(
+//             //     "Rejected drivers array:",
+//             //     JSON.stringify(rejectedDrivers, null, 2)
+//             // );
+//             // console.log("Checking rider ID:", riderId);
+
+//             if (!rejectedDrivers || !Array.isArray(rejectedDrivers)) {
+//                 // console.log(
+//                 //     "No rejected drivers array or not array - RIDER NOT REJECTED"
+//                 // );
+//                 return false;
+//             }
+
+//             if (rejectedDrivers.length === 0) {
+//                 // console.log("Empty rejected drivers array - RIDER NOT REJECTED");
+//                 return false;
+//             }
+
+//             for (let i = 0; i < rejectedDrivers.length; i++) {
+//                 const rejection = rejectedDrivers[i];
+//                 // console.log(
+//                 //     `Checking rejection ${i}:`,
+//                 //     JSON.stringify(rejection, null, 2)
+//                 // );
+
+//                 if (!rejection) {
+//                     // console.log(`Rejection ${i} is null/undefined - SKIP`);
+//                     continue;
+//                 }
+
+//                 // Based on schema, the field is 'driver' not '_id'
+//                 const rejectedDriverId = rejection.driver;
+//                 // console.log(`Rejected driver ID from schema: ${rejectedDriverId}`);
+//                 // console.log(`Rejected at: ${rejection.rejected_at}`);
+//                 // console.log(`Comparing: ${rejectedDriverId} === ${riderId}`);
+//                 // console.log(
+//                 //     `String comparison: ${rejectedDriverId?.toString()} === ${riderId.toString()}`
+//                 // );
+
+//                 if (
+//                     rejectedDriverId &&
+//                     rejectedDriverId.toString() === riderId.toString()
+//                 ) {
+//                     // console.log("MATCH FOUND - RIDER IS REJECTED");
+//                     return true;
+//                 }
+//             }
+
+//             // console.log("NO MATCH FOUND - RIDER NOT REJECTED");
+//             return false;
+//         };
+
+//         // 🆕 Integrated preference checking function
+//         const isRideAllowedByPreferences = (rideVehicleType, rider) => {
+//             const driverType = rider?.rideVehicleInfo?.vehicleType?.trim();
+//             const prefs = rider?.preferences || {};
+//             let decision = false;
+//             // console.info("--------------------------------------------------");
+//             // console.info(`👤 Rider: ${rider.name || "Unnamed"} (${rider._id})`);
+//             // console.info(`📌 Driver Vehicle Type: ${driverType}`);
+//             // console.info(`📌 Ride Requires Vehicle Type: ${rideVehicleType}`);
+//             // console.info(`⚙️ Preferences:`, {
+//             //     OlyoxAcceptMiniRides: prefs?.OlyoxAcceptMiniRides?.enabled,
+//             //     OlyoxAcceptSedanRides: prefs?.OlyoxAcceptSedanRides?.enabled,
+//             // });
+
+//             switch (rideVehicleType?.toUpperCase()) {
+//                 case "BIKE":
+//                 case "Bike":
+//                 case "BiKe":
+//                     // ✅ Special case: Bike → always accept, ignore preferences
+//                     decision = driverType === "Bike";
+//                     break;
+
+//                 case "AUTO":
+//                 case "auto":
+//                 case "Auto":
+//                     // ✅ Special case:Auto → always accept, ignore preferences
+//                     decision = driverType === "auto";
+//                     break;
+
+//                 case "MINI":
+//                     decision =
+//                         driverType === "MINI" ||
+//                         (driverType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
+//                         ((driverType === "SUV" ||
+//                             driverType === "XL" ||
+//                             driverType === "SUV/XL") &&
+//                             prefs.OlyoxAcceptMiniRides?.enabled);
+//                     break;
+
+//                 case "SEDAN":
+//                     decision =
+//                         driverType === "SEDAN" ||
+//                         ((driverType === "SUV" ||
+//                             driverType === "XL" ||
+//                             driverType === "SUV/XL") &&
+//                             prefs.OlyoxAcceptSedanRides?.enabled);
+//                     break;
+
+//                 case "SUV":
+//                 case "SUV/XL":
+//                 case "XL":
+//                     decision =
+//                         driverType === "SUV/XL" ||
+//                         driverType === "XL" ||
+//                         driverType === "SUV";
+//                     break;
+
+//                 default:
+//                     decision = false;
+//             }
+
+//             // console.info(
+//             //     `✅ Preference Decision: ${decision ? "ACCEPTED ✅" : "REJECTED ❌"}`
+//             // );
+//             // console.info("--------------------------------------------------");
+//             return decision;
+//         };
+
+//         // 🔄 Modified database query - get ALL searching rides (remove vehicle_type filter)
+//         // console.log("\n=== QUERYING DATABASE FOR RIDES ===");
+//         // console.log("Query criteria:");
+//         // console.log("- ride_status: 'searching'");
+//         // console.log("- requested_at >= ", cutoffTime);
+//         // console.log(
+//         //     "- 🆕 Removed vehicle_type filter - will check preferences instead"
+//         // );
+
+//         const dbRides = await RideBooking.find({
+//             ride_status: "searching",
+//             requested_at: { $gte: cutoffTime },
+//         }).sort({ requested_at: -1 });
+
+//         // console.log(
+//         //     `Found ${dbRides.length} rides in database with basic criteria`
+//         // );
+
+//         // Filter out rejected rides, check proximity, and check preferences
+//         const filteredRides = [];
+//         for (let i = 0; i < dbRides.length; i++) {
+//             const ride = dbRides[i];
+//             // console.log(`\n--- PROCESSING RIDE ${i + 1}/${dbRides.length} ---`);
+//             // console.log("Ride ID:", ride._id);
+//             // console.log("Ride status:", ride.ride_status);
+//             // console.log("Ride vehicle type:", ride.vehicle_type);
+//             // console.log("Requested at:", ride.requested_at);
+//             // console.log(
+//             //     "Pickup location:",
+//             //     JSON.stringify(ride.pickup_location, null, 2)
+//             // );
+
+//             // Check if rider is rejected for this ride
+//             const isRejected = isRiderRejected(ride.rejected_by_drivers, riderId);
+//             // console.log("Is rider rejected for this ride:", isRejected);
+
+//             if (isRejected) {
+//                 // console.log("SKIPPING RIDE - RIDER IS REJECTED");
+//                 continue;
+//             }
+
+//             // Check if ride is nearby (within 5km)
+//             const isNearby = isRideNearby(
+//                 ride.pickup_location,
+//                 riderLat,
+//                 riderLng,
+//                 5
+//             );
+//             // console.log("Is ride nearby:", isNearby);
+
+//             if (!isNearby) {
+//                 // console.log("SKIPPING RIDE - TOO FAR FROM RIDER");
+//                 continue;
+//             }
+
+//             // 🆕 Check if ride is allowed by preferences
+//             const isAllowedByPreferences = isRideAllowedByPreferences(
+//                 ride.vehicle_type,
+//                 foundRiderDetails
+//             );
+//             // console.log("Is ride allowed by preferences:", isAllowedByPreferences);
+
+//             if (!isAllowedByPreferences) {
+//                 console.log("SKIPPING RIDE - NOT ALLOWED BY PREFERENCES");
+//                 continue;
+//             }
+
+//             // console.log("ADDING RIDE TO FILTERED LIST - PASSED ALL CHECKS ✅");
+//             filteredRides.push(ride);
+//         }
+
+//         // console.log(`\n=== FILTERING RESULTS ===`);
+//         // console.log(
+//         //     `After rejection, proximity, and preference filtering: ${filteredRides.length} rides`
+//         // );
+
+//         // Take only first 2 rides
+//         const finalRides = filteredRides.slice(0, 2);
+//         // console.log(`Taking first 2 rides: ${finalRides.length} rides`);
+
+//         // Final validation - check each ride one more time
+//         const validatedRides = [];
+//         for (let i = 0; i < finalRides.length; i++) {
+//             const ride = finalRides[i];
+//             // console.log(`\n--- FINAL VALIDATION FOR RIDE ${i + 1} ---`);
+//             // console.log("Ride ID:", ride._id);
+
+//             // Get latest ride data from database
+//             const latestRideData = await RideBooking.findById(ride._id);
+//             // console.log("Latest ride data found:", latestRideData ? "YES" : "NO");
+
+//             if (!latestRideData) {
+//                 console.log("RIDE NOT FOUND IN DB - SKIPPING");
+//                 continue;
+//             }
+
+//             console.log("Latest ride status:", latestRideData.ride_status);
+
+//             if (latestRideData.ride_status !== "searching") {
+//                 console.log("RIDE STATUS NOT SEARCHING - SKIPPING");
+//                 continue;
+//             }
+
+//             // Final rejection check
+//             const finalRejectionCheck = isRiderRejected(
+//                 latestRideData.rejected_by_drivers,
+//                 riderId
+//             );
+//             console.log("Final rejection check result:", finalRejectionCheck);
+
+//             if (finalRejectionCheck) {
+//                 console.log("RIDER IS REJECTED IN FINAL CHECK - SKIPPING");
+//                 continue;
+//             }
+
+//             // Final proximity check
+//             const finalProximityCheck = isRideNearby(
+//                 latestRideData.pickup_location,
+//                 riderLat,
+//                 riderLng,
+//                 5
+//             );
+//             console.log("Final proximity check result:", finalProximityCheck);
+
+//             if (!finalProximityCheck) {
+//                 // console.log("RIDE TOO FAR IN FINAL CHECK - SKIPPING");
+//                 continue;
+//             }
+
+//             // 🆕 Final preference check
+//             const finalPreferenceCheck = isRideAllowedByPreferences(
+//                 latestRideData.vehicle_type,
+//                 foundRiderDetails
+//             );
+//             // console.log("Final preference check result:", finalPreferenceCheck);
+
+//             if (!finalPreferenceCheck) {
+//                 // console.log(
+//                 //     "RIDE NOT ALLOWED BY PREFERENCES IN FINAL CHECK - SKIPPING"
+//                 // );
+//                 continue;
+//             }
+
+//             console.log("RIDE PASSED ALL VALIDATIONS - ADDING TO FINAL LIST ✅");
+//             validatedRides.push(latestRideData);
+//         }
+
+//         // console.log(`\n=== FINAL RESULTS ===`);
+//         // console.log(`Total validated rides: ${validatedRides.length}`);
+
+//         if (validatedRides.length > 0) {
+//             // console.log(
+//             //     "Final ride IDs:",
+//             //     validatedRides.map((r) => r._id.toString())
+//             // );
+//             // console.log(
+//             //     "Final ride vehicle types:",
+//             //     validatedRides.map((r) => r.vehicle_type)
+//             // );
+
+//             validatedRides.forEach((ride, index) => {
+//                 console.log(
+//                     `Ride ${index + 1} rejected_by_drivers:`,
+//                     JSON.stringify(ride.rejected_by_drivers, null, 2)
+//                 );
+//             });
+//         }
+
+//         return res.status(200).json({
+//             success: true,
+//             message: `Found ${validatedRides.length} available rides`,
+//             data: validatedRides,
+//         });
+//     } catch (error) {
+//         console.error("ERROR in riderFetchPoolingForNewRides:", error.message);
+//         console.error("Full error:", error);
+//         return res.status(500).json({
+//             success: false,
+//             message: "Server error while fetching rides.",
+//             error: error.message,
+//         });
+//     }
+// };
+
 exports.riderFetchPoolingForNewRides = async (req, res) => {
+    const io = req.app.get('io')
     try {
+        console.log("piined")
         const { id: riderId } = req.params;
-        // console.log("=== STARTING RIDE FETCH FOR RIDER ===");
-        // console.log("Rider ID:", riderId);
 
         if (!riderId) {
-            // console.log("ERROR: No rider ID provided");
             return res.status(400).json({ message: "Rider ID is required." });
         }
 
         const foundRiderDetails = await RiderModel.findOne({ _id: riderId });
-        console.log("Found rider details:", foundRiderDetails ? "YES" : "NO");
         if (!foundRiderDetails) {
-            // console.log("ERROR: Rider not found in database");
             return res.status(404).json({ message: "Rider not found." });
         }
 
-        console.log("Rider availability:", foundRiderDetails.isAvailable);
         if (!foundRiderDetails.isAvailable) {
-            // console.log("ERROR: Rider is not available");
             return res
                 .status(400)
                 .json({ message: "Rider is not available for new rides." });
         }
 
-        // console.log(
-        //     "Rider vehicle type:",
-        //     foundRiderDetails.rideVehicleInfo.vehicleType
-        // );
-        // console.log(
-        //     "Rider location:",
-        //     JSON.stringify(foundRiderDetails.location, null, 2)
-        // );
-
-        // Check if rider has location data
         if (
             !foundRiderDetails.location ||
             !foundRiderDetails.location.coordinates ||
             foundRiderDetails.location.coordinates.length !== 2
         ) {
-            // console.log("ERROR: Rider location data is missing or invalid");
             return res
                 .status(400)
                 .json({ message: "Rider location data is required." });
         }
 
-        const riderLat = foundRiderDetails.location.coordinates[1]; // Latitude
-        const riderLng = foundRiderDetails.location.coordinates[0]; // Longitude
-        // console.log("Rider coordinates - Lat:", riderLat, "Lng:", riderLng);
+        const riderLat = foundRiderDetails.location.coordinates[1];
+        const riderLng = foundRiderDetails.location.coordinates[0];
 
-        const redisClient = getRedisClient(req);
-        let availableRides = [];
-
-        // Time cutoff: 4 minutes ago (240 seconds)
         const now = new Date();
         const cutoffTime = new Date(now.getTime() - 240 * 1000);
-        // console.log("Current time:", now);
-        // console.log("Cutoff time:", cutoffTime);
 
-        // Helper function to calculate distance between two points (Haversine formula)
         const calculateDistance = (lat1, lng1, lat2, lng2) => {
-            // console.log(`--- CALCULATING DISTANCE ---`);
-            // console.log(`Point 1 (Rider): Lat ${lat1}, Lng ${lng1}`);
-            // console.log(`Point 2 (Pickup): Lat ${lat2}, Lng ${lng2}`);
-
-            const R = 6371; // Radius of the Earth in kilometers
+            const R = 6371; // km
             const dLat = ((lat2 - lat1) * Math.PI) / 180;
             const dLng = ((lng2 - lng1) * Math.PI) / 180;
             const a =
-                Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.sin(dLat / 2) ** 2 +
                 Math.cos((lat1 * Math.PI) / 180) *
                 Math.cos((lat2 * Math.PI) / 180) *
-                Math.sin(dLng / 2) *
-                Math.sin(dLng / 2);
+                Math.sin(dLng / 2) ** 2;
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            const distance = R * c; // Distance in kilometers
-
-            // console.log(`Calculated distance: ${distance.toFixed(2)} km`);
-            return distance;
+            return R * c;
         };
 
-        // Helper function to check if ride is within acceptable distance (e.g., 5km)
-        const isRideNearby = (
-            ridePickupLocation,
-            riderLat,
-            riderLng,
-            maxDistanceKm = 5
-        ) => {
-            // console.log(`--- CHECKING RIDE PROXIMITY ---`);
-            // console.log(
-            //     "Ride pickup location:",
-            //     JSON.stringify(ridePickupLocation, null, 2)
-            // );
-
-            if (
-                !ridePickupLocation ||
-                !ridePickupLocation.coordinates ||
-                ridePickupLocation.coordinates.length !== 2
-            ) {
-                // console.log("Ride pickup location is invalid - SKIPPING RIDE");
-                return false;
-            }
-
-            const pickupLat = ridePickupLocation.coordinates[1]; // Latitude
-            const pickupLng = ridePickupLocation.coordinates[0]; // Longitude
-            // console.log("Pickup coordinates - Lat:", pickupLat, "Lng:", pickupLng);
-
-            const distance = calculateDistance(
-                riderLat,
-                riderLng,
-                pickupLat,
-                pickupLng
-            );
-            const isNearby = distance <= maxDistanceKm;
-
-            // console.log(
-            //     `Distance: ${distance.toFixed(
-            //         2
-            //     )}km, Max allowed: ${maxDistanceKm}km, Is nearby: ${isNearby}`
-            // );
-            return isNearby;
+        const isRideNearby = (ridePickupLocation, riderLat, riderLng, maxDistanceKm = 5) => {
+            if (!ridePickupLocation?.coordinates || ridePickupLocation.coordinates.length !== 2) return false;
+            const pickupLat = ridePickupLocation.coordinates[1];
+            const pickupLng = ridePickupLocation.coordinates[0];
+            return calculateDistance(riderLat, riderLng, pickupLat, pickupLng) <= maxDistanceKm;
         };
 
-        // Helper function to check if rider is rejected
         const isRiderRejected = (rejectedDrivers, riderId) => {
-            // console.log("--- CHECKING REJECTION ---");
-            // console.log(
-            //     "Rejected drivers array:",
-            //     JSON.stringify(rejectedDrivers, null, 2)
-            // );
-            // console.log("Checking rider ID:", riderId);
-
-            if (!rejectedDrivers || !Array.isArray(rejectedDrivers)) {
-                // console.log(
-                //     "No rejected drivers array or not array - RIDER NOT REJECTED"
-                // );
-                return false;
-            }
-
-            if (rejectedDrivers.length === 0) {
-                // console.log("Empty rejected drivers array - RIDER NOT REJECTED");
-                return false;
-            }
-
-            for (let i = 0; i < rejectedDrivers.length; i++) {
-                const rejection = rejectedDrivers[i];
-                // console.log(
-                //     `Checking rejection ${i}:`,
-                //     JSON.stringify(rejection, null, 2)
-                // );
-
-                if (!rejection) {
-                    // console.log(`Rejection ${i} is null/undefined - SKIP`);
-                    continue;
-                }
-
-                // Based on schema, the field is 'driver' not '_id'
-                const rejectedDriverId = rejection.driver;
-                // console.log(`Rejected driver ID from schema: ${rejectedDriverId}`);
-                // console.log(`Rejected at: ${rejection.rejected_at}`);
-                // console.log(`Comparing: ${rejectedDriverId} === ${riderId}`);
-                // console.log(
-                //     `String comparison: ${rejectedDriverId?.toString()} === ${riderId.toString()}`
-                // );
-
-                if (
-                    rejectedDriverId &&
-                    rejectedDriverId.toString() === riderId.toString()
-                ) {
-                    // console.log("MATCH FOUND - RIDER IS REJECTED");
-                    return true;
-                }
-            }
-
-            // console.log("NO MATCH FOUND - RIDER NOT REJECTED");
-            return false;
+            if (!Array.isArray(rejectedDrivers) || rejectedDrivers.length === 0) return false;
+            return rejectedDrivers.some(r => r?.driver?.toString() === riderId.toString());
         };
 
-        // 🆕 Integrated preference checking function
         const isRideAllowedByPreferences = (rideVehicleType, rider) => {
             const driverType = rider?.rideVehicleInfo?.vehicleType?.trim();
             const prefs = rider?.preferences || {};
-            let decision = false;
-            // console.info("--------------------------------------------------");
-            // console.info(`👤 Rider: ${rider.name || "Unnamed"} (${rider._id})`);
-            // console.info(`📌 Driver Vehicle Type: ${driverType}`);
-            // console.info(`📌 Ride Requires Vehicle Type: ${rideVehicleType}`);
-            // console.info(`⚙️ Preferences:`, {
-            //     OlyoxAcceptMiniRides: prefs?.OlyoxAcceptMiniRides?.enabled,
-            //     OlyoxAcceptSedanRides: prefs?.OlyoxAcceptSedanRides?.enabled,
-            // });
-
             switch (rideVehicleType?.toUpperCase()) {
-                case "BIKE":
-                case "Bike":
-                case "BiKe":
-                    // ✅ Special case: Bike → always accept, ignore preferences
-                    decision = driverType === "Bike";
-                    break;
-
-                case "AUTO":
-                case "auto":
-                case "Auto":
-                    // ✅ Special case:Auto → always accept, ignore preferences
-                    decision = driverType === "auto";
-                    break;
-
-                case "MINI":
-                    decision =
-                        driverType === "MINI" ||
-                        (driverType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
-                        ((driverType === "SUV" ||
-                            driverType === "XL" ||
-                            driverType === "SUV/XL") &&
-                            prefs.OlyoxAcceptMiniRides?.enabled);
-                    break;
-
-                case "SEDAN":
-                    decision =
-                        driverType === "SEDAN" ||
-                        ((driverType === "SUV" ||
-                            driverType === "XL" ||
-                            driverType === "SUV/XL") &&
-                            prefs.OlyoxAcceptSedanRides?.enabled);
-                    break;
-
+                case "BIKE": return driverType === "Bike";
+                case "AUTO": return driverType === "auto";
+                case "MINI": return driverType === "MINI" ||
+                    ((driverType === "SEDAN" || driverType === "SUV" || driverType === "XL") && prefs.OlyoxAcceptMiniRides?.enabled);
+                case "SEDAN": return driverType === "SEDAN" ||
+                    ((driverType === "SUV" || driverType === "XL") && prefs.OlyoxAcceptSedanRides?.enabled);
                 case "SUV":
                 case "SUV/XL":
-                case "XL":
-                    decision =
-                        driverType === "SUV/XL" ||
-                        driverType === "XL" ||
-                        driverType === "SUV";
-                    break;
-
-                default:
-                    decision = false;
+                case "XL": return ["SUV", "SUV/XL", "XL"].includes(driverType);
+                default: return false;
             }
-
-            // console.info(
-            //     `✅ Preference Decision: ${decision ? "ACCEPTED ✅" : "REJECTED ❌"}`
-            // );
-            // console.info("--------------------------------------------------");
-            return decision;
         };
-
-        // 🔄 Modified database query - get ALL searching rides (remove vehicle_type filter)
-        // console.log("\n=== QUERYING DATABASE FOR RIDES ===");
-        // console.log("Query criteria:");
-        // console.log("- ride_status: 'searching'");
-        // console.log("- requested_at >= ", cutoffTime);
-        // console.log(
-        //     "- 🆕 Removed vehicle_type filter - will check preferences instead"
-        // );
 
         const dbRides = await RideBooking.find({
             ride_status: "searching",
             requested_at: { $gte: cutoffTime },
         }).sort({ requested_at: -1 });
 
-        // console.log(
-        //     `Found ${dbRides.length} rides in database with basic criteria`
-        // );
-
-        // Filter out rejected rides, check proximity, and check preferences
         const filteredRides = [];
-        for (let i = 0; i < dbRides.length; i++) {
-            const ride = dbRides[i];
-            // console.log(`\n--- PROCESSING RIDE ${i + 1}/${dbRides.length} ---`);
-            // console.log("Ride ID:", ride._id);
-            // console.log("Ride status:", ride.ride_status);
-            // console.log("Ride vehicle type:", ride.vehicle_type);
-            // console.log("Requested at:", ride.requested_at);
-            // console.log(
-            //     "Pickup location:",
-            //     JSON.stringify(ride.pickup_location, null, 2)
-            // );
-
-            // Check if rider is rejected for this ride
-            const isRejected = isRiderRejected(ride.rejected_by_drivers, riderId);
-            console.log("Is rider rejected for this ride:", isRejected);
-
-            if (isRejected) {
-                // console.log("SKIPPING RIDE - RIDER IS REJECTED");
-                continue;
-            }
-
-            // Check if ride is nearby (within 5km)
-            const isNearby = isRideNearby(
-                ride.pickup_location,
-                riderLat,
-                riderLng,
-                5
-            );
-            // console.log("Is ride nearby:", isNearby);
-
-            if (!isNearby) {
-                // console.log("SKIPPING RIDE - TOO FAR FROM RIDER");
-                continue;
-            }
-
-            // 🆕 Check if ride is allowed by preferences
-            const isAllowedByPreferences = isRideAllowedByPreferences(
-                ride.vehicle_type,
-                foundRiderDetails
-            );
-            // console.log("Is ride allowed by preferences:", isAllowedByPreferences);
-
-            if (!isAllowedByPreferences) {
-                console.log("SKIPPING RIDE - NOT ALLOWED BY PREFERENCES");
-                continue;
-            }
-
-            // console.log("ADDING RIDE TO FILTERED LIST - PASSED ALL CHECKS ✅");
+        for (const ride of dbRides) {
+            if (isRiderRejected(ride.rejected_by_drivers, riderId)) continue;
+            if (!isRideNearby(ride.pickup_location, riderLat, riderLng, 5)) continue;
+            if (!isRideAllowedByPreferences(ride.vehicle_type, foundRiderDetails)) continue;
             filteredRides.push(ride);
         }
 
-        // console.log(`\n=== FILTERING RESULTS ===`);
-        // console.log(
-        //     `After rejection, proximity, and preference filtering: ${filteredRides.length} rides`
-        // );
-
-        // Take only first 2 rides
         const finalRides = filteredRides.slice(0, 2);
-        // console.log(`Taking first 2 rides: ${finalRides.length} rides`);
 
-        // Final validation - check each ride one more time
         const validatedRides = [];
-        for (let i = 0; i < finalRides.length; i++) {
-            const ride = finalRides[i];
-            // console.log(`\n--- FINAL VALIDATION FOR RIDE ${i + 1} ---`);
-            // console.log("Ride ID:", ride._id);
-
-            // Get latest ride data from database
+        for (const ride of finalRides) {
             const latestRideData = await RideBooking.findById(ride._id);
-            // console.log("Latest ride data found:", latestRideData ? "YES" : "NO");
+            if (!latestRideData) continue;
+            if (latestRideData.ride_status !== "searching") continue;
+            if (isRiderRejected(latestRideData.rejected_by_drivers, riderId)) continue;
+            if (!isRideNearby(latestRideData.pickup_location, riderLat, riderLng, 5)) continue;
+            if (!isRideAllowedByPreferences(latestRideData.vehicle_type, foundRiderDetails)) continue;
 
-            if (!latestRideData) {
-                console.log("RIDE NOT FOUND IN DB - SKIPPING");
-                continue;
-            }
-
-            console.log("Latest ride status:", latestRideData.ride_status);
-
-            if (latestRideData.ride_status !== "searching") {
-                console.log("RIDE STATUS NOT SEARCHING - SKIPPING");
-                continue;
-            }
-
-            // Final rejection check
-            const finalRejectionCheck = isRiderRejected(
-                latestRideData.rejected_by_drivers,
-                riderId
+            // Filter notified_riders for this riderId
+            const notifiedRiderData = latestRideData.notified_riders?.find(
+                nr => nr.rider_id.toString() === riderId.toString()
             );
-            console.log("Final rejection check result:", finalRejectionCheck);
 
-            if (finalRejectionCheck) {
-                console.log("RIDER IS REJECTED IN FINAL CHECK - SKIPPING");
-                continue;
+            if (io) {
+                if (latestRideData?.ride_status !== "searching") {
+                    io.to(`driver:${riderId}`).emit('clear_ride_request', { rideId: latestRideData?._id });
+                }
+            } else {
+                console.log("Io not ")
             }
 
-            // Final proximity check
-            const finalProximityCheck = isRideNearby(
-                latestRideData.pickup_location,
-                riderLat,
-                riderLng,
-                5
-            );
-            console.log("Final proximity check result:", finalProximityCheck);
 
-            if (!finalProximityCheck) {
-                // console.log("RIDE TOO FAR IN FINAL CHECK - SKIPPING");
-                continue;
-            }
 
-            // 🆕 Final preference check
-            const finalPreferenceCheck = isRideAllowedByPreferences(
-                latestRideData.vehicle_type,
-                foundRiderDetails
-            );
-            // console.log("Final preference check result:", finalPreferenceCheck);
-
-            if (!finalPreferenceCheck) {
-                // console.log(
-                //     "RIDE NOT ALLOWED BY PREFERENCES IN FINAL CHECK - SKIPPING"
-                // );
-                continue;
-            }
-
-            console.log("RIDE PASSED ALL VALIDATIONS - ADDING TO FINAL LIST ✅");
-            validatedRides.push(latestRideData);
-        }
-
-        // console.log(`\n=== FINAL RESULTS ===`);
-        // console.log(`Total validated rides: ${validatedRides.length}`);
-
-        if (validatedRides.length > 0) {
-            // console.log(
-            //     "Final ride IDs:",
-            //     validatedRides.map((r) => r._id.toString())
-            // );
-            // console.log(
-            //     "Final ride vehicle types:",
-            //     validatedRides.map((r) => r.vehicle_type)
-            // );
-
-            validatedRides.forEach((ride, index) => {
-                console.log(
-                    `Ride ${index + 1} rejected_by_drivers:`,
-                    JSON.stringify(ride.rejected_by_drivers, null, 2)
-                );
+            validatedRides.push({
+                _id: latestRideData._id,
+                pickup_address: latestRideData.pickup_address?.formatted_address,
+                drop_address: latestRideData.drop_address?.formatted_address,
+                vehicle_type: latestRideData.vehicle_type,
+                ride_status: latestRideData.ride_status,
+                total_fare: latestRideData.pricing?.total_fare,
+                distance: latestRideData.route_info?.distance,
+                notified_rider: notifiedRiderData
+                    ? {
+                        distance_from_pickup: notifiedRiderData.distance_from_pickup,
+                        distance_from_pickup_km: notifiedRiderData.distance_from_pickup_km
+                    }
+                    : null
             });
         }
 
@@ -2224,8 +2424,6 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
             data: validatedRides,
         });
     } catch (error) {
-        console.error("ERROR in riderFetchPoolingForNewRides:", error.message);
-        console.error("Full error:", error);
         return res.status(500).json({
             success: false,
             message: "Server error while fetching rides.",
@@ -2612,6 +2810,8 @@ const handleRideRejection = async (
     riderId,
     redisClient
 ) => {
+    const io = req.app.get('io')
+
     try {
         // Check if rider already rejected this ride
         const alreadyRejected = ride.rejected_by_drivers?.some(
@@ -2670,6 +2870,8 @@ const handleRideRejection = async (
         } catch (redisError) {
             console.warn("Redis cleanup error:", redisError.message);
         }
+        io.to(`driver:${riderId}`).emit('clear_ride_request', { rideId: ride._id });
+
 
         return res.status(200).json({
             success: true,
@@ -2696,10 +2898,13 @@ const handleRideAcceptance = async (
     rideId,
     redisClient
 ) => {
+    const io = req.app.get('io')
     try {
         // Double-check ride is still available (race condition protection)
         const currentRide = await RideBooking.findById(rideObjectId);
         if (!currentRide || currentRide.ride_status !== "searching") {
+            io.to(`driver:${riderId}`).emit('clear_ride_request', { rideId: rideId });
+
             return res.status(400).json({
                 success: false,
                 message: "Sorry, this ride was just taken by another driver",
@@ -3045,6 +3250,7 @@ exports.ride_status_after_booking_for_drivers = async (req, res) => {
 };
 
 exports.changeCurrentRiderRideStatus = async (req, res) => {
+    const io = req.app.get('io')
     try {
         const validStatus = ["driver_arrived", "completed", "cancelled"];
         const { riderId, rideId, status, byAdmin } = req.body;
@@ -3195,6 +3401,7 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
                     }
                 );
             }
+            io.to(`driver:${driver?._id}`).emit('clear_ride_request', { rideId: foundRide._id });
 
             if (driver?.fcmToken) {
                 await sendNotification.sendNotification(
@@ -3230,6 +3437,8 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
 };
 
 exports.AdminChangeCurrentRiderRideStatus = async (req, res) => {
+    const io = req.app.get('io');
+
     try {
         const validStatus = [
             "pending",
@@ -3367,6 +3576,7 @@ exports.AdminChangeCurrentRiderRideStatus = async (req, res) => {
                 foundRide.cancellation_reason = "Cancelled by admin";
                 foundRide.cancelled_by = "admin";
                 foundRide.cancelled_at = new Date();
+                io.to(`driver:${driver?._id}`).emit('clear_ride_request', { rideId: foundRide._id });
 
                 if (userFcmToken) {
                     await sendNotification.sendNotification(
@@ -3962,6 +4172,7 @@ class RetryableError extends Error {
 
 exports.cancelRideByPoll = async (req, res) => {
     const session = await mongoose.startSession();
+    const io = req.app.get('io');
 
     try {
         const { ride, cancelBy, reason_id, reason } = req.body;
@@ -4019,6 +4230,8 @@ exports.cancelRideByPoll = async (req, res) => {
             rideData.cancelled_by = cancelBy;
             rideData.cancelled_at = new Date();
             rideData.cancellation_reason = reason || null;
+            io.to(`driver:${driverId}`).emit('clear_ride_request', { rideId: ride._id });
+
             stopNotificationLoop(rideData?._id);
 
             // 🔹 Free driver if assigned
@@ -4298,54 +4511,54 @@ exports.FindRiderNearByUser = async (req, res) => {
 
 
 exports.findMyRideNewMode = async (req, res) => {
-  try {
-    const userId = req.params.id;
+    try {
+        const userId = req.params.id;
 
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: "User ID is required",
-      });
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: "User ID is required",
+            });
+        }
+
+        // Fetch Normal Rides
+        const normalRides = await RideBooking.find({ user: userId })
+            .select("-rejected_by_drivers -notified_riders -user -route_info")
+            .sort({ created: -1 });
+
+        // Fetch Intercity Rides
+        const intercityRides = await IntercityRide.find({ passengerId: userId })
+            .select("-rejectedByDrivers -reviews -messageSendToDriver")
+            .sort({ createdAt: -1 });
+
+        // Prioritize active rides within each category
+        const priorityStatuses = ['driver_assigned', 'in_progress', 'driver_reached', 'otp_verify', 'ride_in_progress'];
+
+        const sortByStatusAndDate = (rides) =>
+            rides.sort((a, b) => {
+                const aPriority = priorityStatuses.includes(a.rideStatus) ? 1 : 0;
+                const bPriority = priorityStatuses.includes(b.rideStatus) ? 1 : 0;
+                return (
+                    bPriority - aPriority ||
+                    new Date(b.createdAt || b.created) - new Date(a.createdAt || a.created)
+                );
+            });
+
+        const sortedNormalRides = sortByStatusAndDate(normalRides);
+        const sortedIntercityRides = sortByStatusAndDate(intercityRides);
+
+        return res.status(200).json({
+            success: true,
+            message: "Rides fetched successfully",
+            normalRides: sortedNormalRides,
+            intercityRides: sortedIntercityRides,
+        });
+    } catch (error) {
+        console.error("Error fetching rides:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
+            error: error.message,
+        });
     }
-
-    // Fetch Normal Rides
-    const normalRides = await RideBooking.find({ user: userId })
-      .select("-rejected_by_drivers -notified_riders -user -route_info")
-      .sort({ created: -1 });
-
-    // Fetch Intercity Rides
-    const intercityRides = await IntercityRide.find({ passengerId: userId })
-      .select("-rejectedByDrivers -reviews -messageSendToDriver")
-      .sort({ createdAt: -1 });
-
-    // Prioritize active rides within each category
-    const priorityStatuses = ['driver_assigned', 'in_progress', 'driver_reached', 'otp_verify', 'ride_in_progress'];
-
-    const sortByStatusAndDate = (rides) =>
-      rides.sort((a, b) => {
-        const aPriority = priorityStatuses.includes(a.rideStatus) ? 1 : 0;
-        const bPriority = priorityStatuses.includes(b.rideStatus) ? 1 : 0;
-        return (
-          bPriority - aPriority ||
-          new Date(b.createdAt || b.created) - new Date(a.createdAt || a.created)
-        );
-      });
-
-    const sortedNormalRides = sortByStatusAndDate(normalRides);
-    const sortedIntercityRides = sortByStatusAndDate(intercityRides);
-
-    return res.status(200).json({
-      success: true,
-      message: "Rides fetched successfully",
-      normalRides: sortedNormalRides,
-      intercityRides: sortedIntercityRides,
-    });
-  } catch (error) {
-    console.error("Error fetching rides:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: error.message,
-    });
-  }
 };

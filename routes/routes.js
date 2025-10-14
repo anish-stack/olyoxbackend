@@ -9,6 +9,7 @@ const Protect = require('../middleware/Auth');
 const { findAllOrders, logout, addFcm } = require('../user_controller/user.register.controller');
 const { make_recharge, verify_recharge } = require('../PaymentWithWebDb/razarpay');
 const { ride_status_after_booking } = require('../src/New-Rides-Controller/CreateNewRides');
+const NewRideModelModel = require('../src/New-Rides-Controller/NewRideModel.model');
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -99,4 +100,44 @@ router.put('/vehicles/:vehicleId/documents/:documentType/approve',approveVehicle
 
 router.put('/update_rider_Profile_completed/:id',updateRiderProfileCompleted)
 
+
+
+
+
+router.get('/:rideId/messages', async (req, res) => {
+  try {
+    const { rideId } = req.params;
+    const ride = await NewRideModelModel.findById(rideId);
+    if (!ride) return res.status(404).json({ message: 'Ride not found' });
+
+    res.json({ messages: ride.chat });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Send message
+router.post('/:rideId/messages', async (req, res) => {
+  try {
+    const { rideId } = req.params;
+    const { from, fromType, message } = req.body;
+
+    if (!from || !fromType || !message)
+      return res.status(400).json({ message: 'from, fromType, and message are required' });
+
+    const ride = await NewRideModelModel.findById(rideId);
+    if (!ride) return res.status(404).json({ message: 'Ride not found' });
+
+    const chatData = { from, fromType, message, createdAt: new Date(), seen: false };
+
+    ride.chat.push(chatData);
+    await ride.save();
+
+    res.json({ message: 'Message sent', chat: chatData });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 module.exports = router;

@@ -988,23 +988,7 @@ exports.getMyAllDetails = async (req, res) => {
     const todayTrips = todayCompletedRides.length;
     const timestamp = new Date().toISOString();
 
-    console.log("📊 Driver Ride Details:", {
-      isOnRide: !!driver.on_ride_id,
-      isAvailable: driver.isAvailable,
-      currentRide: currentRide || null,
-      totalRides,
-      totalEarnings,
-      averageRating,
-      loggedInHours: totalHours,
-      currentDate: todayIST,
-      location: driver.location?.coordinates,
-      earnings: todayEarnings,
-      trips: todayTrips,
-      hours: formattedHours,
-      points: driver.points || 0,
-      lastUpdated: timestamp,
-    });
-
+   
     return res.status(200).json({
       isOnRide: !!driver.on_ride_id,
       isAvailable: driver.isAvailable,
