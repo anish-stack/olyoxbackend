@@ -4230,7 +4230,7 @@ exports.cancelRideByPoll = async (req, res) => {
             rideData.cancelled_by = cancelBy;
             rideData.cancelled_at = new Date();
             rideData.cancellation_reason = reason || null;
-            io.to(`driver:${driverId}`).emit('clear_ride_request', { rideId: ride._id });
+            io.to(`driver:${rideData?.driver?._id}`).emit('clear_ride_request', { rideId: rideData._id });
 
             stopNotificationLoop(rideData?._id);
 
