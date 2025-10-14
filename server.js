@@ -859,6 +859,50 @@ app.get("/rider/:tempRide", async (req, res) => {
   }
 });
 
+
+app.get("/rider-light/:tempRide", async (req, res) => {
+  const { tempRide } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(tempRide)) {
+    console.warn("[STEP 2] Invalid ride ID");
+    return res.status(400).json({ error: "Invalid ride ID" });
+  }
+
+  try {
+    console.log("[STEP 3] Fetching lightweight ride data from MongoDB...");
+
+    const ride = await NewRideModelModel.findById(tempRide)
+      .select("ride_status") 
+      .populate({
+        path: "driver",
+        select: "location" // Only select driver's location field
+      })
+      .lean()
+      .exec();
+
+    if (!ride) {
+      console.warn("[STEP 4] Ride not found in MongoDB");
+      return res.status(404).json({ error: "Ride not found" });
+    }
+
+    // Return only the essential fields in a clean structure
+    return res.status(200).json({
+      success: true,
+      data: {
+        ride_status: ride.ride_status,
+        driver_location: ride.driver?.location,
+        updated_at: ride.updatedAt // Optional: for client-side timestamp tracking
+      }
+    });
+  } catch (error) {
+    console.error(
+      `[ERROR] ${new Date().toISOString()} Internal server error:`,
+      error
+    );
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 const GEO_UPDATE_TTL = 30;
 function haversineDistance(lat1, lon1, lat2, lon2) {
   const toRad = (x) => (x * Math.PI) / 180;
