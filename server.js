@@ -1047,78 +1047,71 @@ app.get("/health", async (req, res) => {
   res.status(statusCode).json(health);
 });
 
-// Fetch Current Location
-app.post("/Fetch-Current-Location", async (req, res) => {
-  const { lat, lng } = req.body;
+app.post('/Fetch-Current-Location', async (req, res) => {
+    const { lat, lng } = req.body;
 
-  if (!lat || !lng) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Latitude and longitude required" });
-  }
-
-  const cacheKey = `geocode:${lat},${lng}`;
-
-  try {
-    // Try cache
-    if (pubClient && pubClient.isOpen) {
-      const cachedData = await pubClient.get(cacheKey);
-      if (cachedData) {
-        return res.status(200).json({
-          success: true,
-          data: JSON.parse(cachedData),
-          message: "Location fetched from cache",
-        });
-      }
+    if (!lat || !lng) {
+        return res.status(400).json({ success: false, message: 'Latitude and longitude required' });
     }
 
-    const apiKey =
-      process.env.GOOGLE_MAPS_API_KEY ||
-      "AIzaSyCBATa-tKn2Ebm1VbQ5BU8VOqda2nzkoTU";
+    const cacheKey = `geocode:${lat},${lng}`;
 
-    // ✅ Reverse Geocode: get address from coordinates
-    const response = await axios.get(
-      "https://maps.googleapis.com/maps/api/geocode/json",
-      {
-        params: { latlng: `${lat},${lng}`, key: apiKey },
-      }
-    );
+    try {
+        // Try to get from cache if Redis is available
+        let cachedData = null;
+        if (pubClient && pubClient.isOpen) {
+            try {
+                cachedData = await pubClient.get(cacheKey);
+                if (cachedData) {
+                    return res.status(200).json({
+                        success: true,
+                        data: JSON.parse(cachedData),
+                        message: 'Location fetched from cache'
+                    });
+                }
+            } catch (cacheError) {
+                console.warn(`[${new Date().toISOString()}] Cache read error:`, cacheError.message);
+            }
+        }
 
-    if (response.data.status !== "OK") {
-      return res
-        .status(400)
-        .json({ success: false, message: "Failed to fetch location details" });
+        const response = await axios.get(
+            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${process.env.GOOGLE_MAPS_API_KEY || 'AIzaSyCBATa-tKn2Ebm1VbQ5BU8VOqda2nzkoTU'}`
+        );
+        console.log("response",response.data)
+
+        if (!response.data.results?.[0]) {
+            return res.status(404).json({ success: false, message: 'No address found' });
+        }
+
+        const addressComponents = response.data.results[0].address_components;
+        const addressDetails = {
+            completeAddress: response.data.results[0].formatted_address,
+            city: addressComponents.find(c => c.types.includes('locality'))?.long_name,
+            area: addressComponents.find(c => c.types.includes('sublocality_level_1'))?.long_name,
+            district: addressComponents.find(c => c.types.includes('administrative_area_level_3'))?.long_name,
+            postalCode: addressComponents.find(c => c.types.includes('postal_code'))?.long_name,
+            landmark: null,
+            lat: response.data.results[0].geometry.location.lat,
+            lng: response.data.results[0].geometry.location.lng
+        };
+
+        const result = { location: { lat, lng }, address: addressDetails };
+
+        // Cache the result if Redis is available
+        if (pubClient && pubClient.isOpen) {
+            try {
+                await pubClient.setEx(cacheKey, 3600, JSON.stringify(result));
+            } catch (cacheError) {
+                console.warn(`[${new Date().toISOString()}] Cache write error:`, cacheError.message);
+            }
+        }
+
+        res.status(200).json({ success: true, data: result, message: 'Location fetched' });
+    } catch (err) {
+        console.error(`[${new Date().toISOString()}] Location fetch error:`, err.message);
+        res.status(500).json({ success: false, message: 'Failed to fetch location' });
     }
-
-    const result = response.data.results[0];
-    const locationData = {
-      formattedAddress: result.formatted_address,
-      placeId: result.place_id,
-      types: result.types,
-      location: result.geometry.location,
-    };
-
-    // Cache for 30 mins
-    if (pubClient && pubClient.isOpen) {
-      await pubClient.setEx(cacheKey, 1800, JSON.stringify(locationData));
-    }
-
-    res.status(200).json({
-      success: true,
-      data: locationData,
-      message: "Location fetched successfully",
-    });
-  } catch (err) {
-    console.error(
-      `[${new Date().toISOString()}] Geo-code reverse error:`,
-      err.message
-    );
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch location details" });
-  }
 });
-
 
 const ANDROID_STORE =
   "https://play.google.com/store/apps/details?id=com.happy_coding.olyox&hl=en_IN";
