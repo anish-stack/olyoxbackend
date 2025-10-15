@@ -247,8 +247,7 @@ io.on("connection", (socket) => {
       }
 
       console.log(
-        `[${new Date().toISOString()}] Location update from ${
-          socket.userType
+        `[${new Date().toISOString()}] Location update from ${socket.userType
         }:${socket.userId}`
       );
       socket.emit("location_ack", { success: true });
@@ -261,99 +260,99 @@ io.on("connection", (socket) => {
     }
   });
 
-socket.on("join_ride_chat", (data) => {
-  const { ride_id } = data;
-  if (!ride_id) {
-    socket.emit("error", { message: "ride_id is required to join chat" });
-    return;
-  }
-
-  socket.ride_id = ride_id;
-  socket.join(`ride_chat:${ride_id}`);
-  console.log(
-    `[${new Date().toISOString()}] 🗨️ ${socket.userType}:${socket.userId} joined chat for ride ${ride_id}`
-  );
-
-  // Add socket to rideChatMap
-  if (!rideChatMap.has(ride_id)) rideChatMap.set(ride_id, new Set());
-  rideChatMap.get(ride_id).add(socket.id);
-
-  socket.emit("chat_joined", { ride_id, success: true });
-});
-
-
-socket.on("chat_message", async (incomingData) => {
-  try {
-    console.log("⚡ Received incoming chat message:", incomingData);
-
-    const data = incomingData?.data || incomingData;
-    const { ride_id, message, who, timestamp } = data;
-
-    if (!ride_id || !message || !who) {
-      console.warn("⚠️ Missing required fields:", { ride_id, message, who });
-      socket.emit("error", { message: "ride_id, message, and who are required" });
+  socket.on("join_ride_chat", (data) => {
+    const { ride_id } = data;
+    if (!ride_id) {
+      socket.emit("error", { message: "ride_id is required to join chat" });
       return;
     }
-    console.log(`📝 Processing message for ride_id: ${ride_id}, from: ${who}`);
 
-    const ride = await NewRideModelModel.findById(ride_id);
-    if (!ride) {
-      console.warn(`❌ Ride not found for ride_id: ${ride_id}`);
-      socket.emit("error", { message: "Ride not found" });
-      return;
-    }
-    console.log("✅ Ride found:", ride_id);
-
-    const toUserId = who === "driver" ? ride.user : ride.driver;
-    if (!toUserId) {
-      console.warn("❌ Recipient not found for this ride:", ride_id);
-      socket.emit("error", { message: "Recipient not found for this ride" });
-      return;
-    }
-    console.log("👤 Message recipient userId:", toUserId);
-
-    const chatData = {
-      from: socket.userId,
-      fromType: who,
-      to: toUserId,
-      message,
-      ride_id,
-      seen: false,
-      createdAt: timestamp ? new Date(timestamp) : new Date(),
-      updatedAt: new Date(),
-    };
-    console.log("💬 Chat data prepared:", chatData);
-
-    const chatRoom = `ride_chat:${ride_id}`;
-
-    // Emit to all sockets in the room
-    io.to(chatRoom).emit("chat_message", chatData);
-    console.log(`📢 Message broadcasted to room: ${chatRoom}`);
-
-    // Emit to the specific recipient if connected in this ride
-    const socketsInRoom = rideChatMap.get(ride_id) || new Set();
-    for (let socketId of socketsInRoom) {
-      const s = io.sockets.sockets.get(socketId);
-      if (s && s.userId === toUserId) {
-        s.emit("chat_message", chatData);
-        console.log(`📩 Message sent directly to user ${toUserId} (socketId: ${socketId})`);
-      }
-    }
-
-    // Save chat to ride
-    ride.chat = ride.chat || [];
-    ride.chat.push(chatData);
-    await ride.save();
-    console.log("💾 Chat saved to ride successfully");
-
+    socket.ride_id = ride_id;
+    socket.join(`ride_chat:${ride_id}`);
     console.log(
-      `[${new Date().toISOString()}] ✅ ${who.toUpperCase()} sent message in ride ${ride_id}: "${message}"`
+      `[${new Date().toISOString()}] 🗨️ ${socket.userType}:${socket.userId} joined chat for ride ${ride_id}`
     );
-  } catch (err) {
-    console.error("❌ Error handling chat_message:", err);
-    socket.emit("error", { message: "Failed to send chat message" });
-  }
-});
+
+    // Add socket to rideChatMap
+    if (!rideChatMap.has(ride_id)) rideChatMap.set(ride_id, new Set());
+    rideChatMap.get(ride_id).add(socket.id);
+
+    socket.emit("chat_joined", { ride_id, success: true });
+  });
+
+
+  socket.on("chat_message", async (incomingData) => {
+    try {
+      console.log("⚡ Received incoming chat message:", incomingData);
+
+      const data = incomingData?.data || incomingData;
+      const { ride_id, message, who, timestamp } = data;
+
+      if (!ride_id || !message || !who) {
+        console.warn("⚠️ Missing required fields:", { ride_id, message, who });
+        socket.emit("error", { message: "ride_id, message, and who are required" });
+        return;
+      }
+      console.log(`📝 Processing message for ride_id: ${ride_id}, from: ${who}`);
+
+      const ride = await NewRideModelModel.findById(ride_id);
+      if (!ride) {
+        console.warn(`❌ Ride not found for ride_id: ${ride_id}`);
+        socket.emit("error", { message: "Ride not found" });
+        return;
+      }
+      console.log("✅ Ride found:", ride_id);
+
+      const toUserId = who === "driver" ? ride.user : ride.driver;
+      if (!toUserId) {
+        console.warn("❌ Recipient not found for this ride:", ride_id);
+        socket.emit("error", { message: "Recipient not found for this ride" });
+        return;
+      }
+      console.log("👤 Message recipient userId:", toUserId);
+
+      const chatData = {
+        from: socket.userId,
+        fromType: who,
+        to: toUserId,
+        message,
+        ride_id,
+        seen: false,
+        createdAt: timestamp ? new Date(timestamp) : new Date(),
+        updatedAt: new Date(),
+      };
+      console.log("💬 Chat data prepared:", chatData);
+
+      const chatRoom = `ride_chat:${ride_id}`;
+
+      // Emit to all sockets in the room
+      io.to(chatRoom).emit("chat_message", chatData);
+      console.log(`📢 Message broadcasted to room: ${chatRoom}`);
+
+      // Emit to the specific recipient if connected in this ride
+      const socketsInRoom = rideChatMap.get(ride_id) || new Set();
+      for (let socketId of socketsInRoom) {
+        const s = io.sockets.sockets.get(socketId);
+        if (s && s.userId === toUserId) {
+          s.emit("chat_message", chatData);
+          console.log(`📩 Message sent directly to user ${toUserId} (socketId: ${socketId})`);
+        }
+      }
+
+      // Save chat to ride
+      ride.chat = ride.chat || [];
+      ride.chat.push(chatData);
+      await ride.save();
+      console.log("💾 Chat saved to ride successfully");
+
+      console.log(
+        `[${new Date().toISOString()}] ✅ ${who.toUpperCase()} sent message in ride ${ride_id}: "${message}"`
+      );
+    } catch (err) {
+      console.error("❌ Error handling chat_message:", err);
+      socket.emit("error", { message: "Failed to send chat message" });
+    }
+  });
 
   // Backend socket handler
   socket.on("get_all_messages", async (data) => {
@@ -412,8 +411,7 @@ socket.on("chat_message", async (incomingData) => {
   // Handle reconnection
   socket.on("reconnect", async (attemptNumber) => {
     console.log(
-      `[${new Date().toISOString()}] Socket ${
-        socket.id
+      `[${new Date().toISOString()}] Socket ${socket.id
       } reconnected after ${attemptNumber} attempts`
     );
 
@@ -438,8 +436,7 @@ socket.on("chat_message", async (incomingData) => {
   // Handle disconnection
   socket.on("disconnect", async (reason) => {
     console.log(
-      `[${new Date().toISOString()}] ❌ Socket disconnected: ${
-        socket.id
+      `[${new Date().toISOString()}] ❌ Socket disconnected: ${socket.id
       }, Reason: ${reason}`
     );
 
@@ -448,8 +445,7 @@ socket.on("chat_message", async (incomingData) => {
       try {
         await pubClient.del(`socket:${socket.userType}:${socket.userId}`);
         console.log(
-          `[${new Date().toISOString()}] Cleaned up Redis data for ${
-            socket.userType
+          `[${new Date().toISOString()}] Cleaned up Redis data for ${socket.userType
           }:${socket.userId}`
         );
       } catch (error) {
@@ -595,8 +591,7 @@ app.use(cookieParser());
 app.use((req, res, next) => {
   if (!pubClient || !pubClient.isOpen) {
     console.warn(
-      `[${new Date().toISOString()}] Redis client not available for request: ${
-        req.path
+      `[${new Date().toISOString()}] Redis client not available for request: ${req.path
       }`
     );
   }
@@ -860,6 +855,82 @@ app.get("/rider/:tempRide", async (req, res) => {
 });
 
 
+
+app.post("/autocomplete", async (req, res) => {
+  const { input } = req.body;
+
+  if (!input || input.trim().length === 0) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Input text is required" });
+  }
+
+  const cacheKey = `autocomplete:${input.trim().toLowerCase()}`;
+  const apiKey ="AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8"; // fallback for testing only
+
+  try {
+    // 🔹 Try Redis cache first
+    if (pubClient && pubClient.isOpen) {
+      const cached = await pubClient.get(cacheKey);
+      if (cached) {
+        return res.status(200).json({
+          success: true,
+          data: JSON.parse(cached),
+          message: "Fetched from cache",
+        });
+      }
+    }
+
+    // 🔹 Call Google Places Autocomplete API
+    const response = await axios.get(
+      "https://maps.googleapis.com/maps/api/place/autocomplete/json",
+      {
+        params: {
+          input: input,
+          key: apiKey,
+          components: "country:in", // restrict to India (optional)
+          sessiontoken: Date.now(), // helps Google optimize billing
+        },
+      }
+    );
+
+    if (response.data.status !== "OK" && response.data.status !== "ZERO_RESULTS") {
+      return res
+        .status(400)
+        .json({ success: false, message: response.data.error_message || "Failed to fetch suggestions" });
+    }
+
+    const suggestions = response.data.predictions.map((p) => ({
+      description: p.description,
+      place_id: p.place_id,
+      main_text: p.structured_formatting.main_text,
+      secondary_text: p.structured_formatting.secondary_text,
+    }));
+
+    // 🔹 Cache the response for 15 minutes
+    if (pubClient && pubClient.isOpen) {
+      await pubClient.setEx(cacheKey, 900, JSON.stringify(suggestions));
+    }
+
+    res.status(200).json({
+      success: true,
+      data: suggestions,
+      message: "Autocomplete results fetched successfully",
+    });
+  } catch (err) {
+    console.error(
+      `[${new Date().toISOString()}] Autocomplete error:`,
+      err.message
+    );
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch autocomplete results" });
+  }
+});
+
+
+
+
 app.get("/rider-light/:tempRide", async (req, res) => {
   const { tempRide } = req.params;
 
@@ -872,7 +943,7 @@ app.get("/rider-light/:tempRide", async (req, res) => {
     console.log("[STEP 3] Fetching lightweight ride data from MongoDB...");
 
     const ride = await NewRideModelModel.findById(tempRide)
-      .select("ride_status") 
+      .select("ride_status")
       .populate({
         path: "driver",
         select: "location" // Only select driver's location field
@@ -1048,69 +1119,69 @@ app.get("/health", async (req, res) => {
 });
 
 app.post('/Fetch-Current-Location', async (req, res) => {
-    const { lat, lng } = req.body;
+  const { lat, lng } = req.body;
 
-    if (!lat || !lng) {
-        return res.status(400).json({ success: false, message: 'Latitude and longitude required' });
+  if (!lat || !lng) {
+    return res.status(400).json({ success: false, message: 'Latitude and longitude required' });
+  }
+
+  const cacheKey = `geocode:${lat},${lng}`;
+
+  try {
+    // Try to get from cache if Redis is available
+    let cachedData = null;
+    if (pubClient && pubClient.isOpen) {
+      try {
+        cachedData = await pubClient.get(cacheKey);
+        if (cachedData) {
+          return res.status(200).json({
+            success: true,
+            data: JSON.parse(cachedData),
+            message: 'Location fetched from cache'
+          });
+        }
+      } catch (cacheError) {
+        console.warn(`[${new Date().toISOString()}] Cache read error:`, cacheError.message);
+      }
     }
 
-    const cacheKey = `geocode:${lat},${lng}`;
+    const response = await axios.get(
+      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8`
+    );
+    console.log("response", response.data)
 
-    try {
-        // Try to get from cache if Redis is available
-        let cachedData = null;
-        if (pubClient && pubClient.isOpen) {
-            try {
-                cachedData = await pubClient.get(cacheKey);
-                if (cachedData) {
-                    return res.status(200).json({
-                        success: true,
-                        data: JSON.parse(cachedData),
-                        message: 'Location fetched from cache'
-                    });
-                }
-            } catch (cacheError) {
-                console.warn(`[${new Date().toISOString()}] Cache read error:`, cacheError.message);
-            }
-        }
-
-        const response = await axios.get(
-            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8`
-        );
-        console.log("response",response.data)
-
-        if (!response.data.results?.[0]) {
-            return res.status(404).json({ success: false, message: 'No address found' });
-        }
-
-        const addressComponents = response.data.results[0].address_components;
-        const addressDetails = {
-            completeAddress: response.data.results[0].formatted_address,
-            city: addressComponents.find(c => c.types.includes('locality'))?.long_name,
-            area: addressComponents.find(c => c.types.includes('sublocality_level_1'))?.long_name,
-            district: addressComponents.find(c => c.types.includes('administrative_area_level_3'))?.long_name,
-            postalCode: addressComponents.find(c => c.types.includes('postal_code'))?.long_name,
-            landmark: null,
-            lat: response.data.results[0].geometry.location.lat,
-            lng: response.data.results[0].geometry.location.lng
-        };
-
-        const result = { location: { lat, lng }, address: addressDetails };
-
-        // Cache the result if Redis is available
-        if (pubClient && pubClient.isOpen) {
-            try {
-                await pubClient.setEx(cacheKey, 3600, JSON.stringify(result));
-            } catch (cacheError) {
-                console.warn(`[${new Date().toISOString()}] Cache write error:`, cacheError.message);
-            }
-        }
-
-        res.status(200).json({ success: true, data: result, message: 'Location fetched' });
-    } catch (err) {
-        console.error(`[${new Date().toISOString()}] Location fetch error:`, err.message);
-        res.status(500).json({ success: false, message: 'Failed to fetch location' });
+    if (!response.data.results?.[0]) {
+      return res.status(404).json({ success: false, message: 'No address found' });
     }
+
+    const addressComponents = response.data.results[0].address_components;
+    const addressDetails = {
+      completeAddress: response.data.results[0].formatted_address,
+      city: addressComponents.find(c => c.types.includes('locality'))?.long_name,
+      area: addressComponents.find(c => c.types.includes('sublocality_level_1'))?.long_name,
+      district: addressComponents.find(c => c.types.includes('administrative_area_level_3'))?.long_name,
+      postalCode: addressComponents.find(c => c.types.includes('postal_code'))?.long_name,
+      landmark: null,
+      lat: response.data.results[0].geometry.location.lat,
+      lng: response.data.results[0].geometry.location.lng
+    };
+
+    const result = { location: { lat, lng }, address: addressDetails };
+
+    // Cache the result if Redis is available
+    if (pubClient && pubClient.isOpen) {
+      try {
+        await pubClient.setEx(cacheKey, 3600, JSON.stringify(result));
+      } catch (cacheError) {
+        console.warn(`[${new Date().toISOString()}] Cache write error:`, cacheError.message);
+      }
+    }
+
+    res.status(200).json({ success: true, data: result, message: 'Location fetched' });
+  } catch (err) {
+    console.error(`[${new Date().toISOString()}] Location fetch error:`, err.message);
+    res.status(500).json({ success: false, message: 'Failed to fetch location' });
+  }
 });
 
 const ANDROID_STORE =
@@ -1343,8 +1414,7 @@ async function startServer() {
     // Start the server
     server.listen(PORT, () => {
       console.log(
-        `[${new Date().toISOString()}] 🚀 Server running on port ${PORT} (Worker ${
-          process.pid
+        `[${new Date().toISOString()}] 🚀 Server running on port ${PORT} (Worker ${process.pid
         })`
       );
       console.log(`[${new Date().toISOString()}] 🔌 Socket.IO server ready`);
@@ -1352,8 +1422,7 @@ async function startServer() {
         `Bull Board available at http://localhost:${PORT}/admin/queues`
       );
       console.log(
-        `[${new Date().toISOString()}] 🌍 Environment: ${
-          process.env.NODE_ENV || "development"
+        `[${new Date().toISOString()}] 🌍 Environment: ${process.env.NODE_ENV || "development"
         }`
       );
       console.log(
@@ -1362,8 +1431,7 @@ async function startServer() {
     });
   } catch (error) {
     console.error(
-      `[${new Date().toISOString()}] ❌ Failed to start server (Worker ${
-        process.pid
+      `[${new Date().toISOString()}] ❌ Failed to start server (Worker ${process.pid
       }):`,
       error.message
     );
