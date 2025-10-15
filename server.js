@@ -1241,6 +1241,82 @@ app.get("/share-ride-to-loveone/:rideId", (req, res) => {
   }
 });
 
+
+
+
+app.get("/geocode", async (req, res) => {
+  const { address } = req.query;
+
+  if (!address || address.trim().length === 0) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Address is required" });
+  }
+
+  const cacheKey = `geocode:${address.trim().toLowerCase()}`;
+  const apiKey ="AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8" // fallback for testing only
+
+  try {
+    // 🔹 Try cache first
+    if (pubClient && pubClient.isOpen) {
+      const cached = await pubClient.get(cacheKey);
+      if (cached) {
+        return res.status(200).json({
+          success: true,
+          data: JSON.parse(cached),
+          message: "Fetched from cache",
+        });
+      }
+    }
+
+    // 🔹 Call Google Geocoding API
+    const response = await axios.get(
+      "https://maps.googleapis.com/maps/api/geocode/json",
+      {
+        params: {
+          address: address,
+          key: apiKey,
+        },
+      }
+    );
+
+    if (response.data.status !== "OK" || !response.data.results.length) {
+      return res.status(400).json({
+        success: false,
+        message: response.data.error_message || "Failed to fetch coordinates",
+      });
+    }
+
+    const result = response.data.results[0];
+    const locationData = {
+      formattedAddress: result.formatted_address,
+      placeId: result.place_id,
+      types: result.types,
+      location: result.geometry.location, // { lat, lng }
+    };
+
+    // 🔹 Cache result for 30 mins
+    if (pubClient && pubClient.isOpen) {
+      await pubClient.setEx(cacheKey, 1800, JSON.stringify(locationData));
+    }
+
+    res.status(200).json({
+      success: true,
+      data: locationData,
+      message: "Geocode fetched successfully",
+    });
+  } catch (err) {
+    console.error(
+      `[${new Date().toISOString()}] Geocode error:`,
+      err.message
+    );
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch geocode data",
+    });
+  }
+});
+
 // API Routes
 app.use("/api/v1/rider", router);
 app.use("/api/v1/rides", rides);
