@@ -1060,23 +1060,15 @@ app.post("/Fetch-Current-Location", async (req, res) => {
   const cacheKey = `geocode:${lat},${lng}`;
 
   try {
-    // Try to get from cache if Redis is available
-    let cachedData = null;
+    // Try cache
     if (pubClient && pubClient.isOpen) {
-      try {
-        cachedData = await pubClient.get(cacheKey);
-        if (cachedData) {
-          return res.status(200).json({
-            success: true,
-            data: JSON.parse(cachedData),
-            message: "Location fetched from cache",
-          });
-        }
-      } catch (cacheError) {
-        console.warn(
-          `[${new Date().toISOString()}] Cache read error:`,
-          cacheError.message
-        );
+      const cachedData = await pubClient.get(cacheKey);
+      if (cachedData) {
+        return res.status(200).json({
+          success: true,
+          data: JSON.parse(cachedData),
+          message: "Location fetched from cache",
+        });
       }
     }
 
@@ -1084,91 +1076,49 @@ app.post("/Fetch-Current-Location", async (req, res) => {
       process.env.GOOGLE_MAPS_API_KEY ||
       "AIzaSyCBATa-tKn2Ebm1VbQ5BU8VOqda2nzkoTU";
 
-    const pickupResponse = await axios.get(
+    // ✅ Reverse Geocode: get address from coordinates
+    const response = await axios.get(
       "https://maps.googleapis.com/maps/api/geocode/json",
       {
-        params: { address: pickup, key: apiKey },
+        params: { latlng: `${lat},${lng}`, key: apiKey },
       }
     );
 
-    if (pickupResponse.data.status !== "OK") {
+    if (response.data.status !== "OK") {
       return res
         .status(400)
-        .json({ success: false, message: "Invalid pickup location" });
-    }
-    const pickupData = pickupResponse.data.results[0].geometry.location;
-
-    const dropOffResponse = await axios.get(
-      "https://maps.googleapis.com/maps/api/geocode/json",
-      {
-        params: { address: dropOff, key: apiKey },
-      }
-    );
-
-    if (dropOffResponse.data.status !== "OK") {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid dropoff location" });
-    }
-    const dropOffData = dropOffResponse.data.results[0].geometry.location;
-
-    const distanceResponse = await axios.get(
-      "https://maps.googleapis.com/maps/api/distancematrix/json",
-      {
-        params: {
-          origins: `${pickupData.lat},${pickupData.lng}`,
-          destinations: `${dropOffData.lat},${dropOffData.lng}`,
-          key: apiKey,
-        },
-      }
-    );
-
-    if (
-      distanceResponse.data.status !== "OK" ||
-      distanceResponse.data.rows[0].elements[0].status !== "OK"
-    ) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Failed to calculate distance" });
+        .json({ success: false, message: "Failed to fetch location details" });
     }
 
-    const distanceInfo = distanceResponse.data.rows[0].elements[0];
-    const settings = await Settings.findOne();
-    const distanceInKm = distanceInfo.distance.value / 1000;
-    const price = distanceInKm * (settings?.foodDeliveryPrice || 12);
-
-    const result = {
-      pickupLocation: pickupData,
-      dropOffLocation: dropOffData,
-      distance: distanceInfo.distance.text,
-      duration: distanceInfo.duration.text,
-      price: `₹${price.toFixed(2)}`,
-      distanceInKm: distanceInKm.toFixed(2),
+    const result = response.data.results[0];
+    const locationData = {
+      formattedAddress: result.formatted_address,
+      placeId: result.place_id,
+      types: result.types,
+      location: result.geometry.location,
     };
 
-    // Cache the result if Redis is available
+    // Cache for 30 mins
     if (pubClient && pubClient.isOpen) {
-      try {
-        await pubClient.setEx(cacheKey, 1800, JSON.stringify(result));
-      } catch (cacheError) {
-        console.warn(
-          `[${new Date().toISOString()}] Cache write error:`,
-          cacheError.message
-        );
-      }
+      await pubClient.setEx(cacheKey, 1800, JSON.stringify(locationData));
     }
 
-    res.status(200).json({ success: true, ...result });
+    res.status(200).json({
+      success: true,
+      data: locationData,
+      message: "Location fetched successfully",
+    });
   } catch (err) {
     console.error(
-      `[${new Date().toISOString()}] Geo-code distance error:`,
+      `[${new Date().toISOString()}] Geo-code reverse error:`,
       err.message
     );
     res
       .status(500)
-      .json({ success: false, message: "Failed to calculate distance" });
+      .json({ success: false, message: "Failed to fetch location details" });
   }
 });
+
 
 const ANDROID_STORE =
   "https://play.google.com/store/apps/details?id=com.happy_coding.olyox&hl=en_IN";
