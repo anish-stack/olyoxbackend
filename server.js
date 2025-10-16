@@ -992,6 +992,7 @@ app.get("/rider-light/:tempRide", async (req, res) => {
   }
 });
 
+const GEO_UPDATE_TTL = 30;
 const GEO_BATCH_KEY = "rider:location:batch";
 const DB_FLUSH_INTERVAL = 30 * 1000; // 30 seconds
 const MAX_DISTANCE_THRESHOLD = 50; // meters
