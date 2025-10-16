@@ -86,13 +86,13 @@ function formatDistance(km) {
 // Check if driver is eligible (not rejected, not recently notified)
 function isDriverEligible(driver, ride, now) {
     // Check if driver rejected this ride
-    const hasRejected = ride.rejected_by_drivers?.some(rej => 
+    const hasRejected = ride.rejected_by_drivers?.some(rej =>
         rej.driver.toString() === driver._id.toString()
     );
     if (hasRejected) return false;
 
     // Check recent notifications (within 5 minutes)
-    const recentlyNotified = ride.notified_riders?.some(notification => 
+    const recentlyNotified = ride.notified_riders?.some(notification =>
         notification.rider_id.toString() === driver._id.toString() &&
         (now - new Date(notification.notification_time)) < 5 * 60 * 1000
     );
@@ -106,13 +106,13 @@ function isDriverEligible(driver, ride, now) {
 }
 
 // Update ride with driver notification tracking
-async function trackDriverNotification(ride, driver, distanceKm, searchAttempt, searchRadius) {
+async function trackDriverNotification(ride, driver, distanceKm, searchAttempt = 20, searchRadius) {
     const now = new Date();
     const distanceM = distanceKm * 1000;
     const formattedDistance = formatDistance(distanceKm);
-    
+
     // Check if driver already notified in this search attempt
-    const existingNotification = ride.notified_riders.find(n => 
+    const existingNotification = ride.notified_riders.find(n =>
         n.rider_id.toString() === driver._id.toString() &&
         n.search_attempt === searchAttempt
     );
@@ -133,7 +133,7 @@ async function trackDriverNotification(ride, driver, distanceKm, searchAttempt, 
             notification_time: now,
             notification_count: 1,
             rider_location: driver.location || null,
-            search_attempt,
+            search_attempt: searchAttempt ? searchAttempt : 20,
             search_radius: searchRadius * 1000, // Convert to meters
             notification_history: [{
                 time: now,
@@ -147,7 +147,7 @@ async function trackDriverNotification(ride, driver, distanceKm, searchAttempt, 
 
     ride.last_notification_sent_at = now;
     ride.search_started_at = ride.search_started_at || now;
-    
+
     // Update search status
     if (ride.ride_status !== 'searching') {
         ride.ride_status = 'searching';
@@ -174,9 +174,9 @@ async function sendNoDriverWhatsApp(ride, logger) {
         const message = `Dear ${user.name || 'Customer'},\n\nWe're sorry, but we couldn't find an available driver for your intercity ride scheduled at ${pickupTime}.\n\nPickup: ${ride.pickup_address.formatted_address}\nDrop: ${ride.drop_address.formatted_address}\n\nPlease try booking again or contact support for assistance.\n\nThank you,\nOlyox Team`;
 
         await SendWhatsAppMessageNormal(message, user.number);
-        
+
         await logger.notification(`WhatsApp sent to user ${user.number} for ride ${ride._id}`);
-        
+
         // Update ride with WhatsApp notification status
         ride.no_driver_notification_sent = true;
         ride.no_driver_notification_time = new Date();
@@ -228,16 +228,16 @@ const DriverSearchQueue = new Bull('intercity-driver-search', {
 // ==========================
 AddRideInModelOfDb.process(1, async (job) => {
     const logger = createLogger(job);
-    
+
     try {
         await logger.info(`Starting intercity ride add job ${job.id}`);
-        
+
         const { id } = job.data;
         if (!id) throw new Error('No ride ID provided');
 
         await logger.info(`Fetching intercity ride ${id} from database`);
         const rideData = await IntercityRides.findById(id);
-        
+
         if (!rideData) {
             await logger.error('Intercity ride not found in database');
             throw new Error('Intercity ride not found');
@@ -245,9 +245,9 @@ AddRideInModelOfDb.process(1, async (job) => {
 
         const now = new Date();
         const pickupTime = rideData.schedule?.departureTime;
-        
+
         await logger.info(`Pickup time: ${pickupTime?.toISOString()}`);
-        
+
         if (!pickupTime || pickupTime <= now) {
             await logger.error('Invalid pickup time - must be in future');
             throw new Error('Invalid pickup time');
@@ -304,7 +304,7 @@ AddRideInModelOfDb.process(1, async (job) => {
             { rideId: newRide._id.toString(), searchAttempt: 1 },
             { delay: searchDelay }
         );
-        
+
         await logger.time(`Driver search scheduled to start in 20 seconds for ride ${newRide._id}`);
         await logger.success(`Job ${job.id} completed successfully`);
 
@@ -319,12 +319,12 @@ AddRideInModelOfDb.process(1, async (job) => {
 // ==========================
 DriverSearchQueue.process(2, async (job) => {
     const logger = createLogger(job);
-    
+
     try {
         const { rideId, searchAttempt } = job.data;
-        
+
         await logger.search(`Starting search attempt #${searchAttempt} for ride ${rideId}`);
-        
+
         if (!rideId) throw new Error('No rideId provided');
 
         const ride = await RideRequestNew.findById(rideId);
@@ -335,22 +335,22 @@ DriverSearchQueue.process(2, async (job) => {
 
         const now = new Date();
         const pickupTime = ride.IntercityPickupTime;
-        
+
         await logger.info(`Current time: ${now.toISOString()}`);
         await logger.info(`Pickup time: ${pickupTime.toISOString()}`);
-        
+
         // Stop searching 3 minutes before pickup time
         const searchCutoffTime = new Date(pickupTime.getTime() - 3 * 60 * 1000);
         await logger.info(`Search cutoff time: ${searchCutoffTime.toISOString()}`);
-        
+
         if (now > searchCutoffTime) {
             await logger.time(`Search cutoff reached for ride ${rideId} (3 min before pickup)`);
-            
+
             // Send WhatsApp if no driver assigned
             if (ride.ride_status === 'searching' || ride.ride_status === 'pending') {
                 await logger.notification('No driver found, sending WhatsApp notification to user...');
                 await sendNoDriverWhatsApp(ride, logger);
-                
+
                 ride.ride_status = 'no_driver_available';
                 await ride.save();
                 await logger.warn(`Ride ${rideId} marked as no_driver_available`);
@@ -421,7 +421,7 @@ DriverSearchQueue.process(2, async (job) => {
         for (const driver of drivers) {
             // Check eligibility
             if (!isDriverEligible(driver, ride, now)) {
-                const hasRejected = ride.rejected_by_drivers?.some(rej => 
+                const hasRejected = ride.rejected_by_drivers?.some(rej =>
                     rej.driver.toString() === driver._id.toString()
                 );
                 if (hasRejected) {
@@ -429,7 +429,7 @@ DriverSearchQueue.process(2, async (job) => {
                     continue;
                 }
 
-                const recentlyNotified = ride.notified_riders?.some(notification => 
+                const recentlyNotified = ride.notified_riders?.some(notification =>
                     notification.rider_id.toString() === driver._id.toString() &&
                     (now - new Date(notification.notification_time)) < 5 * 60 * 1000
                 );
@@ -452,7 +452,7 @@ DriverSearchQueue.process(2, async (job) => {
             }
 
             const distanceKm = calculateDistance(origin.lat, origin.lng, driverLoc.lat, driverLoc.lng);
-            
+
             if (distanceKm > searchRadius) continue;
 
             // Vehicle compatibility check
@@ -510,9 +510,9 @@ DriverSearchQueue.process(2, async (job) => {
 
             } catch (notificationError) {
                 await logger.error(`Failed to notify driver ${driver.name}`, notificationError);
-                
+
                 // Track failed notification
-                const notificationEntry = ride.notified_riders.find(n => 
+                const notificationEntry = ride.notified_riders.find(n =>
                     n.rider_id.toString() === driver._id.toString()
                 );
                 if (notificationEntry) {
@@ -527,7 +527,7 @@ DriverSearchQueue.process(2, async (job) => {
                         error: notificationError.message
                     });
                 }
-                
+
                 await ride.save();
             }
         }
@@ -537,7 +537,7 @@ DriverSearchQueue.process(2, async (job) => {
         await logger.info(`Total drivers found: ${drivers.length}`);
         await logger.info(`Eligible drivers: ${eligibleCount}`);
         await logger.info(`Notifications sent: ${notificationsSent}`);
-        
+
         if (eligibleCount === 0) {
             await logger.warn('No eligible drivers found. Reasons:');
             await logger.info(`- Rejected: ${ineligibleReasons.rejected}`);
@@ -551,7 +551,7 @@ DriverSearchQueue.process(2, async (job) => {
         const timeUntilNextSearch = 30 * 1000; // 30 seconds
         const timeUntilCutoff = searchCutoffTime.getTime() - now.getTime();
         const minutesUntilCutoff = Math.floor(timeUntilCutoff / 1000 / 60);
-        
+
         if (timeUntilCutoff > timeUntilNextSearch) {
             await DriverSearchQueue.add(
                 { rideId: ride._id.toString(), searchAttempt: searchAttempt + 1 },
@@ -577,7 +577,7 @@ DriverSearchQueue.process(2, async (job) => {
 
     } catch (error) {
         await logger.error('Error in driver search', error);
-        
+
         try {
             const ride = await RideRequestNew.findById(job.data.rideId);
             if (ride) {
@@ -592,7 +592,7 @@ DriverSearchQueue.process(2, async (job) => {
         } catch (saveError) {
             await logger.error('Failed to save error to ride', saveError);
         }
-        
+
         throw error;
     }
 });
