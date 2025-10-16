@@ -992,9 +992,9 @@ app.get("/rider-light/:tempRide", async (req, res) => {
   }
 });
 
-const GEO_UPDATE_TTL = 30;
+const GEO_UPDATE_TTL = 30; // seconds
 const GEO_BATCH_KEY = "rider:location:batch";
-const DB_FLUSH_INTERVAL = 30 * 1000; // 30 seconds
+const DB_FLUSH_INTERVAL = 30 * 1000; // 30s
 const MAX_DISTANCE_THRESHOLD = 50; // meters
 
 function haversineDistance(lat1, lon1, lat2, lon2) {
@@ -1008,16 +1008,16 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// 🔁 Flush latest locations from Redis ZSET to DB every 30s
-setInterval(async () => {
+// 🔁 Async batch flush to DB
+const flushLocationsToDB = async () => {
   try {
-    // Get all riders' latest locations from ZSET
     const ridersData = await pubClient.zRangeWithScores(GEO_BATCH_KEY, 0, -1);
+    if (ridersData.length === 0) return;
 
-    for (const { value: riderId, score } of ridersData) {
+    const updatePromises = ridersData.map(async ({ value: riderId }) => {
       try {
         const locStr = await pubClient.get(`rider:location:${riderId}`);
-        if (!locStr) continue;
+        if (!locStr) return;
 
         const loc = JSON.parse(locStr);
 
@@ -1030,48 +1030,46 @@ setInterval(async () => {
           { upsert: true, new: true }
         );
 
-        console.log(`💾 DB updated for rider ${riderId} ✅ coords: [${loc.latitude}, ${loc.longitude}]`);
-
-        // Remove from ZSET after flush
         await pubClient.zRem(GEO_BATCH_KEY, riderId);
       } catch (err) {
         console.error(`❌ DB update failed for rider ${riderId}:`, err.message);
       }
-    }
+    });
 
-    console.log(`🕒 Batch flush done. Total riders updated: ${ridersData.length}`);
+    await Promise.all(updatePromises);
+
   } catch (err) {
     console.error("❌ Redis batch fetch error:", err.message);
   }
-}, DB_FLUSH_INTERVAL);
+};
+
+setInterval(flushLocationsToDB, DB_FLUSH_INTERVAL);
 
 app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
   try {
     const riderId = req.user?.userId;
-    const { latitude, longitude, accuracy, speed, timestamp, platform } = req.body;
     if (!riderId) return Protect(req, res);
 
+    const { latitude, longitude, accuracy, speed, timestamp, platform } = req.body;
     const now = timestamp || Date.now();
     const newLoc = { latitude, longitude, timestamp: now, accuracy, speed, platform: platform || "unknown" };
 
-    // ✅ Get last location from Redis
     const lastLocStr = await pubClient.get(`rider:location:${riderId}`);
     if (lastLocStr) {
       const lastLoc = JSON.parse(lastLocStr);
       const distance = haversineDistance(lastLoc.latitude, lastLoc.longitude, latitude, longitude);
 
       if (distance <= MAX_DISTANCE_THRESHOLD) {
-        console.log(`🚫 Rider ${riderId} ka movement ${distance.toFixed(2)}m → ignore kiya`);
+        // Ignore movements less than 50 meters
         return res.status(200).json({ message: "Location change negligible. Ignored." });
       }
 
+      // Only log when movement >= 50 meters
       console.log(`📍 Rider ${riderId} moved ${distance.toFixed(2)}m → update karenge`);
     }
 
-    // ✅ Update latest location in Redis
+    // 🔹 Update Redis cache
     await pubClient.setEx(`rider:location:${riderId}`, GEO_UPDATE_TTL, JSON.stringify(newLoc));
-
-    // ✅ Add/update in Redis ZSET with timestamp as score
     await pubClient.zAdd(GEO_BATCH_KEY, { score: now, value: riderId });
 
     return res.status(200).json({ message: "Location cached successfully", data: newLoc });
