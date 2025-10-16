@@ -7,6 +7,53 @@ const sendNotification = require("../utils/sendNotification");
 const SendWhatsAppMessageNormal = require('../utils/normalWhatsapp');
 const User = require('../models/normal_user/User.model');
 
+// ========================================
+// LOGGER HELPER - Logs to both Console & Bull Dashboard
+// ========================================
+function createLogger(job) {
+    return {
+        info: async (message, data = {}) => {
+            const logMsg = `ℹ️ ${message}`;
+            console.log(logMsg, data);
+            if (job) await job.log(logMsg);
+        },
+        success: async (message, data = {}) => {
+            const logMsg = `✅ ${message}`;
+            console.log(logMsg, data);
+            if (job) await job.log(logMsg);
+        },
+        warn: async (message, data = {}) => {
+            const logMsg = `⚠️ ${message}`;
+            console.warn(logMsg, data);
+            if (job) await job.log(logMsg);
+        },
+        error: async (message, error = null) => {
+            const logMsg = `❌ ${message}`;
+            console.error(logMsg, error?.message || error);
+            if (job) await job.log(`${logMsg} - ${error?.message || error || ''}`);
+        },
+        search: async (message, data = {}) => {
+            const logMsg = `🔍 ${message}`;
+            console.log(logMsg, data);
+            if (job) await job.log(logMsg);
+        },
+        time: async (message, data = {}) => {
+            const logMsg = `⏰ ${message}`;
+            console.log(logMsg, data);
+            if (job) await job.log(logMsg);
+        },
+        notification: async (message, data = {}) => {
+            const logMsg = `📱 ${message}`;
+            console.log(logMsg, data);
+            if (job) await job.log(logMsg);
+        },
+        stats: async (message, data = {}) => {
+            const logMsg = `📊 ${message}`;
+            console.log(logMsg, data);
+            if (job) await job.log(logMsg);
+        }
+    };
+}
 
 function getLatLngSafe(obj) {
     const coords = obj?.coordinates;
@@ -110,11 +157,11 @@ async function trackDriverNotification(ride, driver, distanceKm, searchAttempt, 
 }
 
 // Send WhatsApp message to user when no driver found
-async function sendNoDriverWhatsApp(ride) {
+async function sendNoDriverWhatsApp(ride, logger) {
     try {
         const user = await User.findById(ride.user).select('number name');
         if (!user || !user.number) {
-            console.warn(`No phone number for user ${ride.user}`);
+            await logger.warn(`No phone number for user ${ride.user}`);
             return;
         }
 
@@ -126,9 +173,9 @@ async function sendNoDriverWhatsApp(ride) {
 
         const message = `Dear ${user.name || 'Customer'},\n\nWe're sorry, but we couldn't find an available driver for your intercity ride scheduled at ${pickupTime}.\n\nPickup: ${ride.pickup_address.formatted_address}\nDrop: ${ride.drop_address.formatted_address}\n\nPlease try booking again or contact support for assistance.\n\nThank you,\nOlyox Team`;
 
-        await SendWhatsAppMessageNormal( message,user.number,);
+        await SendWhatsAppMessageNormal(message, user.number);
         
-        console.log(`📱 WhatsApp sent to user ${user.number} for ride ${ride._id}`);
+        await logger.notification(`WhatsApp sent to user ${user.number} for ride ${ride._id}`);
         
         // Update ride with WhatsApp notification status
         ride.no_driver_notification_sent = true;
@@ -136,7 +183,7 @@ async function sendNoDriverWhatsApp(ride) {
         await ride.save();
 
     } catch (error) {
-        console.error('❌ Error sending WhatsApp:', error.message);
+        await logger.error('Error sending WhatsApp', error);
     }
 }
 
@@ -179,17 +226,30 @@ const DriverSearchQueue = new Bull('intercity-driver-search', {
 // ==========================
 // Process: Add Intercity Ride to DB
 // ==========================
-AddRideInModelOfDb.process(1, async (job) => { // 1 worker
+AddRideInModelOfDb.process(1, async (job) => {
+    const logger = createLogger(job);
+    
     try {
+        await logger.info(`Starting intercity ride add job ${job.id}`);
+        
         const { id } = job.data;
         if (!id) throw new Error('No ride ID provided');
 
+        await logger.info(`Fetching intercity ride ${id} from database`);
         const rideData = await IntercityRides.findById(id);
-        if (!rideData) throw new Error('Intercity ride not found');
+        
+        if (!rideData) {
+            await logger.error('Intercity ride not found in database');
+            throw new Error('Intercity ride not found');
+        }
 
         const now = new Date();
         const pickupTime = rideData.schedule?.departureTime;
+        
+        await logger.info(`Pickup time: ${pickupTime?.toISOString()}`);
+        
         if (!pickupTime || pickupTime <= now) {
+            await logger.error('Invalid pickup time - must be in future');
             throw new Error('Invalid pickup time');
         }
 
@@ -224,7 +284,7 @@ AddRideInModelOfDb.process(1, async (job) => { // 1 worker
             ride_status: "pending",
             ride_otp: rideData.otp?.code,
             payment_method: rideData.payment?.method || 'cash',
-            search_radius: 5, // Start with 5km
+            search_radius: 5,
             max_search_radius: 25,
             auto_increase_radius: true,
             notified_riders: [],
@@ -233,9 +293,11 @@ AddRideInModelOfDb.process(1, async (job) => { // 1 worker
         });
 
         await newRide.save();
-        console.log(`✅ Intercity ride saved: ${newRide._id}, Pickup: ${pickupTime}`);
+        await logger.success(`Intercity ride saved: ${newRide._id}`);
+        await logger.info(`Pickup: ${pickupTime.toISOString()}`);
+        await logger.info(`Route: ${rideData.route.origin.address} → ${rideData.route.destination.address}`);
 
-        // **CHANGE 1: Start driver search after 20 seconds (not 5 minutes before pickup)**
+        // Start driver search after 20 seconds
         const searchDelay = 20 * 1000; // 20 seconds
 
         await DriverSearchQueue.add(
@@ -243,10 +305,11 @@ AddRideInModelOfDb.process(1, async (job) => { // 1 worker
             { delay: searchDelay }
         );
         
-        console.log(`⏰ Driver search will start in 20 seconds for ride ${newRide._id}`);
+        await logger.time(`Driver search scheduled to start in 20 seconds for ride ${newRide._id}`);
+        await logger.success(`Job ${job.id} completed successfully`);
 
     } catch (error) {
-        console.error('❌ Error adding intercity ride:', error.message);
+        await logger.error('Error adding intercity ride', error);
         throw error;
     }
 });
@@ -254,53 +317,63 @@ AddRideInModelOfDb.process(1, async (job) => { // 1 worker
 // ==========================
 // Process: Periodic Driver Search
 // ==========================
-DriverSearchQueue.process(2, async (job) => { // 2 workers for parallel processing
+DriverSearchQueue.process(2, async (job) => {
+    const logger = createLogger(job);
+    
     try {
         const { rideId, searchAttempt } = job.data;
+        
+        await logger.search(`Starting search attempt #${searchAttempt} for ride ${rideId}`);
+        
         if (!rideId) throw new Error('No rideId provided');
 
         const ride = await RideRequestNew.findById(rideId);
         if (!ride) {
-            console.warn(`Ride ${rideId} not found`);
+            await logger.warn(`Ride ${rideId} not found in database`);
             return;
         }
 
         const now = new Date();
         const pickupTime = ride.IntercityPickupTime;
         
-        // **CHANGE 2: Stop searching 3 minutes before pickup time (not 1 minute after)**
-        const searchCutoffTime = new Date(pickupTime.getTime() - 3 * 60 * 1000); // 3 min before pickup
+        await logger.info(`Current time: ${now.toISOString()}`);
+        await logger.info(`Pickup time: ${pickupTime.toISOString()}`);
+        
+        // Stop searching 3 minutes before pickup time
+        const searchCutoffTime = new Date(pickupTime.getTime() - 3 * 60 * 1000);
+        await logger.info(`Search cutoff time: ${searchCutoffTime.toISOString()}`);
         
         if (now > searchCutoffTime) {
-            console.log(`⏰ Search cutoff reached for ride ${rideId} (3 min before pickup)`);
+            await logger.time(`Search cutoff reached for ride ${rideId} (3 min before pickup)`);
             
-            // **CHANGE 3: Send WhatsApp if no driver assigned**
+            // Send WhatsApp if no driver assigned
             if (ride.ride_status === 'searching' || ride.ride_status === 'pending') {
-                console.log(`📱 No driver found, sending WhatsApp to user...`);
-                await sendNoDriverWhatsApp(ride);
+                await logger.notification('No driver found, sending WhatsApp notification to user...');
+                await sendNoDriverWhatsApp(ride, logger);
                 
                 ride.ride_status = 'no_driver_available';
                 await ride.save();
+                await logger.warn(`Ride ${rideId} marked as no_driver_available`);
             }
             return;
         }
 
-        // **CHANGE 4: Stop if driver is assigned**
+        // Stop if driver is assigned
         const assignedStatuses = ['accepted', 'driver_assigned', 'arrived', 'started', 'completed'];
         if (assignedStatuses.includes(ride.ride_status)) {
-            console.log(`✅ Ride ${rideId} assigned to driver, stopping search`);
+            await logger.success(`Ride ${rideId} already assigned (status: ${ride.ride_status}), stopping search`);
             return;
         }
 
         // Stop if ride cancelled
         if (ride.ride_status === 'cancelled') {
-            console.log(`❌ Ride ${rideId} cancelled, stopping search`);
+            await logger.warn(`Ride ${rideId} cancelled, stopping search`);
             return;
         }
 
         const origin = getLatLngSafe(ride.pickup_location);
         if (!origin) {
-            console.warn(`Invalid pickup location for ride ${rideId}`);
+            await logger.error('Invalid pickup location coordinates');
             return;
         }
 
@@ -310,41 +383,76 @@ DriverSearchQueue.process(2, async (job) => { // 2 workers for parallel processi
             searchRadius = Math.min(searchRadius + (searchAttempt - 1) * 2, ride.max_search_radius || 25);
         }
 
-        console.log(`🔍 Search attempt ${searchAttempt} for ride ${rideId}, radius: ${searchRadius}km`);
+        await logger.search(`Search radius: ${searchRadius}km for attempt #${searchAttempt}`);
+        await logger.info(`Pickup location: [${origin.lat}, ${origin.lng}]`);
 
-        // **FIX: Correct $near query syntax**
+        // Find eligible drivers
         const driversQuery = {
             "preferences.OlyoxIntercity.enabled": true,
             location: {
                 $near: {
                     $geometry: {
                         type: "Point",
-                        coordinates: [origin.lng, origin.lat] // Fixed: should be array [lng, lat]
+                        coordinates: [origin.lng, origin.lat]
                     },
-                    $maxDistance: searchRadius * 1000 // Convert to meters
+                    $maxDistance: searchRadius * 1000
                 }
             }
         };
 
+        await logger.search('Querying database for nearby drivers...');
         const drivers = await driverModel
             .find(driversQuery)
             .select('name fcmToken location preferences rideVehicleInfo RechargeData')
             .lean();
 
-        console.log(`Found ${drivers.length} drivers within ${searchRadius}km`);
+        await logger.info(`Found ${drivers.length} drivers within ${searchRadius}km radius`);
 
         let notificationsSent = 0;
-        const eligibleDrivers = [];
+        let eligibleCount = 0;
+        let ineligibleReasons = {
+            rejected: 0,
+            recentlyNotified: 0,
+            noRecharge: 0,
+            noLocation: 0,
+            vehicleMismatch: 0
+        };
 
         for (const driver of drivers) {
-            if (!isDriverEligible(driver, ride, now)) continue;
+            // Check eligibility
+            if (!isDriverEligible(driver, ride, now)) {
+                const hasRejected = ride.rejected_by_drivers?.some(rej => 
+                    rej.driver.toString() === driver._id.toString()
+                );
+                if (hasRejected) {
+                    ineligibleReasons.rejected++;
+                    continue;
+                }
+
+                const recentlyNotified = ride.notified_riders?.some(notification => 
+                    notification.rider_id.toString() === driver._id.toString() &&
+                    (now - new Date(notification.notification_time)) < 5 * 60 * 1000
+                );
+                if (recentlyNotified) {
+                    ineligibleReasons.recentlyNotified++;
+                    continue;
+                }
+
+                const expireDate = driver?.RechargeData?.expireData;
+                if (!expireDate || new Date(expireDate) < now) {
+                    ineligibleReasons.noRecharge++;
+                    continue;
+                }
+            }
 
             const driverLoc = getLatLngSafe(driver.location);
-            if (!driverLoc) continue;
+            if (!driverLoc) {
+                ineligibleReasons.noLocation++;
+                continue;
+            }
 
             const distanceKm = calculateDistance(origin.lat, origin.lng, driverLoc.lat, driverLoc.lng);
             
-            // Double-check distance
             if (distanceKm > searchRadius) continue;
 
             // Vehicle compatibility check
@@ -360,13 +468,18 @@ DriverSearchQueue.process(2, async (job) => { // 2 workers for parallel processi
                 vehicleCompatible = driver.preferences?.OlyoxAcceptMiniRides || driver.preferences?.OlyoxIntercity;
             }
 
-            if (!vehicleCompatible) continue;
+            if (!vehicleCompatible) {
+                ineligibleReasons.vehicleMismatch++;
+                continue;
+            }
 
-            eligibleDrivers.push({ driver, distanceKm });
+            eligibleCount++;
 
             try {
                 // Track notification before sending
                 await trackDriverNotification(ride, driver, distanceKm, searchAttempt, searchRadius);
+
+                await logger.notification(`Sending notification to ${driver.name} (${distanceKm.toFixed(1)}km away)`);
 
                 // Send notification
                 await sendNotification.sendNotification(
@@ -393,10 +506,10 @@ DriverSearchQueue.process(2, async (job) => { // 2 workers for parallel processi
                 );
 
                 notificationsSent++;
-                console.log(`✅ Notification sent to driver ${driver.name} (${distanceKm.toFixed(1)}km)`);
+                await logger.success(`Notification sent to ${driver.name} (${distanceKm.toFixed(1)}km)`);
 
             } catch (notificationError) {
-                console.error(`❌ Failed to notify driver ${driver.name}:`, notificationError.message);
+                await logger.error(`Failed to notify driver ${driver.name}`, notificationError);
                 
                 // Track failed notification
                 const notificationEntry = ride.notified_riders.find(n => 
@@ -419,26 +532,40 @@ DriverSearchQueue.process(2, async (job) => { // 2 workers for parallel processi
             }
         }
 
-        console.log(`📊 Search ${searchAttempt}: ${notificationsSent} notifications sent`);
+        // Log detailed statistics
+        await logger.stats(`Search attempt #${searchAttempt} completed`);
+        await logger.info(`Total drivers found: ${drivers.length}`);
+        await logger.info(`Eligible drivers: ${eligibleCount}`);
+        await logger.info(`Notifications sent: ${notificationsSent}`);
+        
+        if (eligibleCount === 0) {
+            await logger.warn('No eligible drivers found. Reasons:');
+            await logger.info(`- Rejected: ${ineligibleReasons.rejected}`);
+            await logger.info(`- Recently notified: ${ineligibleReasons.recentlyNotified}`);
+            await logger.info(`- No active recharge: ${ineligibleReasons.noRecharge}`);
+            await logger.info(`- No location: ${ineligibleReasons.noLocation}`);
+            await logger.info(`- Vehicle mismatch: ${ineligibleReasons.vehicleMismatch}`);
+        }
 
-        // **CHANGE 5: Schedule next search continuously until driver assigned or cutoff**
+        // Schedule next search
         const timeUntilNextSearch = 30 * 1000; // 30 seconds
         const timeUntilCutoff = searchCutoffTime.getTime() - now.getTime();
+        const minutesUntilCutoff = Math.floor(timeUntilCutoff / 1000 / 60);
         
-        // Continue searching if we haven't reached cutoff and driver not assigned
         if (timeUntilCutoff > timeUntilNextSearch) {
             await DriverSearchQueue.add(
                 { rideId: ride._id.toString(), searchAttempt: searchAttempt + 1 },
                 { delay: timeUntilNextSearch }
             );
-            console.log(`⏳ Next search scheduled in 30s for ride ${rideId} (${Math.floor(timeUntilCutoff/1000/60)} min until cutoff)`);
+            await logger.time(`Next search scheduled in 30s (${minutesUntilCutoff} min until cutoff)`);
         } else if (timeUntilCutoff > 0) {
-            // Last search before cutoff
             await DriverSearchQueue.add(
                 { rideId: ride._id.toString(), searchAttempt: searchAttempt + 1 },
-                { delay: timeUntilCutoff - 5000 } // 5 seconds before cutoff
+                { delay: timeUntilCutoff - 5000 }
             );
-            console.log(`⏳ Final search scheduled for ride ${rideId}`);
+            await logger.time('Final search scheduled before cutoff');
+        } else {
+            await logger.warn('Cutoff time reached, no more searches scheduled');
         }
 
         // Update retry count
@@ -446,18 +573,24 @@ DriverSearchQueue.process(2, async (job) => { // 2 workers for parallel processi
         ride.last_retry_at = now;
         await ride.save();
 
+        await logger.success(`Job ${job.id} completed`);
+
     } catch (error) {
-        console.error('❌ Error in driver search:', error.message);
+        await logger.error('Error in driver search', error);
         
-        const ride = await RideRequestNew.findById(job.data.rideId);
-        if (ride) {
-            ride.last_error = {
-                message: error.message,
-                code: error.code || 'SEARCH_FAILED',
-                occurred_at: new Date()
-            };
-            ride.retry_count = (ride.retry_count || 0) + 1;
-            await ride.save();
+        try {
+            const ride = await RideRequestNew.findById(job.data.rideId);
+            if (ride) {
+                ride.last_error = {
+                    message: error.message,
+                    code: error.code || 'SEARCH_FAILED',
+                    occurred_at: new Date()
+                };
+                ride.retry_count = (ride.retry_count || 0) + 1;
+                await ride.save();
+            }
+        } catch (saveError) {
+            await logger.error('Failed to save error to ride', saveError);
         }
         
         throw error;
@@ -475,7 +608,7 @@ process.on('SIGTERM', async () => {
 
 // Monitor stalled jobs
 AddRideInModelOfDb.on('stalled', (job) => {
-    console.warn(`⚠️ Job ${job.id} stalled`);
+    console.warn(`⚠️ AddRide job ${job.id} stalled`);
 });
 
 DriverSearchQueue.on('stalled', (job) => {
