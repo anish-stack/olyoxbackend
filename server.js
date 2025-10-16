@@ -992,9 +992,8 @@ app.get("/rider-light/:tempRide", async (req, res) => {
   }
 });
 
-const GEO_BATCH_KEY = "rider:location:batch"; // Redis hash key
+const GEO_BATCH_KEY = "rider:location:batch";
 const DB_FLUSH_INTERVAL = 30 * 1000; // 30 seconds
-const MIN_DISTANCE_THRESHOLD = 20; // meters
 const MAX_DISTANCE_THRESHOLD = 50; // meters
 
 function haversineDistance(lat1, lon1, lat2, lon2) {
@@ -1008,14 +1007,19 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// 🔁 Periodically flush latest locations from Redis to DB
+// 🔁 Flush latest locations from Redis ZSET to DB every 30s
 setInterval(async () => {
   try {
-    const batchLocations = await pubClient.hGetAll(GEO_BATCH_KEY);
+    // Get all riders' latest locations from ZSET
+    const ridersData = await pubClient.zRangeWithScores(GEO_BATCH_KEY, 0, -1);
 
-    for (const [riderId, locStr] of Object.entries(batchLocations)) {
-      const loc = JSON.parse(locStr);
+    for (const { value: riderId, score } of ridersData) {
       try {
+        const locStr = await pubClient.get(`rider:location:${riderId}`);
+        if (!locStr) continue;
+
+        const loc = JSON.parse(locStr);
+
         await RiderModel.findOneAndUpdate(
           { _id: riderId },
           {
@@ -1024,14 +1028,17 @@ setInterval(async () => {
           },
           { upsert: true, new: true }
         );
+
         console.log(`💾 DB updated for rider ${riderId} ✅ coords: [${loc.latitude}, ${loc.longitude}]`);
-        await pubClient.hDel(GEO_BATCH_KEY, riderId);
+
+        // Remove from ZSET after flush
+        await pubClient.zRem(GEO_BATCH_KEY, riderId);
       } catch (err) {
         console.error(`❌ DB update failed for rider ${riderId}:`, err.message);
       }
     }
 
-    console.log(`🕒 Batch flush done. Total riders updated: ${Object.keys(batchLocations).length}`);
+    console.log(`🕒 Batch flush done. Total riders updated: ${ridersData.length}`);
   } catch (err) {
     console.error("❌ Redis batch fetch error:", err.message);
   }
@@ -1044,46 +1051,35 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
     if (!riderId) return Protect(req, res);
 
     const now = timestamp || Date.now();
-    const newLoc = { latitude, longitude, timestamp: now };
+    const newLoc = { latitude, longitude, timestamp: now, accuracy, speed, platform: platform || "unknown" };
 
-    // ✅ Check last location from Redis
+    // ✅ Get last location from Redis
     const lastLocStr = await pubClient.get(`rider:location:${riderId}`);
     if (lastLocStr) {
       const lastLoc = JSON.parse(lastLocStr);
-      const distance = haversineDistance(
-        lastLoc.latitude,
-        lastLoc.longitude,
-        newLoc.latitude,
-        newLoc.longitude
-      );
+      const distance = haversineDistance(lastLoc.latitude, lastLoc.longitude, latitude, longitude);
 
       if (distance <= MAX_DISTANCE_THRESHOLD) {
-        console.log(`🚫 Rider ${riderId} ka location change sirf ${distance.toFixed(2)}m → ignore kiya`);
+        console.log(`🚫 Rider ${riderId} ka movement ${distance.toFixed(2)}m → ignore kiya`);
         return res.status(200).json({ message: "Location change negligible. Ignored." });
       }
 
       console.log(`📍 Rider ${riderId} moved ${distance.toFixed(2)}m → update karenge`);
     }
 
-    // ✅ Update Redis (latest location)
-    await pubClient.setEx(
-      `rider:location:${riderId}`,
-      GEO_UPDATE_TTL,
-      JSON.stringify({ ...newLoc, riderId, accuracy, speed, platform: platform || "unknown" })
-    );
+    // ✅ Update latest location in Redis
+    await pubClient.setEx(`rider:location:${riderId}`, GEO_UPDATE_TTL, JSON.stringify(newLoc));
 
-    // ✅ Update batch hash for DB flush
-    await pubClient.hSet(GEO_BATCH_KEY, riderId, JSON.stringify({ ...newLoc, riderId, accuracy, speed, platform: platform || "unknown" }));
+    // ✅ Add/update in Redis ZSET with timestamp as score
+    await pubClient.zAdd(GEO_BATCH_KEY, { score: now, value: riderId });
 
-    return res.status(200).json({
-      message: "Location cached successfully",
-      data: newLoc,
-    });
+    return res.status(200).json({ message: "Location cached successfully", data: newLoc });
   } catch (err) {
     console.error("❌ Error handling rider location:", err.message);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 
 app.post("/webhook/receive-location", Protect, async (req, res) => {
@@ -1560,22 +1556,21 @@ async function startServer() {
 }
 
 // Cluster logic
-// if (cluster.isMaster) {
-//     console.log(`[${new Date().toISOString()}] 🛠 Master ${process.pid} is running`);
-//     console.log(`[${new Date().toISOString()}] Spawning ${numCPUs} workers...`);
+if (cluster.isMaster) {
+    console.log(`[${new Date().toISOString()}] 🛠 Master ${process.pid} is running`);
+    console.log(`[${new Date().toISOString()}] Spawning ${numCPUs} workers...`);
 
-//     // Fork workers
-//     for (let i = 0; i < numCPUs; i++) {
-//         cluster.fork();
-//     }
+    // Fork workers
+    for (let i = 0; i < numCPUs; i++) {
+        cluster.fork();
+    }
 
-//     // Restart worker if it dies
-//     cluster.on("exit", (worker, code, signal) => {
-//         console.log(`[${new Date().toISOString()}] ⚠️ Worker ${worker.process.pid} died. Restarting...`);
-//         cluster.fork();
-//     });
-// } else {
-//     // Workers run the server
-//     startServer();
-// }
-startServer();
+    // Restart worker if it dies
+    cluster.on("exit", (worker, code, signal) => {
+        console.log(`[${new Date().toISOString()}] ⚠️ Worker ${worker.process.pid} died. Restarting...`);
+        cluster.fork();
+    });
+} else {
+    // Workers run the server
+    startServer();
+}
