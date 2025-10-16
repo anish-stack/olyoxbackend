@@ -818,42 +818,60 @@ app.get("/rider", async (req, res) => {
   }
 });
 
+const rideCache = new Map();
+
+// Throttle Map: key = rideId, value = timestamp of last request
+const rideThrottle = new Map();
+
+// TTL & throttle window in milliseconds
+const CACHE_TTL = 30 * 1000; // 30 seconds
+const THROTTLE_WINDOW = 1000; // 1 second per ride per requester
+
 app.get("/rider/:tempRide", async (req, res) => {
   const { tempRide } = req.params;
+  const requesterIp = req.ip; // use IP to throttle per user
+  const throttleKey = `${tempRide}_${requesterIp}`;
 
   if (!mongoose.Types.ObjectId.isValid(tempRide)) {
-    console.warn("[STEP 2] Invalid ride ID");
     return res.status(400).json({ error: "Invalid ride ID" });
   }
 
-  try {
-    console.log("[STEP 3] Fetching ride from MongoDB...");
+  const now = Date.now();
 
+  // Throttle check
+  const lastRequest = rideThrottle.get(throttleKey);
+  if (lastRequest && now - lastRequest < THROTTLE_WINDOW) {
+    return res.status(429).json({ error: "Too many requests. Try again shortly." });
+  }
+  rideThrottle.set(throttleKey, now);
+
+  // Cache check
+  const cached = rideCache.get(tempRide);
+  if (cached && cached.expiresAt > now) {
+    return res.status(200).json({ success: true, data: cached.data, cached: true });
+  }
+
+  try {
     const ride = await NewRideModelModel.findById(tempRide)
-      .select("-__v -updatedAt") // optional: exclude unused ride fields
-      .populate("user", "name email number") // fetch only required user fields
-      .populate("driver", "-documents -preferences -updateLogs -RechargeData") // fetch all driver fields EXCEPT these
+      .select("-__v -updatedAt")
+      .populate("user", "name email number")
+      .populate("driver", "-documents -preferences -updateLogs -RechargeData")
       .lean()
       .exec();
 
     if (!ride) {
-      console.warn("[STEP 4] Ride not found in MongoDB");
       return res.status(404).json({ error: "Ride not found" });
     }
 
-    return res.status(200).json({
-      success: true,
-      data: ride,
-    });
+    // Store in cache with TTL
+    rideCache.set(tempRide, { data: ride, expiresAt: now + CACHE_TTL });
+
+    return res.status(200).json({ success: true, data: ride, cached: false });
   } catch (error) {
-    console.error(
-      `[ERROR] ${new Date().toISOString()} Internal server error:`,
-      error
-    );
+    console.error(`[ERROR] ${new Date().toISOString()} Internal server error:`, error);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 
 app.post("/autocomplete", async (req, res) => {
