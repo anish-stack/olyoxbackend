@@ -8,6 +8,7 @@ const { queue: notificationQueue } = require('./queues/sendNotificationQuee');
 const { queue: notificationQueueUser } = require('./queues/sendUserNotifications');
 const locationQueue = require('./queues/LocationQue');
 const { AddRideInModelOfDb, DriverSearchQueue } = require('./queues/IntercityRideAddQue');
+const { intercityQueue } = require('./queues/DriverShutOffline');
 const setupBullBoard = (app) => {
   const serverAdapter = new ExpressAdapter();
   serverAdapter.setBasePath('/admin/queues');
@@ -18,9 +19,8 @@ const setupBullBoard = (app) => {
       new BullAdapter(locationQueue),
       new BullAdapter(DriverSearchQueue),
       new BullAdapter(notificationQueueUser),
+      new BullAdapter(intercityQueue),
       new BullAdapter(AddRideInModelOfDb)
-
-
     ],
     serverAdapter,
   });

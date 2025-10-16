@@ -3,11 +3,11 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
 const UpdateLogSchema = new Schema({
-    field: { type: String, required: true }, // e.g. 'location', 'fcmToken'
+    field: { type: String, required: true }, 
     oldValue: { type: Schema.Types.Mixed },
     newValue: { type: Schema.Types.Mixed },
     changedAt: { type: Date, default: Date.now },
-    changedBy: { type: String, default: 'system' } // system, rider, admin
+    changedBy: { type: String, default: 'system' } 
 }, { _id: false });
 
 const PreferenceHistorySchema = new Schema({
@@ -237,13 +237,17 @@ const RiderSchema = new Schema({
     BH: {
         type: String
     },
-    AppVersion:{
-        type:String,
-        default:"1.0.1"
+    AppVersion: {
+        type: String,
+        default: "1.0.1"
     },
     on_ride_id: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'TempRideDetails'
+    },
+    on_intercity_ride_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'RideRequestNew'
     },
     YourQrCodeToMakeOnline: {
         type: String,
@@ -268,11 +272,11 @@ const RiderSchema = new Schema({
     fcmToken: {
         type: String,
     },
-   fcmUpdatedAt:{
-          type: Date,
+    fcmUpdatedAt: {
+        type: Date,
     },
-   deviceId:{
-                type: String,
+    deviceId: {
+        type: String,
     },
     isBlockByAdmin: {
         type: Boolean,

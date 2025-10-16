@@ -200,12 +200,12 @@ const RideRequestSchema = new Schema({
     },
     scheduled_at: {
         type: Date,
-        validate: {
-            validator: function (date) {
-                return !date || date > new Date();
-            },
-            message: 'Scheduled time must be in the future'
-        }
+        // validate: {
+        //     validator: function (date) {
+        //         return !date || date > new Date();
+        //     },
+        //     message: 'Scheduled time must be in the future'
+        // }
     },
     driver_assigned_at: Date,
     driver_arrived_at: Date,

@@ -9,27 +9,27 @@ const { AddRideInModelOfDb } = require('../../queues/IntercityRideAddQue');
 
 
 async function addRideJob(rideId) {
-  if (!rideId) {
-    throw new Error("Ride ID is required to add job");
-  }
+    if (!rideId) {
+        throw new Error("Ride ID is required to add job");
+    }
 
-  try {
-    const job = await AddRideInModelOfDb.add(
-      { id: rideId },   // data sent to the processor
-      {
-        attempts:5,           // retry 3 times if fails
-        backoff: { type: 'exponential', delay: 5000 }, // retry delay
-        removeOnComplete: 50,  // keep last 50 completed jobs
-        removeOnFail: 100      // keep last 100 failed jobs
-      }
-    );
+    try {
+        const job = await AddRideInModelOfDb.add(
+            { id: rideId },   // data sent to the processor
+            {
+                attempts: 5,           // retry 3 times if fails
+                backoff: { type: 'exponential', delay: 5000 }, // retry delay
+                removeOnComplete: 50,  // keep last 50 completed jobs
+                removeOnFail: 100      // keep last 100 failed jobs
+            }
+        );
 
-    console.log(`✅ Ride job added to queue with Job ID: ${job.id}`);
-    return job;
-  } catch (error) {
-    console.error('❌ Failed to add ride job:', error);
-    throw error;
-  }
+        console.log(`✅ Ride job added to queue with Job ID: ${job.id}`);
+        return job;
+    } catch (error) {
+        console.error('❌ Failed to add ride job:', error);
+        throw error;
+    }
 }
 
 // ===== PASSENGER BOOKING FUNCTIONS =====
@@ -449,7 +449,7 @@ exports.bookIntercityRide = async (req, res) => {
 
         // Send WhatsApp notification
         await SendWhatsAppMessageNormal(message, user.number);
-        
+
         //add a job to convert this to in ride model and start searching 
         await addRideJob(newRide?._id)
 
@@ -1242,182 +1242,153 @@ exports.getAvailableRides = async (req, res) => {
 
 // Accept ride (Driver function)
 exports.acceptRide = async (req, res) => {
-    const session = await mongoose.startSession();
-    session.startTransaction();
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-    try {
-        const { rideId } = req.params;
-        const { driverId } = req.body;
+  try {
+    const { rideId } = req.params;
+    const { driverId } = req.body;
 
-        console.log("➡️ Accept Ride Request:", { rideId, driverId });
+    console.log("🚖 Accept Ride Request:", { rideId, driverId });
 
-        // Validate IDs
-        if (!mongoose.Types.ObjectId.isValid(rideId) || !mongoose.Types.ObjectId.isValid(driverId)) {
-            console.warn("❌ Invalid IDs:", { rideId, driverId });
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid ride ID or driver ID format'
-            });
-        }
-
-        console.log("🔍 Fetching ride:", rideId);
-        const ride = await IntercityRide.findById(rideId)
-            .populate('passengerId', 'name number')
-            .session(session);
-
-        if (!ride) {
-            console.warn("❌ Ride not found:", rideId);
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(404).json({
-                success: false,
-                message: 'Ride not found'
-            });
-        }
-
-        console.log("✅ Ride found:", ride._id, "Status:", ride.status);
-
-        // Check if ride is still available
-        if (ride.status !== 'scheduled' || ride.driverId) {
-            console.warn("❌ Ride no longer available:", { status: ride.status, driverId: ride.driverId });
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({
-                success: false,
-                message: 'Ride is no longer available'
-            });
-        }
-
-        // Assign driver and update status
-        console.log("🚖 Assigning driver:", driverId);
-        ride.driverId = driverId;
-        ride.status = "driver_assigned"; // safer than custom updateStatus inside session
-
-        if (ride.passengerId) {
-            ride.passengerId.IntercityRide = ride._id
-            await ride.passengerId.save()
-            console.log("Passengenr updated")
-        }
-        await ride.save({ session });
-
-        console.log("✅ Driver assigned successfully in transaction");
-
-        // Get driver details
-        const driverDetails = await driver.findById(driverId).session(session);
-        console.log("👨‍💼 Driver details fetched:", driverDetails ? driverDetails.name : "Not found");
-
-        // Commit transaction now, so ride assignment is guaranteed before notification
-        await session.commitTransaction();
-        session.endSession();
-        console.log("🔒 Transaction committed successfully");
-
-        // Send notification to passenger (outside transaction)
-        if (ride.passengerId && ride.passengerId.number && driverDetails) {
-            console.log("📲 Preparing WhatsApp message for passenger:", ride.passengerId.number);
-
-            const formatDateTime = (date) => {
-                return new Intl.DateTimeFormat('en-IN', {
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: true
-                }).format(date);
-            };
-
-            let assignmentMessage = `🚗 Driver Assigned!\n\n`;
-            assignmentMessage += `Hi ${ride.passengerId.name},\n\n`;
-            assignmentMessage += `Great news! A driver has been assigned for your intercity ride.\n\n`;
-            assignmentMessage += `📋 *Booking ID:* ${ride._id.toString().slice(-8).toUpperCase()}\n`;
-            assignmentMessage += `👨‍💼 *Driver:* ${driverDetails.name}\n`;
-            assignmentMessage += `📞 *Driver Contact:* ${driverDetails.phone}\n`;
-            assignmentMessage += `🚗 *Vehicle:* ${ride.vehicle.type}\n`;
-            assignmentMessage += `📅 *Departure:* ${formatDateTime(ride.schedule.departureTime)}\n\n`;
-            assignmentMessage += `🔐 *Your OTP:* ${ride.otp.code}\n`;
-            assignmentMessage += `⚠️ Share this OTP with your driver to start the ride.\n\n`;
-            assignmentMessage += `📞 The driver will contact you shortly.\n`;
-            assignmentMessage += `🙏 Thank you for choosing Olyox!`;
-
-            try {
-                console.log("📤 Sending WhatsApp message...");
-                await SendWhatsAppMessageNormal(assignmentMessage, ride.passengerId.number);
-                console.log("✅ WhatsApp message sent successfully");
-            } catch (msgErr) {
-                console.error("❌ Failed to send WhatsApp message:", msgErr.message || msgErr);
-            }
-        } else {
-            console.warn("⚠️ Skipping WhatsApp notification (missing passenger or driver details)");
-        }
-
-        return res.status(200).json({
-            success: true,
-            message: 'Ride accepted successfully',
-            ride: ride
-        });
-
-    } catch (error) {
-        console.error('❌ Error in acceptRide:', error);
-
-        // Rollback transaction if error occurs
-        await session.abortTransaction();
-        session.endSession();
-
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to accept ride',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
+    // 🔍 Validate IDs
+    if (
+      !mongoose.Types.ObjectId.isValid(rideId) ||
+      !mongoose.Types.ObjectId.isValid(driverId)
+    ) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ride ID or driver ID",
+      });
     }
+
+    // 🧠 Atomic operation: Only assign if ride is pending & no driver assigned
+    const ride = await RideBooking.findOneAndUpdate(
+      { _id: rideId, ride_status: "pending", driver: { $exists: false } },
+      { driver: driverId, ride_status: "driver_assigned", driver_assigned_at: new Date() },
+      { new: true, session }
+    ).populate("user", "name phone_number");
+
+    if (!ride) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Ride not available or already accepted",
+      });
+    }
+
+    // 👨‍💼 Fetch driver details
+    const driverDetails = await Rider.findById(driverId).session(session);
+    if (!driverDetails) {
+      console.warn("⚠️ Driver not found:", driverId);
+    }
+
+    // ✅ Commit transaction
+    await session.commitTransaction();
+    session.endSession();
+
+    // 📲 Send WhatsApp notification to user
+    if (ride.user?.phone_number && driverDetails) {
+      const formatDateTime = (date) =>
+        new Intl.DateTimeFormat("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        }).format(date || new Date());
+
+      const assignmentMessage = `🚗 *Driver Assigned!*\n\nHi ${ride.user.name},\n\nYour intercity ride is confirmed.\n\n📋 *Booking ID:* ${ride._id.toString().slice(-8).toUpperCase()}\n👨‍💼 *Driver:* ${driverDetails.name}\n📞 *Driver Contact:* ${driverDetails.phone_number}\n🚗 *Vehicle:* ${ride.vehicle_type || "Not specified"}\n📅 *Departure:* ${formatDateTime(ride.scheduled_at)}\n\n🔐 *Your OTP:* ${ride.ride_otp || "N/A"}\n\n📞 Driver will contact you shortly.\n🙏 Thank you for choosing *Olyox*!`;
+
+      try {
+        await SendWhatsAppMessageNormal(assignmentMessage, ride.user.phone_number);
+        console.log("✅ WhatsApp message sent");
+      } catch (err) {
+        console.error("❌ Failed to send WhatsApp message:", err.message);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Ride accepted successfully",
+      ride,
+    });
+  } catch (error) {
+    console.error("❌ Error in acceptRide:", error);
+    await session.abortTransaction();
+    session.endSession();
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to accept ride",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
 };
 
 
 exports.RejectRide = async (req, res) => {
-    try {
-        const { rideId } = req.params;
-        const { driverId } = req.body;
+  try {
+    const { rideId } = req.params;
+    const { driverId } = req.body;
 
-        // ✅ Validate IDs
-        if (!mongoose.Types.ObjectId.isValid(rideId) || !mongoose.Types.ObjectId.isValid(driverId)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid ride ID or driver ID format',
-            });
-        }
-
-        // ✅ Find ride
-        const ride = await IntercityRide.findById(rideId);
-        if (!ride) {
-            return res.status(404).json({
-                success: false,
-                message: 'Ride not found',
-            });
-        }
-
-
-        // ✅ Prevent duplicate rejection
-        if (!ride.rejectedByDrivers.includes(driverId)) {
-            ride.rejectedByDrivers.push(driverId);
-            await ride.save();
-        }
-
-        return res.status(200).json({
-            success: true,
-            message: 'Ride rejected successfully',
-            ride,
-        });
-    } catch (error) {
-        console.error('Error rejecting ride:', error);
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to reject ride',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-        });
+    // ✅ Validate IDs
+    if (!mongoose.Types.ObjectId.isValid(rideId) || !mongoose.Types.ObjectId.isValid(driverId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ride ID or driver ID format",
+      });
     }
-};
 
+    // ✅ Find ride
+    const ride = await RideBooking.findById(rideId);
+    if (!ride) {
+      return res.status(404).json({
+        success: false,
+        message: "Ride not found",
+      });
+    }
+
+    // ✅ Check if driver already rejected
+    const alreadyRejected = ride.rejected_by_drivers.some(
+      (r) => r.driver.toString() === driverId
+    );
+
+    if (alreadyRejected) {
+      return res.status(400).json({
+        success: false,
+        message: "You have already rejected this ride",
+        ride,
+      });
+    }
+
+    // ✅ Add rejection
+    ride.rejected_by_drivers.push({
+      driver: driverId,
+      rejected_at: new Date(),
+      byFake: false, // false by default, can be updated if fake rider
+    });
+
+    await ride.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Ride rejected successfully",
+      ride,
+    });
+  } catch (error) {
+    console.error("❌ Error rejecting ride:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to reject ride",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
 
 // ===== ADMIN/GENERAL FUNCTIONS =====
 
