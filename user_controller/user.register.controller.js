@@ -449,6 +449,8 @@ exports.getAllUser = async (req, res) => {
           $or: [
             { name: new RegExp(search, "i") },
             { email: new RegExp(search, "i") },
+            { number: new RegExp(search, "i") },
+            { platform: new RegExp(search, "i") },
           ],
         }
       : {};
