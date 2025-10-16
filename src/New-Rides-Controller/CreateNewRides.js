@@ -1026,7 +1026,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
     }
 };
 
-// Optimized batch notification sender with throttling
+// Optimized batch notification sender with console logging for admin-friendly reasons
 const sendBatchNotifications = async (io, ridersInput, ride, searchAttempt, searchRadius, batchSize = 50, delayMs = 200) => {
     const results = {
         successfulNotifications: [],
@@ -1035,26 +1035,16 @@ const sendBatchNotifications = async (io, ridersInput, ride, searchAttempt, sear
         failCount: 0,
     };
 
-    // Ensure ridersInput is an array
-    const riders = Array.isArray(ridersInput)
-        ? ridersInput
-        : ridersInput
-        ? [ridersInput]
-        : [];
+    const riders = Array.isArray(ridersInput) ? ridersInput : ridersInput ? [ridersInput] : [];
 
     if (!riders.length) {
         console.warn("No riders to notify.");
         return results;
     }
 
-    const normalizeVehicleType = (type) => {
-        if (!type) return null;
-        return type.toString().toUpperCase().trim();
-    };
-
+    const normalizeVehicleType = (type) => type ? type.toString().toUpperCase().trim() : null;
     const requestedVehicleType = normalizeVehicleType(ride.vehicle_type);
 
-    // Function to process a single rider
     const processRider = async (rider) => {
         try {
             const driverVehicleType = normalizeVehicleType(rider?.rideVehicleInfo?.vehicleType);
@@ -1088,19 +1078,17 @@ const sendBatchNotifications = async (io, ridersInput, ride, searchAttempt, sear
             }
 
             if (!isValidMatch) {
-                results.failedNotifications.push({
-                    rider_id: rider._id,
-                    error: `Vehicle type mismatch: ${driverVehicleType} vs ${requestedVehicleType}`,
-                });
+                const reason = `Vehicle type mismatch. Rider has ${driverVehicleType || "unknown"}, requested ${requestedVehicleType}`;
+                console.warn(`❌ Notification failed for rider ${rider._id}: ${reason}`);
+                results.failedNotifications.push({ rider_id: rider._id, reason });
                 results.failCount++;
                 return;
             }
 
             if (!rider.fcmToken) {
-                results.failedNotifications.push({
-                    rider_id: rider._id,
-                    error: "No FCM token",
-                });
+                const reason = "FCM token missing. Rider cannot receive notifications";
+                console.warn(`❌ Notification failed for rider ${rider._id}: ${reason}`);
+                results.failedNotifications.push({ rider_id: rider._id, reason });
                 results.failCount++;
                 return;
             }
@@ -1129,7 +1117,6 @@ const sendBatchNotifications = async (io, ridersInput, ride, searchAttempt, sear
                 "ride_request_channel"
             );
 
-            // Socket.io emit if available
             if (io) {
                 const socketsInRoom = await io.in(`driver:${rider._id}`).allSockets();
                 if (socketsInRoom.size > 0) {
@@ -1160,28 +1147,25 @@ const sendBatchNotifications = async (io, ridersInput, ride, searchAttempt, sear
 
             results.successCount++;
         } catch (err) {
-            results.failedNotifications.push({
-                rider_id: rider._id,
-                error: err.message,
-            });
+            const reason = `Unexpected error: ${err.message}. Please check rider data or FCM setup.`;
+            console.error(`❌ Notification failed for rider ${rider._id}: ${reason}`);
+            results.failedNotifications.push({ rider_id: rider._id, reason });
             results.failCount++;
         }
     };
 
-    // Split riders into batches
+    // Process riders in batches
     for (let i = 0; i < riders.length; i += batchSize) {
         const batch = riders.slice(i, i + batchSize);
         await Promise.all(batch.map(processRider));
-        // Delay between batches to avoid overload
         if (i + batchSize < riders.length) await new Promise((r) => setTimeout(r, delayMs));
     }
 
-    console.info(
-        `📊 Notification batch complete: ${results.successCount} sent, ${results.failCount} failed`
-    );
+    console.info(`📊 Notification batch complete: ${results.successCount} sent, ${results.failCount} failed`);
 
     return results;
 };
+
 
 // Background process for repeated notifications
 const processRidersBackground = async (rideId, riders, initialRideData) => {
