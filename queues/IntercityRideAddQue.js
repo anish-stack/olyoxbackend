@@ -79,7 +79,7 @@ AddRideInModelOfDb.process(async (job) => {
                 total_fare: rideData.pricing.totalPrice,
                 currency: rideData.pricing.currency,
             },
-            ride_status: rideData.status,
+            ride_status: "pending",
             ride_otp: rideData.otp?.code,
             payment_method: rideData.payment.method,
             isIntercityRides: true,
