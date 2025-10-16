@@ -1026,14 +1026,8 @@ const initiateDriverSearch = async (rideId, req, res) => {
     }
 };
 
-// Optimized notification sender with proper tracking and double validation
-const sendBatchNotifications = async (
-    io,
-    riders,
-    ride,
-    searchAttempt,
-    searchRadius
-) => {
+// Optimized batch notification sender with throttling
+const sendBatchNotifications = async (io, ridersInput, ride, searchAttempt, searchRadius, batchSize = 50, delayMs = 200) => {
     const results = {
         successfulNotifications: [],
         failedNotifications: [],
@@ -1041,7 +1035,18 @@ const sendBatchNotifications = async (
         failCount: 0,
     };
 
-    // Normalize vehicle type helper
+    // Ensure ridersInput is an array
+    const riders = Array.isArray(ridersInput)
+        ? ridersInput
+        : ridersInput
+        ? [ridersInput]
+        : [];
+
+    if (!riders.length) {
+        console.warn("No riders to notify.");
+        return results;
+    }
+
     const normalizeVehicleType = (type) => {
         if (!type) return null;
         return type.toString().toUpperCase().trim();
@@ -1049,43 +1054,40 @@ const sendBatchNotifications = async (
 
     const requestedVehicleType = normalizeVehicleType(ride.vehicle_type);
 
-    // Send all notifications in parallel for speed
-    const notificationPromises = riders.map(async (rider) => {
+    // Function to process a single rider
+    const processRider = async (rider) => {
         try {
-            // DOUBLE VALIDATION: Check vehicle type again before sending notification
-            const driverVehicleType = normalizeVehicleType(
-                rider?.rideVehicleInfo?.vehicleType
-            );
+            const driverVehicleType = normalizeVehicleType(rider?.rideVehicleInfo?.vehicleType);
             const prefs = rider.preferences || {};
 
-            // Validate vehicle type match
+            // Vehicle type validation
             let isValidMatch = false;
-
-            if (requestedVehicleType === "BIKE") {
-                isValidMatch = driverVehicleType === "BIKE";
-            } else if (requestedVehicleType === "AUTO") {
-                isValidMatch = driverVehicleType === "AUTO";
-            } else if (requestedVehicleType === "MINI") {
-                isValidMatch =
-                    driverVehicleType === "MINI" ||
-                    (driverVehicleType === "SEDAN" &&
-                        prefs.OlyoxAcceptMiniRides?.enabled === true) ||
-                    (["SUV", "XL", "SUV/XL"].includes(driverVehicleType) &&
-                        prefs.OlyoxAcceptMiniRides?.enabled === true);
-            } else if (requestedVehicleType === "SEDAN") {
-                isValidMatch =
-                    driverVehicleType === "SEDAN" ||
-                    (["SUV", "XL", "SUV/XL"].includes(driverVehicleType) &&
-                        prefs.OlyoxAcceptSedanRides?.enabled === true);
-            } else if (["SUV", "SUV/XL", "XL"].includes(requestedVehicleType)) {
-                isValidMatch = ["SUV", "XL", "SUV/XL"].includes(driverVehicleType);
+            switch (requestedVehicleType) {
+                case "BIKE":
+                    isValidMatch = driverVehicleType === "BIKE";
+                    break;
+                case "AUTO":
+                    isValidMatch = driverVehicleType === "AUTO";
+                    break;
+                case "MINI":
+                    isValidMatch =
+                        driverVehicleType === "MINI" ||
+                        (driverVehicleType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
+                        (["SUV", "XL", "SUV/XL"].includes(driverVehicleType) && prefs.OlyoxAcceptMiniRides?.enabled);
+                    break;
+                case "SEDAN":
+                    isValidMatch =
+                        driverVehicleType === "SEDAN" ||
+                        (["SUV", "XL", "SUV/XL"].includes(driverVehicleType) && prefs.OlyoxAcceptSedanRides?.enabled);
+                    break;
+                case "SUV":
+                case "SUV/XL":
+                case "XL":
+                    isValidMatch = ["SUV", "XL", "SUV/XL"].includes(driverVehicleType);
+                    break;
             }
 
-            // Skip notification if vehicle type doesn't match
             if (!isValidMatch) {
-                console.warn(
-                    `Skipping notification: Rider ${rider._id} vehicle type ${driverVehicleType} doesn't match requested ${requestedVehicleType}`
-                );
                 results.failedNotifications.push({
                     rider_id: rider._id,
                     error: `Vehicle type mismatch: ${driverVehicleType} vs ${requestedVehicleType}`,
@@ -1094,9 +1096,7 @@ const sendBatchNotifications = async (
                 return;
             }
 
-            // Check FCM token
             if (!rider.fcmToken) {
-                console.warn(`Rider ${rider._id} has no FCM token`);
                 results.failedNotifications.push({
                     rider_id: rider._id,
                     error: "No FCM token",
@@ -1128,28 +1128,22 @@ const sendBatchNotifications = async (
                 },
                 "ride_request_channel"
             );
-         
-            const detailsOfRide = {
-                rideId: ride._id.toString(),
-                distance: ride?.route_info?.distance,
-                distance_from_pickup_km: distanceKm,
-                pickup: ride.pickup_address?.formatted_address,
-                drop: ride.drop_address?.formatted_address,
-                status: ride.rideStatus,
-                vehicleType: ride.vehicle_type,
-                pricing: ride.pricing?.total_fare,
-               distanceKm:distanceKm,
-            }
-            if (io) {
-                console.log("Io is avaibale")
-                const socketsInRoom = await io.in(`driver:${rider._id}`).allSockets();
-                console.log('Sockets in room:', socketsInRoom);
-                io.to(`driver:${rider?._id}`).emit('new_ride_request', detailsOfRide);
-            }
 
-            console.info(
-                `✅ Notification sent to rider ${rider._id} (${driverVehicleType} for ${requestedVehicleType} ride)`
-            );
+            // Socket.io emit if available
+            if (io) {
+                const socketsInRoom = await io.in(`driver:${rider._id}`).allSockets();
+                if (socketsInRoom.size > 0) {
+                    io.to(`driver:${rider._id}`).emit("new_ride_request", {
+                        rideId: ride._id.toString(),
+                        distance_from_pickup_km: distanceKm,
+                        pickup: ride.pickup_address?.formatted_address,
+                        drop: ride.drop_address?.formatted_address,
+                        status: ride.rideStatus,
+                        vehicleType: ride.vehicle_type,
+                        pricing: ride.pricing?.total_fare,
+                    });
+                }
+            }
 
             results.successfulNotifications.push({
                 rider_id: rider._id,
@@ -1166,20 +1160,21 @@ const sendBatchNotifications = async (
 
             results.successCount++;
         } catch (err) {
-            console.error(
-                `❌ Failed to send notification to rider ${rider._id}:`,
-                err.message
-            );
-
             results.failedNotifications.push({
                 rider_id: rider._id,
                 error: err.message,
             });
             results.failCount++;
         }
-    });
+    };
 
-    await Promise.allSettled(notificationPromises);
+    // Split riders into batches
+    for (let i = 0; i < riders.length; i += batchSize) {
+        const batch = riders.slice(i, i + batchSize);
+        await Promise.all(batch.map(processRider));
+        // Delay between batches to avoid overload
+        if (i + batchSize < riders.length) await new Promise((r) => setTimeout(r, delayMs));
+    }
 
     console.info(
         `📊 Notification batch complete: ${results.successCount} sent, ${results.failCount} failed`
