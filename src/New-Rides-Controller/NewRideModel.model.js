@@ -425,6 +425,22 @@ const RideRequestSchema = new Schema({
             }
         }]
     }],
+
+
+    isIntercityRides: {
+        type: Boolean,
+        default: true
+    },
+
+    IntercityPickupTime: {
+        type: Date,
+    },
+
+    rideType: {
+        type: String,
+    },
+
+
     total_notifications_sent: {
         type: Number,
         default: 0

@@ -4,6 +4,33 @@ const SendWhatsAppMessageNormal = require('../../utils/normalWhatsapp');
 const User = require('../../models/normal_user/User.model');
 const driver = require('../../models/Rider.model');
 const cron = require('node-cron')
+const RideBooking = require("../New-Rides-Controller/NewRideModel.model");
+const { AddRideInModelOfDb } = require('../../queues/IntercityRideAddQue');
+
+
+async function addRideJob(rideId) {
+  if (!rideId) {
+    throw new Error("Ride ID is required to add job");
+  }
+
+  try {
+    const job = await AddRideInModelOfDb.add(
+      { id: rideId },   // data sent to the processor
+      {
+        attempts:5,           // retry 3 times if fails
+        backoff: { type: 'exponential', delay: 5000 }, // retry delay
+        removeOnComplete: 50,  // keep last 50 completed jobs
+        removeOnFail: 100      // keep last 100 failed jobs
+      }
+    );
+
+    console.log(`✅ Ride job added to queue with Job ID: ${job.id}`);
+    return job;
+  } catch (error) {
+    console.error('❌ Failed to add ride job:', error);
+    throw error;
+  }
+}
 
 // ===== PASSENGER BOOKING FUNCTIONS =====
 
@@ -250,25 +277,25 @@ exports.bookIntercityRide = async (req, res) => {
         const arrivalTime = new Date(departureTime.getTime() + (duration * 60000));
 
         // Validate vehicle type
- // Validate vehicle type
-const validVehicleTypes = ['SEDAN', 'MINI', 'SUV', 'HATCHBACK', 'SUV/XL', 'XL'];
+        // Validate vehicle type
+        const validVehicleTypes = ['SEDAN', 'MINI', 'SUV', 'HATCHBACK', 'SUV/XL', 'XL'];
 
-if (!vehicle.name) {
-  return res.status(400).json({
-    success: false,
-    message: "Vehicle name is required.",
-  });
-}
+        if (!vehicle.name) {
+            return res.status(400).json({
+                success: false,
+                message: "Vehicle name is required.",
+            });
+        }
 
-// Trim whitespace and convert to uppercase
-const vehicleName = vehicle.name.trim().toUpperCase();
+        // Trim whitespace and convert to uppercase
+        const vehicleName = vehicle.name.trim().toUpperCase();
 
-if (!validVehicleTypes.includes(vehicleName)) {
-  return res.status(400).json({
-    success: false,
-    message: `Invalid vehicle type. Must be one of: ${validVehicleTypes.join(', ')}`,
-  });
-}
+        if (!validVehicleTypes.includes(vehicleName)) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid vehicle type. Must be one of: ${validVehicleTypes.join(', ')}`,
+            });
+        }
 
 
         // Create ride object
@@ -315,6 +342,9 @@ if (!validVehicleTypes.includes(vehicleName)) {
             coupon: coupon || null,
             status: 'scheduled'
         });
+
+
+
 
         // Add initial status to timeline
         newRide.statusTimeline.push({
@@ -419,6 +449,10 @@ if (!validVehicleTypes.includes(vehicleName)) {
 
         // Send WhatsApp notification
         await SendWhatsAppMessageNormal(message, user.number);
+        
+        //add a job to convert this to in ride model and start searching 
+        await addRideJob(newRide?._id)
+
 
         return res.status(201).json({
             success: true,
@@ -1388,99 +1422,99 @@ exports.RejectRide = async (req, res) => {
 // ===== ADMIN/GENERAL FUNCTIONS =====
 
 exports.IntercityRideAll = async (req, res) => {
-  const startTime = Date.now(); // Start time tracking
-  console.log("Start time", startTime);
-  try {
-    const {
-      originCity,
-      destinationCity,
-      departureDate,
-      status,
-      passengerId,
-      driverId,
-      searchTerm, // Add searchTerm to query parameters
-      page = 1,
-      limit = 10
-    } = req.query;
+    const startTime = Date.now(); // Start time tracking
+    console.log("Start time", startTime);
+    try {
+        const {
+            originCity,
+            destinationCity,
+            departureDate,
+            status,
+            passengerId,
+            driverId,
+            searchTerm, // Add searchTerm to query parameters
+            page = 1,
+            limit = 10
+        } = req.query;
 
-    let query = {};
+        let query = {};
 
-    // Optimized filtering
-    if (originCity) {
-      query['route.origin.city'] = { $regex: new RegExp(`^${originCity}`, 'i') }; // Prefix regex for index usage
+        // Optimized filtering
+        if (originCity) {
+            query['route.origin.city'] = { $regex: new RegExp(`^${originCity}`, 'i') }; // Prefix regex for index usage
+        }
+
+        if (destinationCity) {
+            query['route.destination.city'] = { $regex: new RegExp(`^${destinationCity}`, 'i') };
+        }
+
+        if (departureDate) {
+            const startOfDay = new Date(departureDate);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(departureDate);
+            endOfDay.setHours(23, 59, 59, 999);
+
+            query['schedule.departureTime'] = {
+                $gte: startOfDay,
+                $lte: endOfDay
+            };
+        }
+
+        if (status) query.status = status;
+        if (passengerId) query.passengerId = passengerId;
+        if (driverId) query.driverId = driverId;
+
+        // Add search term filtering
+        if (searchTerm) {
+            query.$or = [
+                { 'passengerId.name': { $regex: new RegExp(searchTerm, 'i') } },
+                { 'passengerId.number': { $regex: new RegExp(searchTerm, 'i') } },
+                { rideId: { $regex: new RegExp(searchTerm, 'i') } },
+                { 'route.origin.address': { $regex: new RegExp(searchTerm, 'i') } },
+                { 'route.destination.address': { $regex: new RegExp(searchTerm, 'i') } }
+            ];
+        }
+
+        const skip = (page - 1) * limit;
+
+        // Run count + query in parallel to reduce response time
+        const [rides, totalRides] = await Promise.all([
+            IntercityRide.find(query)
+                .populate('driverId', 'name phone email rating vehicle')
+                .populate('passengerId', 'name number email createdAt platform')
+                .select('-messageSendToDriver')
+                .sort({ 'schedule.departureTime': -1 })
+                .skip(skip)
+                .limit(parseInt(limit))
+                .lean(),
+            IntercityRide.countDocuments(query)
+        ]);
+
+        const endTime = Date.now(); // End time
+        const executionTime = endTime - startTime; // ms
+
+        return res.status(200).json({
+            success: true,
+            rides,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(totalRides / limit),
+                totalRides,
+                hasNext: skip + rides.length < totalRides,
+                hasPrev: page > 1
+            },
+            executionTime: `${executionTime} ms` // ⏱ show time taken
+        });
+    } catch (error) {
+        console.error('Error getting rides:', error);
+        const endTime = Date.now();
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch rides',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+            executionTime: `${endTime - startTime} ms`
+        });
     }
-
-    if (destinationCity) {
-      query['route.destination.city'] = { $regex: new RegExp(`^${destinationCity}`, 'i') };
-    }
-
-    if (departureDate) {
-      const startOfDay = new Date(departureDate);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(departureDate);
-      endOfDay.setHours(23, 59, 59, 999);
-
-      query['schedule.departureTime'] = {
-        $gte: startOfDay,
-        $lte: endOfDay
-      };
-    }
-
-    if (status) query.status = status;
-    if (passengerId) query.passengerId = passengerId;
-    if (driverId) query.driverId = driverId;
-
-    // Add search term filtering
-    if (searchTerm) {
-      query.$or = [
-        { 'passengerId.name': { $regex: new RegExp(searchTerm, 'i') } },
-        { 'passengerId.number': { $regex: new RegExp(searchTerm, 'i') } },
-        { rideId: { $regex: new RegExp(searchTerm, 'i') } },
-        { 'route.origin.address': { $regex: new RegExp(searchTerm, 'i') } },
-        { 'route.destination.address': { $regex: new RegExp(searchTerm, 'i') } }
-      ];
-    }
-
-    const skip = (page - 1) * limit;
-
-    // Run count + query in parallel to reduce response time
-    const [rides, totalRides] = await Promise.all([
-      IntercityRide.find(query)
-        .populate('driverId', 'name phone email rating vehicle')
-        .populate('passengerId', 'name number email createdAt platform')
-        .select('-messageSendToDriver')
-        .sort({ 'schedule.departureTime': -1 })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean(),
-      IntercityRide.countDocuments(query)
-    ]);
-
-    const endTime = Date.now(); // End time
-    const executionTime = endTime - startTime; // ms
-
-    return res.status(200).json({
-      success: true,
-      rides,
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(totalRides / limit),
-        totalRides,
-        hasNext: skip + rides.length < totalRides,
-        hasPrev: page > 1
-      },
-      executionTime: `${executionTime} ms` // ⏱ show time taken
-    });
-  } catch (error) {
-    console.error('Error getting rides:', error);
-    const endTime = Date.now();
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to fetch rides',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-      executionTime: `${endTime - startTime} ms`
-    });
-  }
 };
 
 
@@ -1721,15 +1755,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-const invalidStatuses = [
-    'driver_assigned',
-    'driver_reached',
-    'otp_verify',
-    'ride_in_progress',
-    'completed',
-    'cancelled',
-    'delayed',
-];
+
 
 
 exports.rateYourInterCity = async (req, res) => {
@@ -1987,133 +2013,133 @@ function getLatLngSafe(obj) {
 
 
 exports.getDriversForRide = async (req, res) => {
-  try {
-    const { rideId } = req.query;
-    const now = new Date();
+    try {
+        const { rideId } = req.query;
+        const now = new Date();
 
-    console.log("🟢 getDriversForRide rideId:", rideId);
+        console.log("🟢 getDriversForRide rideId:", rideId);
 
-    if (!rideId || !mongoose.Types.ObjectId.isValid(rideId)) {
-      return res.status(400).json({ success: false, message: "Invalid or missing rideId" });
+        if (!rideId || !mongoose.Types.ObjectId.isValid(rideId)) {
+            return res.status(400).json({ success: false, message: "Invalid or missing rideId" });
+        }
+
+        // 1. Fetch ride
+        const ride = await IntercityRide.findById(rideId);
+        if (!ride) {
+            return res.status(404).json({ success: false, message: "Ride not found" });
+        }
+
+        const originLat = ride.route.origin.location.coordinates[1];
+        const originLng = ride.route.origin.location.coordinates[0];
+        const vehicleType = ride.vehicle.type;
+        const rejectedByDrivers = ride.rejectedByDrivers || [];
+
+        console.log("📍 Ride Origin:", { originLat, originLng, vehicleType });
+
+        // 2. Fetch drivers within 20km using aggregation
+        let riders = await driver.aggregate([
+            {
+                $geoNear: {
+                    near: { type: "Point", coordinates: [originLng, originLat] },
+                    distanceField: "distance",
+                    maxDistance: 10000, // 20 km
+                    spherical: true,
+                },
+            },
+            {
+                $match: {
+                    _id: { $nin: rejectedByDrivers },
+                    "RechargeData.approveRecharge": true,
+                    "RechargeData.expireData": { $gte: now },
+                    "preferences.OlyoxIntercity.enabled": true,
+                },
+            },
+            {
+                $project: {
+                    _id: 1,
+                    name: 1,
+                    number: 1,
+                    rideVehicleInfo: 1,
+                    isAvailable: 1,
+                    location: 1,
+                    RechargeData: 1,
+                    distance: 1,
+                },
+            },
+        ]);
+
+        console.log(`🔹 Total drivers nearby: ${riders.length}`);
+
+        // 3. Apply vehicle & preference logic
+        const stats = {
+            totalNearby: riders.length,
+            actualMatch: 0,
+            preferenceMatch: 0,
+            excluded: 0,
+            byVehicleType: {},
+        };
+
+        const eligibleDrivers = riders.filter((rider) => {
+            const driverType = rider?.rideVehicleInfo?.vehicleType?.trim();
+            const prefs = rider.preferences || {};
+
+            let decision = false;
+            let matchType = null;
+
+            const vType = vehicleType?.toUpperCase();
+            const dType = driverType?.toUpperCase();
+
+            // Special case: Bike
+            if (vType === "BIKE" && dType === "BIKE") {
+                decision = true;
+                matchType = "actualMatch";
+            } else if (vType === "MINI") {
+                decision = (
+                    dType === "MINI" ||
+                    (dType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
+                    ((dType === "SUV" || dType === "XL" || dType === "SUV/XL") &&
+                        prefs.OlyoxAcceptMiniRides?.enabled)
+                );
+                matchType = dType === "MINI" ? "actualMatch" : "preferenceMatch";
+            } else if (vType === "SEDAN") {
+                decision = (
+                    dType === "SEDAN" ||
+                    ((dType === "SUV" || dType === "XL" || dType === "SUV/XL") &&
+                        prefs.OlyoxAcceptSedanRides?.enabled)
+                );
+                matchType = dType === "SEDAN" ? "actualMatch" : "preferenceMatch";
+            } else if (vType === "SUV" || vType === "SUV/XL" || vType === "XL") {
+                decision = ["SUV", "XL", "SUV/XL", "SEDAN", "MINI"].includes(dType);
+                matchType = "actualMatch";
+            }
+
+            // Update stats
+            if (decision) {
+                if (matchType === "actualMatch") stats.actualMatch++;
+                else if (matchType === "preferenceMatch") stats.preferenceMatch++;
+                stats.byVehicleType[dType] = (stats.byVehicleType[dType] || 0) + 1;
+            } else {
+                stats.excluded++;
+                stats.byVehicleType[dType] = (stats.byVehicleType[dType] || 0) + 1;
+            }
+
+            return decision;
+        });
+
+
+
+        if (!eligibleDrivers.length) {
+            return res.status(404).json({ success: false, message: "No eligible drivers found" });
+        }
+
+        return res.status(200).json({
+            success: true,
+            rideId: ride._id,
+            stats,
+            drivers: eligibleDrivers,
+        });
+    } catch (error) {
+        console.error("🔥 Error in getDriversForRide:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
     }
-
-    // 1. Fetch ride
-    const ride = await IntercityRide.findById(rideId);
-    if (!ride) {
-      return res.status(404).json({ success: false, message: "Ride not found" });
-    }
-
-    const originLat = ride.route.origin.location.coordinates[1];
-    const originLng = ride.route.origin.location.coordinates[0];
-    const vehicleType = ride.vehicle.type;
-    const rejectedByDrivers = ride.rejectedByDrivers || [];
-
-    console.log("📍 Ride Origin:", { originLat, originLng, vehicleType });
-
-    // 2. Fetch drivers within 20km using aggregation
-    let riders = await driver.aggregate([
-      {
-        $geoNear: {
-          near: { type: "Point", coordinates: [originLng, originLat] },
-          distanceField: "distance",
-          maxDistance: 10000, // 20 km
-          spherical: true,
-        },
-      },
-      {
-        $match: {
-          _id: { $nin: rejectedByDrivers },
-          "RechargeData.approveRecharge": true,
-          "RechargeData.expireData": { $gte: now },
-          "preferences.OlyoxIntercity.enabled": true,
-        },
-      },
-      {
-        $project: {
-          _id: 1,
-          name: 1,
-          number: 1,
-          rideVehicleInfo: 1,
-          isAvailable: 1,
-          location: 1,
-          RechargeData: 1,
-          distance: 1,
-        },
-      },
-    ]);
-
-    console.log(`🔹 Total drivers nearby: ${riders.length}`);
-
-    // 3. Apply vehicle & preference logic
-    const stats = {
-      totalNearby: riders.length,
-      actualMatch: 0,
-      preferenceMatch: 0,
-      excluded: 0,
-      byVehicleType: {},
-    };
-
-    const eligibleDrivers = riders.filter((rider) => {
-      const driverType = rider?.rideVehicleInfo?.vehicleType?.trim();
-      const prefs = rider.preferences || {};
-
-      let decision = false;
-      let matchType = null;
-
-      const vType = vehicleType?.toUpperCase();
-      const dType = driverType?.toUpperCase();
-
-      // Special case: Bike
-      if (vType === "BIKE" && dType === "BIKE") {
-        decision = true;
-        matchType = "actualMatch";
-      } else if (vType === "MINI") {
-        decision = (
-          dType === "MINI" ||
-          (dType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
-          ((dType === "SUV" || dType === "XL" || dType === "SUV/XL") &&
-            prefs.OlyoxAcceptMiniRides?.enabled)
-        );
-        matchType = dType === "MINI" ? "actualMatch" : "preferenceMatch";
-      } else if (vType === "SEDAN") {
-        decision = (
-          dType === "SEDAN" ||
-          ((dType === "SUV" || dType === "XL" || dType === "SUV/XL") &&
-            prefs.OlyoxAcceptSedanRides?.enabled)
-        );
-        matchType = dType === "SEDAN" ? "actualMatch" : "preferenceMatch";
-      } else if (vType === "SUV" || vType === "SUV/XL" || vType === "XL") {
-        decision = ["SUV", "XL", "SUV/XL", "SEDAN", "MINI"].includes(dType);
-        matchType = "actualMatch";
-      }
-
-      // Update stats
-      if (decision) {
-        if (matchType === "actualMatch") stats.actualMatch++;
-        else if (matchType === "preferenceMatch") stats.preferenceMatch++;
-        stats.byVehicleType[dType] = (stats.byVehicleType[dType] || 0) + 1;
-      } else {
-        stats.excluded++;
-        stats.byVehicleType[dType] = (stats.byVehicleType[dType] || 0) + 1;
-      }
-
-      return decision;
-    });
-
-
-
-    if (!eligibleDrivers.length) {
-      return res.status(404).json({ success: false, message: "No eligible drivers found" });
-    }
-
-    return res.status(200).json({
-      success: true,
-      rideId: ride._id,
-      stats,
-      drivers: eligibleDrivers,
-    });
-  } catch (error) {
-    console.error("🔥 Error in getDriversForRide:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
-  }
 };
