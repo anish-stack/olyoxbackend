@@ -2286,7 +2286,6 @@ exports.ride_status_after_booking = async (req, res) => {
 exports.riderFetchPoolingForNewRides = async (req, res) => {
     const io = req.app.get('io')
     try {
-        console.log("piined")
         const { id: riderId } = req.params;
 
         if (!riderId) {

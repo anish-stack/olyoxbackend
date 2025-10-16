@@ -993,29 +993,49 @@ app.get("/rider-light/:tempRide", async (req, res) => {
 });
 
 const GEO_UPDATE_TTL = 30;
-function haversineDistance(lat1, lon1, lat2, lon2) {
-  const toRad = (x) => (x * Math.PI) / 180;
-  const R = 6371e3; // metres
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
+
+const GEO_BATCH_KEY = "rider:location:batch"; // Redis hash key
+const DB_FLUSH_INTERVAL = 30 * 1000; // 30 seconds
+
+// ✅ Periodically flush latest locations from Redis to DB
+setInterval(async () => {
+  try {
+    // Get all pending locations from Redis hash
+    const batchLocations = await pubClient.hGetAll(GEO_BATCH_KEY);
+
+    for (const [riderId, locStr] of Object.entries(batchLocations)) {
+      const loc = JSON.parse(locStr);
+      try {
+        await RiderModel.findOneAndUpdate(
+          { _id: riderId },
+          {
+            location: { type: "Point", coordinates: [loc.longitude, loc.latitude] },
+            lastUpdated: new Date(loc.timestamp),
+          },
+          { upsert: true, new: true }
+        );
+        console.log(`💾 DB updated for rider ${riderId} ✅ latest coords: [${loc.latitude}, ${loc.longitude}]`);
+        // Remove from batch after DB update
+        await pubClient.hDel(GEO_BATCH_KEY, riderId);
+      } catch (err) {
+        console.error(`❌ DB update failed for rider ${riderId}:`, err.message);
+      }
+    }
+
+    console.log(`🕒 Batch flush done. Total riders updated: ${Object.keys(batchLocations).length}`);
+  } catch (err) {
+    console.error("❌ Redis batch fetch error:", err.message);
+  }
+}, DB_FLUSH_INTERVAL);
 
 app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
   try {
     const riderId = req.user?.userId;
-    const { latitude, longitude, accuracy, speed, timestamp, platform } =
-      req.body;
-    // console.log("Bhai Mai aa gya hu,", req.body);
-
+    const { latitude, longitude, accuracy, speed, timestamp, platform } = req.body;
     if (!riderId) return Protect(req, res);
 
     const now = timestamp || Date.now();
 
-    // ✅ Redis cache
     const locationData = {
       riderId,
       latitude,
@@ -1026,39 +1046,28 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
       timestamp: now,
     };
 
+    // ✅ Always update Redis for real-time location
     await pubClient.setEx(
       `rider:location:${riderId}`,
       GEO_UPDATE_TTL,
       JSON.stringify(locationData)
     );
 
-    // console.log(`📦 Cached in Redis for rider ${riderId}:`, locationData);
+    // ✅ Update batch hash in Redis for DB flush
+    await pubClient.hSet(GEO_BATCH_KEY, riderId, JSON.stringify(locationData));
 
-    // ✅ DB update (always update, no filters)
-    const updatedDoc = await RiderModel.findOneAndUpdate(
-      { _id: riderId },
-      {
-        location: { type: "Point", coordinates: [longitude, latitude] },
-        lastUpdated: new Date(now),
-      },
-      { upsert: true, new: true }
-    );
-
-    // console.log(`💾 DB updated for rider ${riderId}:`, {
-    //   name: updatedDoc?.name,
-    //   coords: updatedDoc?.location?.coordinates
-    // });
+    console.log(`📦 Rider ${riderId} ka latest location cache me update ho gaya: [${latitude}, ${longitude}]`);
 
     return res.status(200).json({
-      message: "Location cached and updated successfully",
-      dbUpdated: !!updatedDoc,
+      message: "Location cached successfully",
       data: locationData,
     });
   } catch (err) {
-    console.error("❌ Error handling location update:", err.message);
+    console.error("❌ Error handling rider location:", err.message);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 app.post("/webhook/receive-location", Protect, async (req, res) => {
   try {
