@@ -2,8 +2,22 @@ const User = require('../models/normal_user/User.model');
 const Rider = require('../models/Rider.model');
 const axios = require('axios');
 
+
+// In-memory cache
+const dashboardCache = new Map();
+const CACHE_KEY = 'userDashboardStats';
+
 exports.getUserDashboardStatics = async (req, res) => {
     try {
+        // Return cached stats if available
+        if (dashboardCache.has(CACHE_KEY)) {
+            return res.status(200).json({
+                success: true,
+                stats: dashboardCache.get(CACHE_KEY),
+                cached: true // optional, for debug
+            });
+        }
+
         // Current Date
         const today = new Date();
         const startOfToday = new Date(today.setHours(0, 0, 0, 0));
@@ -86,24 +100,30 @@ exports.getUserDashboardStatics = async (req, res) => {
             monthlyPerformanceChange = ((lastMonthUsers - prevMonthUsers) / prevMonthUsers) * 100;
         }
 
+        const stats = {
+            totalUsers,
+            todayUsers,
+            yesterdayUsers,
+            lastWeekUsers,
+            lastTwoWeeksUsers,
+            lastMonthUsers,
+            prevMonthUsers,
+            androidUsers,
+            iosUsers,
+            performance: {
+                todayVsYesterday: todayPerformanceChange.toFixed(2) + "%",
+                lastWeekVsPrevWeek: twoWeekPerformanceChange.toFixed(2) + "%",
+                thisMonthVsPrevMonth: monthlyPerformanceChange.toFixed(2) + "%",
+            },
+        };
+
+        // Store in cache
+        dashboardCache.set(CACHE_KEY, stats);
+
         return res.status(200).json({
             success: true,
-            stats: {
-                totalUsers,
-                todayUsers,
-                yesterdayUsers,
-                lastWeekUsers,
-                lastTwoWeeksUsers,
-                lastMonthUsers,
-                prevMonthUsers,
-                androidUsers,
-                iosUsers,
-                performance: {
-                    todayVsYesterday: todayPerformanceChange.toFixed(2) + "%",
-                    lastWeekVsPrevWeek: twoWeekPerformanceChange.toFixed(2) + "%",
-                    thisMonthVsPrevMonth: monthlyPerformanceChange.toFixed(2) + "%",
-                },
-            },
+            stats,
+            cached: false
         });
     } catch (error) {
         console.error("Error fetching dashboard stats:", error);
@@ -115,6 +135,10 @@ exports.getUserDashboardStatics = async (req, res) => {
     }
 };
 
+// Optional: Function to invalidate cache when users are created/updated
+exports.invalidateDashboardCache = () => {
+    dashboardCache.delete(CACHE_KEY);
+};
 
 
 // Haversine formula to calculate distance in km
