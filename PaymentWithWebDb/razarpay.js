@@ -9,19 +9,14 @@ const razorpayInstance = new Razorpay({
     key_id: process.env.RAZORPAY_KEY_ID,
     key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
-const settings = require('../models/Admin/Settings');
 const { createRechargeLogs } = require('../Admin Controllers/Bugs/rechargeLogs');
 const PersonalCoupons = require('../models/Admin/PersonalCoupons');
 const RiderReffer = require('../models/RiderReffer.Model')
 
-// console.log("process.env.RAZORPAY_KEY_ID",process.env.RAZORPAY_KEY_ID)
-// console.log("process.env.RAZORPAY_KEY_SECRET",process.env.RAZORPAY_KEY_SECRET)
-
-const FIRST_RECHARGE_COMMISONS = 10
-const SECOND_RECHARGE_COMMISONS = 2
 
 
 const check_user_presence = async (user_id) => {
+    console.log("rechrage user id",user_id)
     try {
         const response = await axios.post(`https://webapi.olyox.com/api/v1/check-bh-id`, {
             bh: user_id
@@ -38,6 +33,10 @@ exports.make_recharge = async (req, res) => {
     try {
         const { package_id, user_id } = req.params || {};
         const { coupon, type } = req.query || {};
+    console.log("rechrage req.params",req.params)
+    console.log("rechrage req.query",req.query)
+    console.log("rechrage req.body",req.body)
+
 
         const MembershipPlan = getMembershipPlanModel();
         const RechargeModel = getRechargeModel();
