@@ -389,7 +389,7 @@ DriverSearchQueue.process(2, async (job) => { // 2 workers for parallel processi
                         screen: "IntercityRideRequest",
                         rideType: "intercity"
                     },
-                    "intercity_ride_request"
+                    "intercity_ride_channel"
                 );
 
                 notificationsSent++;
