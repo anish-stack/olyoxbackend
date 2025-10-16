@@ -1,4 +1,3 @@
-
 const Razorpay = require('razorpay');
 const axios = require('axios');
 const { getMembershipPlanModel, getRechargeModel, getActiveReferralSchema, getvendorModel } = require('./db');
@@ -11,176 +10,247 @@ const razorpayInstance = new Razorpay({
 });
 const { createRechargeLogs } = require('../Admin Controllers/Bugs/rechargeLogs');
 const PersonalCoupons = require('../models/Admin/PersonalCoupons');
-const RiderReffer = require('../models/RiderReffer.Model')
-
-
+const RiderReffer = require('../models/RiderReffer.Model');
 
 const check_user_presence = async (user_id) => {
-    console.log("rechrage user id",user_id)
+    console.log("recharge user id", user_id);
     try {
         const response = await axios.post(`https://webapi.olyox.com/api/v1/check-bh-id`, {
             bh: user_id
         });
-        return response.data?.complete;
+        
+        // Return the full details object, not just data
+        if (response.data?.success && response.data?.details) {
+            return response.data.details;
+        }
+        
+        // If details not found, throw error
+        throw new Error('We couldn\'t find your account. Please try logging in again.');
     } catch (error) {
         console.error('Error checking user presence:', error.message);
-        throw new Error(error.response.data.message || error.message || "Please reload the screen");
+        throw new Error(error.response?.data?.message || error.message || "Something went wrong. Please refresh and try again.");
     }
-}
-
+};
 
 exports.make_recharge = async (req, res) => {
     try {
         const { package_id, user_id } = req.params || {};
         const { coupon, type } = req.query || {};
-    console.log("rechrage req.params",req.params)
-    console.log("rechrage req.query",req.query)
-    console.log("rechrage req.body",req.body)
-
+        
+        console.log("recharge req.params", req.params);
+        console.log("recharge req.query", req.query);
+        console.log("recharge req.body", req.body);
 
         const MembershipPlan = getMembershipPlanModel();
         const RechargeModel = getRechargeModel();
 
-        // console.log(package_id, user_id)
-        // console.log(coupon, type)
-
+        // Validate inputs
         if (!user_id) {
-            return res.status(400).json({ message: 'Please login to recharge.' });
+            return res.status(400).json({ 
+                success: false,
+                message: 'Please log in to continue with your recharge.' 
+            });
         }
 
         if (!package_id) {
-            return res.status(400).json({ message: 'Please select a package to recharge.' });
+            return res.status(400).json({ 
+                success: false,
+                message: 'Please select a recharge plan to continue.' 
+            });
         }
 
         // Find the package
         const selectedPackage = await MembershipPlan.findById(package_id);
         if (!selectedPackage) {
-            return res.status(404).json({ message: 'Selected package not found.' });
+            return res.status(404).json({ 
+                success: false,
+                message: 'Sorry, this recharge plan is no longer available. Please choose another plan.' 
+            });
         }
 
         const { price: package_price, title: package_name, description: package_description } = selectedPackage;
         if (!package_price || package_price <= 0) {
-            return res.status(400).json({ message: 'Invalid package price. Please contact support.' });
+            return res.status(400).json({ 
+                success: false,
+                message: 'There\'s an issue with this plan. Please contact our support team for help.' 
+            });
         }
-        // console.log(user_id)
-        // Check if user exists
+
+        // Check if user exists - now returns full user object
         const userCheck = await check_user_presence(user_id);
-        if (!userCheck) {
-            return res.status(404).json({ message: 'User not found.' });
+        if (!userCheck || !userCheck._id) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'We couldn\'t verify your account. Please log in again and try.' 
+            });
         }
 
         let finalAmount = package_price;
         let isCouponApplied = false;
         let couponDiscount = 0;
+        let appliedCouponData = null;
 
+        // Coupon validation
         if (coupon) {
             const matchedCoupons = await PersonalCoupons.find({ code: coupon }).populate('assignedTo');
+            
             if (!matchedCoupons || matchedCoupons.length === 0) {
-                return res.status(404).json({ success: false, message: 'Invalid coupon code.' });
+                return res.status(404).json({ 
+                    success: false, 
+                    message: 'This coupon code doesn\'t exist. Please check and try again.' 
+                });
             }
-            let couponData
+
+            let couponData;
+
+            // Find coupon based on type
             if (type === 'heavy') {
                 couponData = matchedCoupons.find(c =>
                     c.assignedTo &&
                     c.assignedTo.Bh_Id &&
                     c.assignedTo.Bh_Id === user_id
                 );
-
-
             } else if (type === 'tiffin') {
                 couponData = matchedCoupons.find(c =>
                     c.assignedTo &&
                     c.assignedTo.restaurant_BHID &&
                     c.assignedTo.restaurant_BHID === user_id
                 );
-
-
             } else if (type === 'cab') {
                 couponData = matchedCoupons.find(c =>
                     c.assignedTo &&
                     c.assignedTo.BH &&
                     c.assignedTo.BH === user_id
                 );
-
-
             } else {
-                if (!couponData) {
-                    return res.status(403).json({
-                        success: false,
-                        message: 'Coupon is not assigned to this user.'
-                    });
-                }
+                return res.status(400).json({
+                    success: false,
+                    message: 'Something went wrong. Please try again or contact support.'
+                });
             }
 
+            // Check if coupon was found for this user
+            if (!couponData) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'This coupon is not available for your account. Please use a valid coupon.'
+                });
+            }
 
+            // Check if coupon is already used
             if (couponData.isUsed) {
-                return res.status(402).json({ success: false, message: 'This coupon code has already been used.' });
+                return res.status(402).json({ 
+                    success: false, 
+                    message: 'This coupon has already been used. You can only use it once.' 
+                });
             }
 
+            // Check if coupon is expired
             if (new Date(couponData.expirationDate) < new Date()) {
-                return res.status(410).json({ success: false, message: 'This coupon code has expired.' });
+                return res.status(410).json({ 
+                    success: false, 
+                    message: 'This coupon has expired. Please try a different coupon.' 
+                });
             }
+
+            // Calculate discount
             couponDiscount = (package_price * couponData.discount) / 100;
             finalAmount = Math.max(package_price - couponDiscount, 0);
-
-
-            finalAmount = parseFloat(finalAmount.toFixed(1));
-
+            finalAmount = parseFloat(finalAmount.toFixed(2));
+            
             isCouponApplied = true;
-
-
+            appliedCouponData = couponData;
         }
 
+        // Calculate GST
         const gstRate = 0.18;
-        const gstAmount = finalAmount * gstRate;
-        finalAmount += gstAmount;
+        const baseAmount = finalAmount;
+        const gstAmount = parseFloat((finalAmount * gstRate).toFixed(2));
+        finalAmount = parseFloat((baseAmount + gstAmount).toFixed(2));
 
         // Create Razorpay order
         const orderOptions = {
-            amount: Math.round(finalAmount * 100),
+            amount: Math.round(finalAmount * 100), // Convert to paise
             currency: 'INR',
             receipt: `receipt_${Date.now()}`,
             notes: {
                 user_id,
+                user_name: userCheck.name || 'N/A',
                 package_name,
                 package_description,
-                base_price: (finalAmount / 1.18).toFixed(2), // Base price before GST
-                gst_amount: gstAmount.toFixed(2),             // GST amount
-                total_amount: finalAmount.toFixed(2)          // Final amount including GST
+                base_price: baseAmount.toFixed(2),
+                gst_amount: gstAmount.toFixed(2),
+                total_amount: finalAmount.toFixed(2),
+                coupon_applied: isCouponApplied,
+                coupon_discount: couponDiscount.toFixed(2)
             }
         };
 
         const razorpayOrder = await razorpayInstance.orders.create(orderOptions);
         if (!razorpayOrder) {
-            return res.status(500).json({ message: 'Failed to create Razorpay order.' });
+            return res.status(500).json({ 
+                success: false,
+                message: 'Unable to process payment at the moment. Please try again in a few seconds.' 
+            });
         }
-        console.log(razorpayOrder)
+
+        console.log("Razorpay Order Created:", razorpayOrder);
 
         // Save recharge entry
         const rechargeData = new RechargeModel({
-            vendor_id: userCheck._id,
+            vendor_id: userCheck._id, // ✅ Now this will work correctly
             member_id: package_id,
             amount: finalAmount,
             original_amount: package_price,
             razarpay_order_id: razorpayOrder.id,
             razorpay_payment_id: null,
             isCouponApplied,
-            couponDiscount,
+            couponDiscount: parseFloat(couponDiscount.toFixed(2)),
             couponCode: isCouponApplied ? coupon : null,
-            razorpay_status: razorpayOrder.status
+            razorpay_status: razorpayOrder.status,
+            gst_amount: gstAmount,
+            base_amount: baseAmount
         });
 
         await rechargeData.save();
 
         return res.status(200).json({
+            success: true,
             message: 'Recharge initiated successfully.',
             order: razorpayOrder,
-            data: rechargeData
+            data: rechargeData,
+            breakdown: {
+                original_price: package_price,
+                coupon_discount: couponDiscount,
+                price_after_discount: baseAmount,
+                gst_amount: gstAmount,
+                final_amount: finalAmount
+            }
         });
 
     } catch (error) {
         console.error('Recharge Error:', error);
-        return res.status(500).json({ message: error.message, error: error.message });
+        
+        // User-friendly error messages based on error type
+        let userMessage = 'Something went wrong while processing your recharge. Please try again.';
+        
+        if (error.message.includes('network') || error.code === 'ECONNREFUSED') {
+            userMessage = 'Connection issue detected. Please check your internet and try again.';
+        } else if (error.message.includes('timeout')) {
+            userMessage = 'Request is taking too long. Please check your connection and try again.';
+        } else if (error.message.includes('Razorpay')) {
+            userMessage = 'Payment gateway is temporarily unavailable. Please try again in a moment.';
+        } else if (error.message) {
+            // Use the error message if it's already user-friendly
+            userMessage = error.message;
+        }
+        
+        return res.status(500).json({ 
+            success: false,
+            message: userMessage,
+            // Only include technical error in development
+            ...(process.env.NODE_ENV === 'development' && { error: error.message })
+        });
     }
 };
 
