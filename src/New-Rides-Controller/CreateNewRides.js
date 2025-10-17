@@ -3830,21 +3830,21 @@ exports.cancelRideByPoll = async (req, res) => {
             // 🔹 Free driver if assigned
             if (rideData.driver) {
                 const driver = await RiderModel.findById(rideData.driver._id).session(session);
-              if (driver) {
-    // Clear driver references only if they match the ride being cancelled
-    if (driver.on_ride_id?.toString() === rideData._id.toString()) {
-        driver.on_ride_id = null;
-        console.log(`🚗 Cleared on_ride_id for driver ${driver._id}`);
-    }
+                if (driver) {
+                    // Clear driver references only if they match the ride being cancelled
+                    if (driver.on_ride_id?.toString() === rideData._id.toString()) {
+                        driver.on_ride_id = null;
+                        console.log(`🚗 Cleared on_ride_id for driver ${driver._id}`);
+                    }
 
-    if (driver.on_intercity_ride_id?.toString() === rideData._id.toString()) {
-        driver.on_intercity_ride_id = null;
-        console.log(`🚗 Cleared on_intercity_ride_id for driver ${driver._id}`);
-    }
+                    if (driver.on_intercity_ride_id?.toString() === rideData._id.toString()) {
+                        driver.on_intercity_ride_id = null;
+                        console.log(`🚗 Cleared on_intercity_ride_id for driver ${driver._id}`);
+                    }
 
-    driver.isAvailable = true;
-    await driver.save({ session });
-}
+                    driver.isAvailable = true;
+                    await driver.save({ session });
+                }
 
 
                 // Notify driver if user cancelled

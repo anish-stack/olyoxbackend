@@ -270,7 +270,8 @@ io.on("connection", (socket) => {
     socket.ride_id = ride_id;
     socket.join(`ride_chat:${ride_id}`);
     console.log(
-      `[${new Date().toISOString()}] 🗨️ ${socket.userType}:${socket.userId} joined chat for ride ${ride_id}`
+      `[${new Date().toISOString()}] 🗨️ ${socket.userType}:${socket.userId
+      } joined chat for ride ${ride_id}`
     );
 
     // Add socket to rideChatMap
@@ -279,7 +280,6 @@ io.on("connection", (socket) => {
 
     socket.emit("chat_joined", { ride_id, success: true });
   });
-
 
   socket.on("chat_message", async (incomingData) => {
     try {
@@ -290,10 +290,14 @@ io.on("connection", (socket) => {
 
       if (!ride_id || !message || !who) {
         console.warn("⚠️ Missing required fields:", { ride_id, message, who });
-        socket.emit("error", { message: "ride_id, message, and who are required" });
+        socket.emit("error", {
+          message: "ride_id, message, and who are required",
+        });
         return;
       }
-      console.log(`📝 Processing message for ride_id: ${ride_id}, from: ${who}`);
+      console.log(
+        `📝 Processing message for ride_id: ${ride_id}, from: ${who}`
+      );
 
       const ride = await NewRideModelModel.findById(ride_id);
       if (!ride) {
@@ -335,7 +339,9 @@ io.on("connection", (socket) => {
         const s = io.sockets.sockets.get(socketId);
         if (s && s.userId === toUserId) {
           s.emit("chat_message", chatData);
-          console.log(`📩 Message sent directly to user ${toUserId} (socketId: ${socketId})`);
+          console.log(
+            `📩 Message sent directly to user ${toUserId} (socketId: ${socketId})`
+          );
         }
       }
 
@@ -465,7 +471,6 @@ io.on("connection", (socket) => {
     );
   });
 });
-
 
 // Make Socket.IO available to the app
 app.set("io", io);
@@ -727,7 +732,6 @@ app.post("/directions", async (req, res) => {
 // List Available Riders
 app.get("/rider", async (req, res) => {
   try {
-    console.log("iamht");
     const riders = await RiderModel.find({ isAvailable: true });
     res.json({ success: true, riders });
   } catch (err) {
@@ -762,23 +766,38 @@ app.get("/rider/:tempRide", async (req, res) => {
   // Throttle check
   const lastRequest = rideThrottle.get(throttleKey);
   if (lastRequest && now - lastRequest < THROTTLE_WINDOW) {
-    return res.status(429).json({ error: "Too many requests. Try again shortly." });
+    return res
+      .status(429)
+      .json({ error: "Too many requests. Try again shortly." });
   }
   rideThrottle.set(throttleKey, now);
 
   // Cache check
   const cached = rideCache.get(tempRide);
   if (cached && cached.expiresAt > now) {
-    return res.status(200).json({ success: true, data: cached.data, cached: true });
+    return res
+      .status(200)
+      .json({ success: true, data: cached.data, cached: true });
   }
 
   try {
-    const ride = await NewRideModelModel.findById(tempRide)
+    let ride = await NewRideModelModel.findById(tempRide)
       .select("-__v -updatedAt")
       .populate("user", "name email number")
       .populate("driver", "-documents -preferences -updateLogs -RechargeData")
       .lean()
       .exec();
+
+    if (!ride) {
+      ride = await NewRideModelModel.findById({
+        intercityRideModel: tempRide
+      })
+        .select("-__v -updatedAt")
+        .populate("user", "name email number")
+        .populate("driver", "-documents -preferences -updateLogs -RechargeData")
+        .lean()
+        .exec();
+    }
 
     if (!ride) {
       return res.status(404).json({ error: "Ride not found" });
@@ -789,11 +808,13 @@ app.get("/rider/:tempRide", async (req, res) => {
 
     return res.status(200).json({ success: true, data: ride, cached: false });
   } catch (error) {
-    console.error(`[ERROR] ${new Date().toISOString()} Internal server error:`, error);
+    console.error(
+      `[ERROR] ${new Date().toISOString()} Internal server error:`,
+      error
+    );
     return res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 app.post("/autocomplete", async (req, res) => {
   const { input } = req.body;
@@ -805,7 +826,7 @@ app.post("/autocomplete", async (req, res) => {
   }
 
   const cacheKey = `autocomplete:${input.trim().toLowerCase()}`;
-  const apiKey ="AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8"; // fallback for testing only
+  const apiKey = "AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8"; // fallback for testing only
 
   try {
     // 🔹 Try Redis cache first
@@ -833,10 +854,16 @@ app.post("/autocomplete", async (req, res) => {
       }
     );
 
-    if (response.data.status !== "OK" && response.data.status !== "ZERO_RESULTS") {
+    if (
+      response.data.status !== "OK" &&
+      response.data.status !== "ZERO_RESULTS"
+    ) {
       return res
         .status(400)
-        .json({ success: false, message: response.data.error_message || "Failed to fetch suggestions" });
+        .json({
+          success: false,
+          message: response.data.error_message || "Failed to fetch suggestions",
+        });
     }
 
     const suggestions = response.data.predictions.map((p) => ({
@@ -863,12 +890,12 @@ app.post("/autocomplete", async (req, res) => {
     );
     res
       .status(500)
-      .json({ success: false, message: "Failed to fetch autocomplete results" });
+      .json({
+        success: false,
+        message: "Failed to fetch autocomplete results",
+      });
   }
 });
-
-
-
 
 app.get("/rider-light/:tempRide", async (req, res) => {
   const { tempRide } = req.params;
@@ -885,7 +912,7 @@ app.get("/rider-light/:tempRide", async (req, res) => {
       .select("ride_status")
       .populate({
         path: "driver",
-        select: "location" // Only select driver's location field
+        select: "location", // Only select driver's location field
       })
       .lean()
       .exec();
@@ -901,8 +928,8 @@ app.get("/rider-light/:tempRide", async (req, res) => {
       data: {
         ride_status: ride.ride_status,
         driver_location: ride.driver?.location,
-        updated_at: ride.updatedAt // Optional: for client-side timestamp tracking
-      }
+        updated_at: ride.updatedAt, // Optional: for client-side timestamp tracking
+      },
     });
   } catch (error) {
     console.error(
@@ -952,7 +979,10 @@ const flushLocationsToDB = async () => {
         await RiderModel.findOneAndUpdate(
           { _id: riderId },
           {
-            location: { type: "Point", coordinates: [loc.longitude, loc.latitude] },
+            location: {
+              type: "Point",
+              coordinates: [loc.longitude, loc.latitude],
+            },
             lastUpdated: new Date(loc.timestamp),
           },
           { upsert: true, new: true }
@@ -970,7 +1000,6 @@ const flushLocationsToDB = async () => {
   }
 };
 
-
 setInterval(flushLocationsToDB, DB_FLUSH_INTERVAL);
 
 app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
@@ -978,36 +1007,57 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
     const riderId = req.user?.userId;
     if (!riderId) return Protect(req, res);
 
-    const { latitude, longitude, accuracy, speed, timestamp, platform } = req.body;
+    const { latitude, longitude, accuracy, speed, timestamp, platform } =
+      req.body;
     const now = timestamp || Date.now();
-    const newLoc = { latitude, longitude, timestamp: now, accuracy, speed, platform: platform || "unknown" };
+    const newLoc = {
+      latitude,
+      longitude,
+      timestamp: now,
+      accuracy,
+      speed,
+      platform: platform || "unknown",
+    };
 
     const lastLocStr = await pubClient.get(`rider:location:${riderId}`);
     if (lastLocStr) {
       const lastLoc = JSON.parse(lastLocStr);
-      const distance = haversineDistance(lastLoc.latitude, lastLoc.longitude, latitude, longitude);
+      const distance = haversineDistance(
+        lastLoc.latitude,
+        lastLoc.longitude,
+        latitude,
+        longitude
+      );
 
       if (distance <= MAX_DISTANCE_THRESHOLD) {
         // Ignore movements less than 50 meters
-        return res.status(200).json({ message: "Location change negligible. Ignored." });
+        return res
+          .status(200)
+          .json({ message: "Location change negligible. Ignored." });
       }
 
       // Only log when movement >= 50 meters
-      console.log(`📍 Rider ${riderId} moved ${distance.toFixed(2)}m → update karenge`);
+      console.log(
+        `📍 Rider ${riderId} moved ${distance.toFixed(2)}m → update karenge`
+      );
     }
 
     // 🔹 Update Redis cache
-    await pubClient.setEx(`rider:location:${riderId}`, GEO_UPDATE_TTL, JSON.stringify(newLoc));
+    await pubClient.setEx(
+      `rider:location:${riderId}`,
+      GEO_UPDATE_TTL,
+      JSON.stringify(newLoc)
+    );
     await pubClient.zAdd(GEO_BATCH_KEY, { score: now, value: riderId });
 
-    return res.status(200).json({ message: "Location cached successfully", data: newLoc });
+    return res
+      .status(200)
+      .json({ message: "Location cached successfully", data: newLoc });
   } catch (err) {
     console.error("❌ Error handling rider location:", err.message);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
-
-
 
 app.post("/webhook/receive-location", Protect, async (req, res) => {
   try {
@@ -1085,11 +1135,13 @@ app.get("/health", async (req, res) => {
   res.status(statusCode).json(health);
 });
 
-app.post('/Fetch-Current-Location', async (req, res) => {
+app.post("/Fetch-Current-Location", async (req, res) => {
   const { lat, lng } = req.body;
 
   if (!lat || !lng) {
-    return res.status(400).json({ success: false, message: 'Latitude and longitude required' });
+    return res
+      .status(400)
+      .json({ success: false, message: "Latitude and longitude required" });
   }
 
   const cacheKey = `geocode:${lat},${lng}`;
@@ -1104,33 +1156,44 @@ app.post('/Fetch-Current-Location', async (req, res) => {
           return res.status(200).json({
             success: true,
             data: JSON.parse(cachedData),
-            message: 'Location fetched from cache'
+            message: "Location fetched from cache",
           });
         }
       } catch (cacheError) {
-        console.warn(`[${new Date().toISOString()}] Cache read error:`, cacheError.message);
+        console.warn(
+          `[${new Date().toISOString()}] Cache read error:`,
+          cacheError.message
+        );
       }
     }
 
     const response = await axios.get(
       `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8`
     );
-    console.log("response", response.data)
+    console.log("response", response.data);
 
     if (!response.data.results?.[0]) {
-      return res.status(404).json({ success: false, message: 'No address found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "No address found" });
     }
 
     const addressComponents = response.data.results[0].address_components;
     const addressDetails = {
       completeAddress: response.data.results[0].formatted_address,
-      city: addressComponents.find(c => c.types.includes('locality'))?.long_name,
-      area: addressComponents.find(c => c.types.includes('sublocality_level_1'))?.long_name,
-      district: addressComponents.find(c => c.types.includes('administrative_area_level_3'))?.long_name,
-      postalCode: addressComponents.find(c => c.types.includes('postal_code'))?.long_name,
+      city: addressComponents.find((c) => c.types.includes("locality"))
+        ?.long_name,
+      area: addressComponents.find((c) =>
+        c.types.includes("sublocality_level_1")
+      )?.long_name,
+      district: addressComponents.find((c) =>
+        c.types.includes("administrative_area_level_3")
+      )?.long_name,
+      postalCode: addressComponents.find((c) => c.types.includes("postal_code"))
+        ?.long_name,
       landmark: null,
       lat: response.data.results[0].geometry.location.lat,
-      lng: response.data.results[0].geometry.location.lng
+      lng: response.data.results[0].geometry.location.lng,
     };
 
     const result = { location: { lat, lng }, address: addressDetails };
@@ -1140,14 +1203,24 @@ app.post('/Fetch-Current-Location', async (req, res) => {
       try {
         await pubClient.setEx(cacheKey, 3600, JSON.stringify(result));
       } catch (cacheError) {
-        console.warn(`[${new Date().toISOString()}] Cache write error:`, cacheError.message);
+        console.warn(
+          `[${new Date().toISOString()}] Cache write error:`,
+          cacheError.message
+        );
       }
     }
 
-    res.status(200).json({ success: true, data: result, message: 'Location fetched' });
+    res
+      .status(200)
+      .json({ success: true, data: result, message: "Location fetched" });
   } catch (err) {
-    console.error(`[${new Date().toISOString()}] Location fetch error:`, err.message);
-    res.status(500).json({ success: false, message: 'Failed to fetch location' });
+    console.error(
+      `[${new Date().toISOString()}] Location fetch error:`,
+      err.message
+    );
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch location" });
   }
 });
 
@@ -1208,9 +1281,6 @@ app.get("/share-ride-to-loveone/:rideId", (req, res) => {
   }
 });
 
-
-
-
 app.get("/geocode", async (req, res) => {
   const { address } = req.query;
 
@@ -1221,7 +1291,7 @@ app.get("/geocode", async (req, res) => {
   }
 
   const cacheKey = `geocode:${address.trim().toLowerCase()}`;
-  const apiKey ="AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8" // fallback for testing only
+  const apiKey = "AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8"; // fallback for testing only
 
   try {
     // 🔹 Try cache first
@@ -1273,10 +1343,7 @@ app.get("/geocode", async (req, res) => {
       message: "Geocode fetched successfully",
     });
   } catch (err) {
-    console.error(
-      `[${new Date().toISOString()}] Geocode error:`,
-      err.message
-    );
+    console.error(`[${new Date().toISOString()}] Geocode error:`, err.message);
     res.status(500).json({
       success: false,
       message: "Failed to fetch geocode data",
@@ -1502,4 +1569,4 @@ async function startServer() {
 //     startServer();
 // }
 
-    startServer();
+startServer();
