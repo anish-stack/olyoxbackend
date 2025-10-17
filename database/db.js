@@ -19,7 +19,7 @@ const connectDb = async () => {
                     {
                         ride_status: { $in: ["pending", "searching"] },
                         requested_at: { $lte: new Date(currentTime.getTime() - 1 * 60 * 1000) },
-                        isIntercityRide: { $ne: true },
+                        isIntercityRides: { $ne: true },
                     },
                     { _id: 1, user: 1, driver: 1, requested_at: 1 }
                 )
@@ -53,7 +53,7 @@ const connectDb = async () => {
                 // 2️⃣ Intercity rides auto-cancel (pickup time passed AND no driver)
                 const intercityRides = await RideBooking.find(
                     {
-                        isIntercityRide: true,
+                        isIntercityRides: true,
                         ride_status: { $in: ["pending", "searching"] },
                         IntercityPickupTime: { $lte: currentTime },
                         driver: null
