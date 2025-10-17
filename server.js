@@ -932,8 +932,15 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 // 🔁 Async batch flush to DB
 const flushLocationsToDB = async () => {
   try {
+    if (!pubClient) {
+      console.error("❌ Redis client not initialized!");
+      return;
+    }
+
+    if (!pubClient.isOpen) await pubClient.connect();
+
     const ridersData = await pubClient.zRangeWithScores(GEO_BATCH_KEY, 0, -1);
-    if (ridersData.length === 0) return;
+    if (!ridersData || ridersData.length === 0) return;
 
     const updatePromises = ridersData.map(async ({ value: riderId }) => {
       try {
@@ -958,11 +965,11 @@ const flushLocationsToDB = async () => {
     });
 
     await Promise.all(updatePromises);
-
   } catch (err) {
     console.error("❌ Redis batch fetch error:", err.message);
   }
 };
+
 
 setInterval(flushLocationsToDB, DB_FLUSH_INTERVAL);
 
@@ -1476,21 +1483,23 @@ async function startServer() {
 }
 
 // Cluster logic
-if (cluster.isMaster) {
-    console.log(`[${new Date().toISOString()}] 🛠 Master ${process.pid} is running`);
-    console.log(`[${new Date().toISOString()}] Spawning ${numCPUs} workers...`);
+// if (cluster.isMaster) {
+//     console.log(`[${new Date().toISOString()}] 🛠 Master ${process.pid} is running`);
+//     console.log(`[${new Date().toISOString()}] Spawning ${numCPUs} workers...`);
 
-    // Fork workers
-    for (let i = 0; i < numCPUs; i++) {
-        cluster.fork();
-    }
+//     // Fork workers
+//     for (let i = 0; i < numCPUs; i++) {
+//         cluster.fork();
+//     }
 
-    // Restart worker if it dies
-    cluster.on("exit", (worker, code, signal) => {
-        console.log(`[${new Date().toISOString()}] ⚠️ Worker ${worker.process.pid} died. Restarting...`);
-        cluster.fork();
-    });
-} else {
-    // Workers run the server
+//     // Restart worker if it dies
+//     cluster.on("exit", (worker, code, signal) => {
+//         console.log(`[${new Date().toISOString()}] ⚠️ Worker ${worker.process.pid} died. Restarting...`);
+//         cluster.fork();
+//     });
+// } else {
+//     // Workers run the server
+//     startServer();
+// }
+
     startServer();
-}

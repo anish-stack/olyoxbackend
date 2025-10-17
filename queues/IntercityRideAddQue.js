@@ -256,6 +256,7 @@ AddRideInModelOfDb.process(1, async (job) => {
         // Map Intercity ride to RideRequestNew schema
         const newRide = new RideRequestNew({
             user: rideData.passengerId,
+            intercityRideModel:id,
             vehicle_type: rideData.vehicle?.type || 'unknown',
             pickup_location: {
                 type: 'Point',

@@ -290,6 +290,10 @@ const RideRequestSchema = new Schema({
         type: Boolean,
         default: true
     },
+    intercityRideModel:{
+          type: mongoose.Schema.Types.ObjectId,
+            ref: 'IntercityRide'
+    },
     rejected_by_drivers: [{
         driver: {
             type: mongoose.Schema.Types.ObjectId,
@@ -359,11 +363,11 @@ const RideRequestSchema = new Schema({
         },
         distance_from_pickup_km: {
             type: String, // Distance in km (formatted)
-            required: true
+            required: false
         },
         notification_time: {
             type: Date,
-            required: true,
+            required: false,
             default: Date.now
         },
         notification_count: {
@@ -429,7 +433,7 @@ const RideRequestSchema = new Schema({
 
     isIntercityRides: {
         type: Boolean,
-        default: true
+        default: false
     },
 
     IntercityPickupTime: {
