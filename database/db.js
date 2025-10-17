@@ -34,7 +34,7 @@ const connectDb = async () => {
                             $set: {
                                 ride_status: "cancelled",
                                 cancelled_at: new Date(),
-                                cancellation_reason: "Auto-cancelled due to inactivity",
+                                cancellation_reason: "Auto-cancelled due to inactivity Normal happen ",
                                 cancelled_by: "system",
                             },
                         }
