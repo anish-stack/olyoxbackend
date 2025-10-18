@@ -924,7 +924,7 @@ app.get("/rider-light/:tempRide", async (req, res) => {
     return res.status(200).json({
       success: true,
       data: {
-        payment_status,
+        payment_status: ride.payment_status,
         ride_status: ride.ride_status,
         driver_location: ride.driver?.location,
         updated_at: ride.updatedAt, // Optional: for client-side timestamp tracking
