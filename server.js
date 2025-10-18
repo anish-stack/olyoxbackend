@@ -782,21 +782,19 @@ app.get("/rider/:tempRide", async (req, res) => {
 
   try {
     let ride = await NewRideModelModel.findById(tempRide)
-      .select("-__v -updatedAt")
+      .select("-__v -updatedAt -notified_riders")
       .populate("user", "name email number")
       .populate("driver", "-documents -preferences -updateLogs -RechargeData")
       .lean()
       .exec();
 
     if (!ride) {
-      ride = await NewRideModelModel.findById({
-        intercityRideModel: tempRide
-      })
-        .select("-__v -updatedAt")
+      console.log(`ℹ️ Ride not found by _id, checking intercityRideModel for ${tempRide}...`);
+      ride = await NewRideModelModel.findOne({ intercityRideModel: tempRide })
+        .select("-__v -updatedAt -notified_riders")
         .populate("user", "name email number")
-        .populate("driver", "-documents -preferences -updateLogs -RechargeData")
-        .lean()
-        .exec();
+        .populate("driver", "-documents -preferences -updateLogs -RechargeData -activityLog")
+        .lean();
     }
 
     if (!ride) {
@@ -909,7 +907,7 @@ app.get("/rider-light/:tempRide", async (req, res) => {
     console.log("[STEP 3] Fetching lightweight ride data from MongoDB...");
 
     const ride = await NewRideModelModel.findById(tempRide)
-      .select("ride_status")
+      .select("ride_status payment_status")
       .populate({
         path: "driver",
         select: "location", // Only select driver's location field
@@ -926,6 +924,7 @@ app.get("/rider-light/:tempRide", async (req, res) => {
     return res.status(200).json({
       success: true,
       data: {
+        payment_status,
         ride_status: ride.ride_status,
         driver_location: ride.driver?.location,
         updated_at: ride.updatedAt, // Optional: for client-side timestamp tracking
