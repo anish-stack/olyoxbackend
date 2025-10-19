@@ -2574,21 +2574,13 @@ const handleIntercityRide = async (ride, driver, io, res) => {
 
         const bookingId = rideId.slice(-8).toUpperCase();
 
-        // Helper function to update driver's intercity ride list safely
-        const updateDriverIntercityRides = async (extraFields = {}) => {
-            await RiderModel.findByIdAndUpdate(
-                driverId,
-                {
-                    $addToSet: { on_intercity_ride_id: new mongoose.Types.ObjectId(rideId) }, // Prevent duplicates
-                    ...extraFields,
-                },
-                { new: true }
-            );
-        };
-
-        // Future intercity ride (> 1 hour)
         if (pickupTime > oneHourFromNow) {
-            await updateDriverIntercityRides();
+            // Future intercity ride (> 1 hour)
+            await RiderModel.findByIdAndUpdate(driverId, {
+                $set: {
+                    on_intercity_ride_id: new mongoose.Types.ObjectId(rideId)
+                }
+            });
 
             const message = `🚗 *Driver Assigned!*\n\nHi ${ride.user.name},\n\nYour intercity ride is confirmed.\n\n📋 *Booking ID:* ${bookingId}\n👨‍💼 *Driver:* ${driver.name}\n📞 *Driver Contact:* ${driver.phone}\n🚗 *Vehicle:* ${ride.vehicle_type || "Not specified"}\n📅 *Departure:* ${formatDateTime(pickupTime)}\n\n🔐 *Your OTP:* ${ride.ride_otp || "N/A"}\n\n📞 Driver will contact you shortly.\n🙏 Thank you for choosing *Olyox*!`;
 
@@ -2607,15 +2599,15 @@ const handleIntercityRide = async (ride, driver, io, res) => {
                 ride: { _id: rideId, pickup: ride.pickup_address, drop: ride.drop_address },
                 is_intercity: true,
             });
-        }
 
-        // Immediate intercity ride (<= 1 hour)
-        else {
-            await updateDriverIntercityRides({
+        } else {
+            // Immediate intercity ride (<= 1 hour)
+            await RiderModel.findByIdAndUpdate(driverId, {
                 $set: {
+                    on_intercity_ride_id: new mongoose.Types.ObjectId(rideId),
                     on_ride_id: new mongoose.Types.ObjectId(rideId),
                     isAvailable: false,
-                },
+                }
             });
 
             const message = `🚗 *Driver On The Way!*\n\nHi ${ride.user.name},\n\nYour intercity ride is starting soon.\n\n📋 *Booking ID:* ${bookingId}\n👨‍💼 *Driver:* ${driver.name}\n📞 *Driver Contact:* ${driver.phone}\n🚗 *Vehicle:* ${ride.vehicle_type || "Not specified"}\n📅 *Departure:* ${formatDateTime(pickupTime)}\n\n🔐 *Your OTP:* ${ride.ride_otp || "N/A"}\n\n📞 Driver will contact you shortly.\n🙏 Thank you for choosing *Olyox*!`;
@@ -2634,13 +2626,10 @@ const handleIntercityRide = async (ride, driver, io, res) => {
                 is_intercity: true,
             });
         }
+
     } catch (error) {
-        console.error("❌ Intercity ride handling error:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Error handling intercity ride.",
-            error: error.message,
-        });
+        console.error("Intercity ride handling error:", error);
+        throw error;
     }
 };
 
@@ -3767,7 +3756,7 @@ class RetryableError extends Error {
 
 exports.cancelRideByPoll = async (req, res) => {
     const session = await mongoose.startSession();
-    const io = req.app.get("io");
+    const io = req.app.get('io');
 
     try {
         const { ride, cancelBy, reason_id, reason, intercity } = req.body;
@@ -3781,14 +3770,12 @@ exports.cancelRideByPoll = async (req, res) => {
         }
 
         await session.withTransaction(async () => {
-            // 🔹 Try finding ride normally
             let rideData = await RideBooking.findById(ride)
                 .populate("driver user")
                 .session(session);
 
-            const isIntercityRide = !!intercity;
+            let isIntercityRide = !!intercity; // use the intercity flag from request
 
-            // 🔹 Fallback: if not found, try by intercityRideModel
             if (!rideData && isIntercityRide) {
                 console.log("ℹ️ Ride not found by _id, trying RideBooking by intercityRideModel...");
                 rideData = await RideBooking.findOne({ intercityRideModel: ride })
@@ -3801,21 +3788,37 @@ exports.cancelRideByPoll = async (req, res) => {
                 throw new Error("Ride not found");
             }
 
-            // ✅ Only check ride status if user cancels
+            // ✅ Only check statuses if cancelled by user
             if (cancelBy !== "driver") {
-                const blockedStatuses = ["cancelled", "completed", "driver_arrived", "in_progress"];
+                const blockedStatuses = [
+                    "cancelled",
+                    "completed",
+                    "driver_arrived",
+                    "in_progress",
+                ];
                 if (blockedStatuses.includes(rideData.ride_status)) {
-                    const msgMap = {
-                        cancelled: "Ride has already been cancelled.",
-                        completed: "Ride has already been completed.",
-                        driver_arrived: "Driver has already arrived. Ride cannot be cancelled now.",
-                        in_progress: "Ride is already in progress. Cancellation not allowed.",
-                    };
-                    throw new Error(msgMap[rideData.ride_status] || "Ride cannot be cancelled at this stage.");
+                    let msg = "";
+                    switch (rideData.ride_status) {
+                        case "cancelled":
+                            msg = "Ride has already been cancelled.";
+                            break;
+                        case "completed":
+                            msg = "Ride has already been completed.";
+                            break;
+                        case "driver_arrived":
+                            msg = "Driver has already arrived. Ride cannot be cancelled now.";
+                            break;
+                        case "in_progress":
+                            msg = "Ride is already in progress. Cancellation not allowed.";
+                            break;
+                        default:
+                            msg = "Ride cannot be cancelled at this stage.";
+                    }
+                    throw new Error(msg);
                 }
             }
 
-            // ✅ Cancel ride
+            // ✅ Cancel the ride
             rideData.ride_status = "cancelled";
             rideData.payment_status = "cancelled";
             rideData.cancelled_by = cancelBy;
@@ -3827,42 +3830,37 @@ exports.cancelRideByPoll = async (req, res) => {
             // 🔹 Free driver if assigned
             if (rideData.driver) {
                 const driver = await RiderModel.findById(rideData.driver._id).session(session);
-
                 if (driver) {
-                    const rideIdStr = rideData._id.toString();
-
-                    // Remove ride from intercity ride array if present
-                    if (Array.isArray(driver.on_intercity_ride_id) && driver.on_intercity_ride_id.length > 0) {
-                        driver.on_intercity_ride_id = driver.on_intercity_ride_id.filter(
-                            (rId) => rId.toString() !== rideIdStr
-                        );
-                        console.log(`🚗 Removed ${rideIdStr} from on_intercity_ride_id for driver ${driver._id}`);
-                    }
-
-                    // Clear on_ride_id if matches
-                    if (driver.on_ride_id?.toString() === rideIdStr) {
+                    // Clear driver references only if they match the ride being cancelled
+                    if (driver.on_ride_id?.toString() === rideData._id.toString()) {
                         driver.on_ride_id = null;
                         console.log(`🚗 Cleared on_ride_id for driver ${driver._id}`);
                     }
 
+                    if (driver.on_intercity_ride_id?.toString() === rideData._id.toString()) {
+                        driver.on_intercity_ride_id = null;
+                        console.log(`🚗 Cleared on_intercity_ride_id for driver ${driver._id}`);
+                    }
+
                     driver.isAvailable = true;
                     await driver.save({ session });
+                }
 
-                    // Notify driver (if user cancelled)
-                    if (cancelBy === "user" && driver?.fcmToken) {
-                        await sendNotification.sendNotification(
-                            driver.fcmToken,
-                            "Ride Cancelled by User",
-                            "The user has cancelled the ride request.",
-                            {
-                                event: "RIDE_CANCELLED",
-                                rideId: rideData._id,
-                                message: "The user has cancelled the ride request.",
-                                screen: "DriverHome",
-                            },
-                            "ride_cancel_channel"
-                        );
-                    }
+
+                // Notify driver if user cancelled
+                if (cancelBy === "user" && driver?.fcmToken) {
+                    await sendNotification.sendNotification(
+                        driver.fcmToken,
+                        "Ride Cancelled by User",
+                        "The user has cancelled the ride request.",
+                        {
+                            event: "RIDE_CANCELLED",
+                            rideId: rideData._id,
+                            message: "The user has cancelled the ride request.",
+                            screen: "DriverHome",
+                        },
+                        "ride_cancel_channel"
+                    );
                 }
             }
 
@@ -3878,12 +3876,12 @@ exports.cancelRideByPoll = async (req, res) => {
 
             await rideData.save({ session });
 
-            // 🔹 Emit event to driver to clear ride from frontend
-            if (io && rideData?.driver?._id) {
-                io.to(`driver:${rideData.driver._id}`).emit("clear_ride_request", { rideId: rideData._id });
+            // Emit clear ride request event
+            if (io) {
+                io.to(`driver:${rideData?.driver?._id}`).emit('clear_ride_request', { rideId: rideData._id });
             }
 
-            // 🔹 Notify user (if driver cancelled)
+            // Notify user if driver cancelled
             if (cancelBy === "driver" && rideData.user?.fcmToken) {
                 await sendNotification.sendNotification(
                     rideData.user.fcmToken,
