@@ -3,11 +3,11 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
 const UpdateLogSchema = new Schema({
-    field: { type: String, required: true }, 
+    field: { type: String, required: true },
     oldValue: { type: Schema.Types.Mixed },
     newValue: { type: Schema.Types.Mixed },
     changedAt: { type: Date, default: Date.now },
-    changedBy: { type: String, default: 'system' } 
+    changedBy: { type: String, default: 'system' }
 }, { _id: false });
 
 const PreferenceHistorySchema = new Schema({
@@ -245,10 +245,10 @@ const RiderSchema = new Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'TempRideDetails'
     },
-    on_intercity_ride_id: {
+    on_intercity_ride_id: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'RideRequestNew'
-    },
+    }],
     YourQrCodeToMakeOnline: {
         type: String,
         default: null
