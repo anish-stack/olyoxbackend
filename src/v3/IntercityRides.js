@@ -439,12 +439,20 @@ exports.bookIntercityRide = async (req, res) => {
         message += `🙏 Thank you for choosing Olyox!\n\n`;
         message += `Safe travels! 🛣️✨`;
 
-
         if (user) {
-            user.IntercityRide = newRide._id;
+            // check if IntercityRide is already an array
+            if (!Array.isArray(user.IntercityRide)) {
+                // agar single ID hai ya null hai, toh array me convert karo
+                user.IntercityRide = user.IntercityRide ? [user.IntercityRide] : [];
+            }
+
+            // new ride push karo
+            user.IntercityRide.push(newRide._id);
+
             await user.save();
-            console.log("Passenger updated");
+            console.log("Passenger updated with new ride ID");
         }
+
 
 
         // Send WhatsApp notification
@@ -574,7 +582,6 @@ exports.cancelRide = async (req, res) => {
             });
         }
 
-        // Validate rideId format
         if (!mongoose.Types.ObjectId.isValid(rideId)) {
             return res.status(400).json({
                 success: false,
@@ -603,18 +610,34 @@ exports.cancelRide = async (req, res) => {
         // Update ride status
         ride.status = "cancelled";
         ride.cancellation = {
-            by: cancelledBy, // "driver" or "user"
+            by: cancelledBy,
             reason: reason || "No reason provided",
             at: new Date(),
         };
 
+        // ✅ Remove cancelled ride from user's IntercityRide array
         if (ride.passengerId) {
-            ride.passengerId.IntercityRide = null
-            await ride.passengerId.save()
+            const passenger = ride.passengerId;
+
+            if (Array.isArray(passenger.IntercityRide)) {
+                passenger.IntercityRide = passenger.IntercityRide.filter(
+                    (id) => id.toString() !== ride._id.toString()
+                );
+            } else if (
+                passenger.IntercityRide &&
+                passenger.IntercityRide.toString() === ride._id.toString()
+            ) {
+                // fallback in case it was a single ID (old data)
+                passenger.IntercityRide = [];
+            }
+
+            await passenger.save();
+            console.log("🧾 Passenger updated: ride removed from IntercityRide array");
         }
+
         await ride.save();
 
-        // Prepare WhatsApp messages
+        // ✅ Send WhatsApp notifications
         if (cancelledBy === "driver" && ride.passengerId?.phone) {
             const msg = `🚖 Hello ${ride.passengerId.name || "Passenger"},\n\nWe’re sorry! Your intercity ride has been cancelled by the driver.\n\n❌ Reason: ${reason || "No reason given"}\n\n👉 Please open the app to book another ride at your convenience.\n\nThank you for choosing us 🙏`;
             await SendWhatsAppMessageNormal(ride.passengerId.phone, msg);
@@ -629,7 +652,7 @@ exports.cancelRide = async (req, res) => {
             ride,
         });
     } catch (error) {
-        console.error("Cancel ride error:", error);
+        console.error("❌ Cancel ride error:", error);
         return res.status(500).json({
             success: false,
             message: "Something went wrong while cancelling the ride. Please try again later.",
@@ -637,6 +660,7 @@ exports.cancelRide = async (req, res) => {
         });
     }
 };
+
 
 // Get booking details by ID
 exports.getBookingDetailsById = async (req, res) => {
@@ -1000,7 +1024,6 @@ exports.getDriverRides = async (req, res) => {
 exports.completeRide = async (req, res) => {
     try {
         const { driverId, notes, rideId } = req.body;
-        console.log("➡️ Complete Ride Request:", req.body);
 
         // ✅ Validate ride ID
         if (!mongoose.Types.ObjectId.isValid(rideId)) {

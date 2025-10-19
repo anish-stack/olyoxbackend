@@ -3,7 +3,9 @@ const mongoose = require('mongoose');
 const userSchema = new mongoose.Schema({
     number: { type: String, index: true, unique: true },
     currentRide: { type: mongoose.Schema.Types.ObjectId, ref: 'RideRequestNew', default: null },
-    IntercityRide: { type: mongoose.Schema.Types.ObjectId, ref: 'IntercityRide', default: null },
+    IntercityRide: [
+        { type: mongoose.Schema.Types.ObjectId, ref: 'IntercityRide', default: null }
+    ],
     otp: { type: String },
     platform: { type: String },
     otpExpiresAt: { type: Date },
