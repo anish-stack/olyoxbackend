@@ -669,6 +669,64 @@ exports.getAllRiders = async (req, res) => {
   }
 };
 
+exports.getAllRidersFcmToken = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+    const search = req.query.search?.trim();
+
+    // Base filter: only riders with valid FCM tokens
+    const baseFilter = {
+      fcmToken: { $exists: true, $ne: null, $ne: "" },
+    };
+
+    // Add search filter if search term provided
+    let searchFilter = {};
+    if (search) {
+      const regex = new RegExp(search, "i"); // case-insensitive
+      searchFilter = {
+        $or: [
+          // Only match _id if it's a valid ObjectId
+          search.match(/^[0-9a-fA-F]{24}$/) ? { _id: search } : null,
+          { name: regex },
+          { phone: regex },
+        ].filter(Boolean),
+      };
+    }
+
+    // Combine both filters
+    const filter = { ...baseFilter, ...searchFilter };
+
+    const [riders, total] = await Promise.all([
+      Rider.find(filter)
+        .skip(skip)
+        .limit(limit)
+        .sort({ createdAt: -1 })
+        .select("name phone _id fcmToken createdAt")
+        .lean(),
+      Rider.countDocuments(filter),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      message: "Riders with valid FCM tokens fetched successfully",
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      data: riders,
+    });
+  } catch (error) {
+    console.error("Error fetching riders:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
 
 exports.riderDocumentsVerify = async (req, res) => {
   try {
