@@ -484,6 +484,56 @@ exports.getAllUser = async (req, res) => {
   }
 };
 
+exports.getAllUserFcm = async (req, res) => {
+  try {
+    // Extract query params (with defaults)
+    let { page = 1, limit = 10, search = "" } = req.query;
+
+    page = parseInt(page);
+    limit = parseInt(limit);
+
+    // Build search filter (case-insensitive, only if search is provided)
+    const filter = search
+      ? {
+          $or: [
+            { name: new RegExp(search, "i") },
+            { email: new RegExp(search, "i") },
+            { number: new RegExp(search, "i") },
+            { platform: new RegExp(search, "i") },
+          ],
+        }
+      : {};
+
+    // Count total documents matching filter
+    const totalUsers = await User.countDocuments(filter);
+
+    // Paginate results
+    const users = await User.find(filter)
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .select('fcmToken number name _id')
+      .sort({ createdAt: -1 }) // latest first
+      .lean() // returns plain JS objects, much faster than Mongoose docs
+      .exec();
+
+    return res.status(200).json({
+      success: true,
+      message: "Users fetched successfully",
+      currentPage: page,
+      totalPages: Math.ceil(totalUsers / limit),
+      totalUsers,
+      data: users,
+    });
+  } catch (error) {
+    console.error("Internal server error", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
 exports.updateProfileDetails = async (req, res) => {
   try {
     const file = req.file || {};

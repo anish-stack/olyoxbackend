@@ -1,5 +1,5 @@
 const express = require('express');
-const { createUser, verify_user, resendOtp,fine_me, login, findAllOrders, updateProfileDetails, getAllUser, updateBlockStatus, deleteMyAccount, updateFcmAndDetails } = require('../../user_controller/user.register.controller');
+const { createUser, verify_user, resendOtp,fine_me, login, findAllOrders, updateProfileDetails, getAllUser, updateBlockStatus, deleteMyAccount, updateFcmAndDetails, getAllUserFcm } = require('../../user_controller/user.register.controller');
 
 const Protect = require('../../middleware/Auth');
 const upload = require('../../middleware/multer');
@@ -19,6 +19,8 @@ users.post('/update-settings-user',Protect,updateFcmAndDetails)
 // router.get('/find-Orders-details', Protect, findAllOrders);
 
 users.get('/get_all_user',getAllUser)
+users.get('/get_all_user_fcm',getAllUserFcm)
+
 users.put('/update_user_block/:id',updateBlockStatus)
 
 
