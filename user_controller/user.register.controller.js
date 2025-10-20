@@ -487,13 +487,18 @@ exports.getAllUser = async (req, res) => {
 exports.getAllUserFcm = async (req, res) => {
   try {
     // Extract query params (with defaults)
-    let { page = 1, limit = 10, search = "" } = req.query;
+    let { page = 1, limit = 30, search = "" } = req.query;
 
     page = parseInt(page);
     limit = parseInt(limit);
 
-    // Build search filter (case-insensitive, only if search is provided)
-    const filter = search
+    // Base filter: only users with valid fcmToken
+    const baseFilter = {
+      fcmToken: { $exists: true, $ne: null, $ne: "" },
+    };
+
+    // Add search filter if search term is provided
+    const searchFilter = search
       ? {
           $or: [
             { name: new RegExp(search, "i") },
@@ -504,6 +509,9 @@ exports.getAllUserFcm = async (req, res) => {
         }
       : {};
 
+    // Combine filters
+    const filter = { ...baseFilter, ...searchFilter };
+
     // Count total documents matching filter
     const totalUsers = await User.countDocuments(filter);
 
@@ -511,14 +519,14 @@ exports.getAllUserFcm = async (req, res) => {
     const users = await User.find(filter)
       .skip((page - 1) * limit)
       .limit(limit)
-      .select('fcmToken number name _id')
+      .select("fcmToken number name _id")
       .sort({ createdAt: -1 }) // latest first
-      .lean() // returns plain JS objects, much faster than Mongoose docs
+      .lean()
       .exec();
 
     return res.status(200).json({
       success: true,
-      message: "Users fetched successfully",
+      message: "Users with valid FCM tokens fetched successfully",
       currentPage: page,
       totalPages: Math.ceil(totalUsers / limit),
       totalUsers,
@@ -533,6 +541,7 @@ exports.getAllUserFcm = async (req, res) => {
     });
   }
 };
+
 
 exports.updateProfileDetails = async (req, res) => {
   try {
