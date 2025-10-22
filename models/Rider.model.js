@@ -3,11 +3,11 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
 const UpdateLogSchema = new Schema({
-    field: { type: String, required: true }, 
+    field: { type: String, required: true },
     oldValue: { type: Schema.Types.Mixed },
     newValue: { type: Schema.Types.Mixed },
     changedAt: { type: Date, default: Date.now },
-    changedBy: { type: String, default: 'system' } 
+    changedBy: { type: String, default: 'system' }
 }, { _id: false });
 
 const PreferenceHistorySchema = new Schema({
@@ -245,7 +245,7 @@ const RiderSchema = new Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'TempRideDetails'
     },
-    on_intercity_ride_ids: {
+    on_intercity_ride_id: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'RideRequestNew'
     },
@@ -318,7 +318,13 @@ const RiderSchema = new Schema({
         }
     ],
 
-
+    reserve_intercity_rides: [
+        {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'RideRequestNew'
+        }
+    ],
+    
     preferences: {
         OlyoxPriority: {
             type: PreferenceSchema,
@@ -385,6 +391,40 @@ const RiderSchema = new Schema({
                 disabledCount: 1
             })
         },
+        FoodDelivery: {
+        type: PreferenceSchema,
+        default: () => ({
+            enabled: false,
+            lastChanged: new Date(),
+            history: [{
+                enabled: false,
+                changedAt: new Date(),
+                changedBy: 'system',
+                reason: 'Initial setup'
+            }],
+            totalEnabledDuration: 0,
+            enabledCount: 0,
+            disabledCount: 1
+        })
+    },
+
+    ParcelDelivery: {
+        type: PreferenceSchema,
+        default: () => ({
+            enabled: false,
+            lastChanged: new Date(),
+            history: [{
+                enabled: false,
+                changedAt: new Date(),
+                changedBy: 'system',
+                reason: 'Initial setup'
+            }],
+            totalEnabledDuration: 0,
+            enabledCount: 0,
+            disabledCount: 1
+        })
+    },
+
         // Additional preference tracking
         preferencesSummary: {
             totalPreferenceChanges: {

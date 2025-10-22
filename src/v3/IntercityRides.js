@@ -1165,103 +1165,115 @@ exports.startRide = async (req, res) => {
 };
 
 
-// Get available rides for drivers to accept
 exports.getAvailableRides = async (req, res) => {
     try {
         const { riderId } = req.query;
         const now = new Date();
 
-        const invalidStatusesAt = [
-            'driver_assigned',
-            'driver_reached',
-            'otp_verify',
-            'ride_in_progress',
-            'completed',
-            'cancelled',
-            'delayed',
-        ];
-
-        // Fetch rides (include all statuses for now, filter manually later)
-        const rides = await IntercityRide.find();
-
-        if (!rides.length) {
-            return res.status(404).json({ success: false, message: "No rides available" });
+        if (!riderId) {
+            return res.status(400).json({ success: false, message: "riderId is required" });
         }
 
-        let matchedRides = [];
 
+        // ride statuses
+        const OnlyThoseStatuses = [
+            "pending",
+            "searching"
+        ];
+
+        // Fetch only intercity rides created in the last 2 days
+        const rides = await RideBooking.find({
+            isIntercityRides: true,
+         
+            ride_status: { $in: OnlyThoseStatuses }
+        }).sort({ createdAt: -1 })
+
+
+        .select('-notified_riders'); // exclude unnecessary field
+            console.log(`🔍 Found ${rides.length} intercity rides for processing`);
+        if (!rides.length) {
+            return res.status(404).json({ success: false, message: "No intercity rides available" });
+        }
+
+        // ✅ Fetch driver details once (not for every ride)
+        const driverData = await driver.findOne({
+            _id: riderId,
+            'preferences.OlyoxIntercity.enabled': true,
+        }).select('RechargeData location rideVehicleInfo preferences');
+
+        if (!driverData ) {
+            return res.status(404).json({ success: false, message: "Driver not found or not eligible" });
+        }
+
+        // ✅ Check recharge validity
+        const expireDate = driverData?.RechargeData?.expireData;
+        if (!expireDate || new Date(expireDate) < now) {
+            return res.status(403).json({ success: false, message: "Driver recharge expired" });
+        }
+
+        const driverCoords =  driverData.location?.coordinates;
+        if (!driverCoords || driverCoords.length !== 2) {
+            return res.status(400).json({ success: false, message: "Driver location not available" });
+        }
+
+        const matchedRides = [];
+
+        // ✅ Filter rides efficiently in-memory
         for (const ride of rides) {
-            const originLat = ride.route.origin.location.coordinates[1];
-            const originLng = ride.route.origin.location.coordinates[0];
-            const vehicleType = ride.vehicle.type;
-            const rejectedByDrivers = ride.rejectedByDrivers || [];
+            const pickupCoords = ride.pickup_location?.coordinates;
+            if (!pickupCoords || pickupCoords.length !== 2) continue;
 
-            // ✅ Case 1: If this ride is already assigned to the same driver → always include
-            if (ride.driverId && ride.driverId.toString() === riderId) {
+            const rejectedByDrivers = ride.rejected_by_drivers?.map(r => r.driver.toString()) || [];
+
+            // Skip rejected rides
+            if (rejectedByDrivers.includes(riderId)) continue;
+
+            // If already assigned to this driver
+            if (ride.driver && ride.driver.toString() === riderId) {
                 matchedRides.push(ride);
-                continue; // skip further checks
-            }
-
-            // ✅ Case 2: If ride is in invalid status (not available for new drivers) → skip
-            if (invalidStatusesAt.includes(ride.status)) {
                 continue;
             }
 
-            // Fetch drivers who turned on OlyoxIntercity
-            const drivers = await driver.find({
-                'preferences.OlyoxIntercity.enabled': true,
-                _id: { $nin: rejectedByDrivers },
-            });
+            // ✅ Distance filter
+            const distance = calculateDistance(
+                pickupCoords[1], pickupCoords[0],
+                driverCoords[1], driverCoords[0]
+            );
 
-            // After recharge check
-            const driversAfterRecharge = drivers.filter(d => {
-                const expireDate = d?.RechargeData?.expireData;
-                return expireDate && new Date(expireDate) >= now;
-            });
+            if (distance > (ride.search_radius || 5)) continue;
 
-            // After distance & vehicle check
-            let validDrivers = [];
-            for (const d of driversAfterRecharge) {
-                const driverLat = d.location?.coordinates[1];
-                const driverLng = d.location?.coordinates[0];
-                if (!driverLat || !driverLng) continue;
+            // ✅ Vehicle type check
+            const rideVehicleType = ride.vehicle_type?.toUpperCase();
+            const driverVehicleType =  driverData.rideVehicleInfo?.vehicleType?.toUpperCase();
 
-                const distance = calculateDistance(originLat, originLng, driverLat, driverLng);
-                if (distance > 5) continue;
+            let vehicleOk = false;
 
-                // Vehicle matching
-                const driverVehicle = d.rideVehicleInfo?.vehicleType;
-                let vehicleOk = false;
-
-                if (driverVehicle === vehicleType) {
-                    vehicleOk = true;
-                } else if (
-                    vehicleType === 'SEDAN' &&
-                    ['SUV', 'XL', 'SUV/XL', 'MINI'].includes(driverVehicle) &&
-                    (d.preferences?.OlyoxAcceptSedanRides || d.preferences?.OlyoxIntercity)
-                ) {
-                    vehicleOk = true;
-                } else if (
-                    vehicleType === 'MINI' &&
-                    ['SEDAN', 'SUV', 'XL', 'SUV/XL'].includes(driverVehicle) &&
-                    (d.preferences?.OlyoxAcceptMiniRides || d.preferences?.OlyoxIntercity)
-                ) {
-                    vehicleOk = true;
-                }
-
-                if (!vehicleOk) continue;
-
-                validDrivers.push(d);
+            if (driverVehicleType === rideVehicleType) {
+                vehicleOk = true;
+            } else if (
+                rideVehicleType === 'SEDAN' &&
+                ['SUV', 'XL', 'SUV/XL', 'MINI'].includes(driverVehicleType) &&
+                ( driverData.preferences?.OlyoxAcceptSedanRides ||  driverData.preferences?.OlyoxIntercity)
+            ) {
+                vehicleOk = true;
+            } else if (
+                rideVehicleType === 'MINI' &&
+                ['SEDAN', 'SUV', 'XL', 'SUV/XL'].includes(driverVehicleType) &&
+                ( driverData.preferences?.OlyoxAcceptMiniRides ||  driverData.preferences?.OlyoxIntercity)
+            ) {
+                vehicleOk = true;
             }
 
-            // ✅ If riderId is in valid drivers → push this ride
-            if (validDrivers.some(d => d._id.toString() === riderId)) {
-                matchedRides.push(ride);
-            }
+            if (!vehicleOk) continue;
+
+            matchedRides.push(ride);
         }
 
         if (!matchedRides.length) {
-            return res.status(404).json({ success: false, message: "No valid rides for this rider" });
+            return res.status(404).json({
+                success: false,
+                message: "No valid rides found for this driver"
+            });
         }
 
         return res.status(200).json({
@@ -1270,8 +1282,11 @@ exports.getAvailableRides = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error in getAvailableRides:', error);
-        res.status(500).json({ success: false, message: "Internal server error" });
+        console.error("Error in getAvailableRides:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+        });
     }
 };
 
@@ -1431,7 +1446,6 @@ exports.RejectRide = async (req, res) => {
 
 exports.IntercityRideAll = async (req, res) => {
     const startTime = Date.now(); // Start time tracking
-    console.log("Start time", startTime);
     try {
         const {
             originCity,

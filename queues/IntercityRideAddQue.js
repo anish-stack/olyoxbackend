@@ -256,7 +256,7 @@ AddRideInModelOfDb.process(1, async (job) => {
         // Map Intercity ride to RideRequestNew schema
         const newRide = new RideRequestNew({
             user: rideData.passengerId,
-            intercityRideModel:id,
+            intercityRideModel: id,
             vehicle_type: rideData.vehicle?.type || 'unknown',
             pickup_location: {
                 type: 'Point',
@@ -398,8 +398,13 @@ DriverSearchQueue.process(2, async (job) => {
                     },
                     $maxDistance: searchRadius * 1000
                 }
-            }
+            },
+            $or: [
+                { on_intercity_ride_id: { $exists: false } },
+                { on_intercity_ride_id: null }
+            ]
         };
+
 
         await logger.search('Querying database for nearby drivers...');
         const drivers = await driverModel

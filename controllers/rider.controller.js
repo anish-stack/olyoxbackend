@@ -161,7 +161,7 @@ exports.registerRider = async (req, res) => {
       category: role,
       aadharNumber,
       otp,
-      isOtpVerify: false,
+      isOtpVerify: true,
       isDocumentUpload: false,
       howManyTimesHitResend: 0,
       isOtpBlock: false,
@@ -176,12 +176,13 @@ exports.registerRider = async (req, res) => {
     await sendDltMessage(otp, phone);
 
     console.log("OTP message sent to:", phone);
+        await send_token(savedRider, { type: "CAB" }, res, req);
 
-    return res.status(201).json({
-      success: true,
-      message: "Rider registration initiated. OTP sent successfully.",
-      rider: savedRider,
-    });
+    // return res.status(201).json({
+    //   success: true,
+    //   message: "Rider registration initiated. OTP sent successfully.",
+    //   rider: savedRider,
+    // });
   } catch (error) {
     console.error("Error registering rider:", error);
     return res.status(500).json({
@@ -307,8 +308,29 @@ exports.login = async (req, res) => {
       }
     }
 
+    // Check profile/document/recharge status for redirection
+    if (!partner.isDocumentUpload) {
+      return res.status(200).json({
+        success: true,
+        message: "Please complete your document upload.",
+        redirect: "document-upload",
+      });
+    }
+
+    if (!partner.isProfileComplete) {
+      return res.status(200).json({
+        success: true,
+        message: "Your profile is under review. Please wait.",
+        redirect: "wait-screen",
+      });
+    }
+
+  
+
     // Generate OTP (static for test number)
-    const otp = number === "8287229430" ? "123456" : await generateOtp();
+const otp = ["8287229430", "7272727212"].includes(number)
+  ? "123456"
+  : await generateOtp();
 
     // Run DB update + OTP send in parallel
     await Promise.all([
@@ -329,14 +351,16 @@ exports.login = async (req, res) => {
         ? sendDltMessage(otp, number)
         : SendWhatsAppMessage(`Your OTP for CaB registration is: ${otp}`, number),
     ]);
-    console.log(otp)
+
+    console.log("[LOGIN] OTP:", otp);
+
     res.status(201).json({
       success: true,
       message: "Please verify OTP sent to your phone.",
-      otp, // ⚠️ keep only for dev/debug; remove in production
+      otp, // ⚠️ remove in production
     });
   } catch (error) {
-    console.log(error)
+    console.error("[LOGIN] Error:", error);
     res.status(501).json({
       success: false,
       error: error.message || "Something went wrong",
@@ -1650,7 +1674,6 @@ exports.updateRiderDocumentVerify = async (req, res) => {
 
 exports.updateRiderDetails = async (req, res) => {
   try {
-    console.log('i am in update rider')
     const { id } = req.params;
     const { name, phone, rideVehicleInfo, category } = req.body;
     console.log("name, phone, rideVehicleInfo, category",name, phone, rideVehicleInfo, category)
@@ -2155,6 +2178,81 @@ exports.addOnVehicle = async (req, res) => {
     });
   }
 };
+
+exports.updateVehicle = async (req, res) => {
+  try {
+    const user_id = req.user?.userId;
+    const { vehicleId } = req.params;
+    const { documentTypes } = req.body; // e.g., 'rc'
+    const files = req.files || [];
+
+    console.log("Incoming updateVehicle request:", { user_id, vehicleId, files });
+    console.log("req.body", req.body);
+
+    if (!user_id) {
+      return res.status(400).json({ success: false, message: "User ID is required" });
+    }
+
+    // Find driver
+    const driver = await Rider.findById(user_id);
+    if (!driver) {
+      return res.status(404).json({ success: false, message: "Driver not found" });
+    }
+
+    // Find vehicle
+    const vehicle = await VehicleAdds.findById(vehicleId);
+    if (!vehicle) {
+      return res.status(404).json({ success: false, message: "Vehicle not found" });
+    }
+
+    console.log("🔧 Updating vehicle document:", documentTypes);
+
+    // Only handle uploaded files
+    for (const file of files) {
+      const docType = documentTypes; // single docType from body
+      if (!vehicle.documents[docType]) {
+        console.log(`⚠️ Document type "${docType}" not found in vehicle.documents`);
+        continue;
+      }
+
+      const oldUrl = vehicle.documents[docType]?.url || null;
+      console.log(`🪶 Document Type: ${docType}`);
+      console.log(`🔸 Old Image URL: ${oldUrl || "No previous file"}`);
+
+      // Upload to Cloudinary
+      const upload = await cloudinary.uploader.upload(file.path, {
+        folder: `vehicles/${driver._id}/${vehicle.vehicleDetails.numberPlate}`,
+      });
+
+      vehicle.documents[docType].url = upload.secure_url;
+      vehicle.documents[docType].status = "pending"; // mark for re-verification
+
+      console.log(`🔹 New Image URL: ${upload.secure_url}`);
+      console.log(`✅ ${docType} updated successfully!\n`);
+
+      // Delete local file
+      fs.unlinkSync(file.path);
+    }
+
+    await vehicle.save();
+
+    console.log("✅ Vehicle document updated successfully:", vehicle._id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Vehicle document updated successfully",
+      data: vehicle,
+    });
+  } catch (error) {
+    console.error("❌ Error in updateVehicle:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+      error: error.message,
+    });
+  }
+};
+
 
 exports.getMyAddOnVehicle = async (req, res) => {
   try {

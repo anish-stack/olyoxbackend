@@ -1,5 +1,5 @@
 const express = require('express');
-const { registerRider, getAllRiders, changeLocation, login, resendOtp, verifyOtp, uploadDocuments, details, getMyAllDetails, getMyAllRides, toggleWorkStatusOfRider, verifyDocument, uploadPaymentQr, getMySessionsByUserId, riderDocumentsVerify, updateBlockStatus, getSingleRider, updateRiderDetails, updateRiderDocumentVerify, logoutRider, deleteRider, AdmintoggleWorkStatusOfRider, saveFcmTokenToken, assignFreeRechargeToRider, addOnVehicle, getMyAddOnVehicle, updateDriverVehicleAddsOn, updateVehicleDetailsForDriver, getAddOnVehicleAdmin, approveVehicleDocument, getAllAddOnVehicleAdmin, updateRiderProfileCompleted, getAllRidersFcmToken } = require('../controllers/rider.controller');
+const { registerRider, getAllRiders, changeLocation, login, resendOtp, verifyOtp, uploadDocuments, details, getMyAllDetails, getMyAllRides, toggleWorkStatusOfRider, verifyDocument, uploadPaymentQr, getMySessionsByUserId, riderDocumentsVerify, updateBlockStatus, getSingleRider, updateRiderDetails, updateRiderDocumentVerify, logoutRider, deleteRider, AdmintoggleWorkStatusOfRider, saveFcmTokenToken, assignFreeRechargeToRider, addOnVehicle, getMyAddOnVehicle, updateDriverVehicleAddsOn, updateVehicleDetailsForDriver, getAddOnVehicleAdmin, approveVehicleDocument, getAllAddOnVehicleAdmin, updateRiderProfileCompleted, getAllRidersFcmToken, updateVehicle } = require('../controllers/rider.controller');
 const { calculateRidePriceForUser, rideEndByFallBack } = require('../controllers/ride.request');
 
 const router = express.Router();
@@ -65,7 +65,7 @@ router.get('/getMySessionsByUserId', getMySessionsByUserId);
 router.put('/rider_document_verify/:id', riderDocumentsVerify)
 
 router.get('/', getAllRiders);
-router.get('/driver-fcm',getAllRidersFcmToken)
+router.get('/driver-fcm', getAllRidersFcmToken)
 
 router.put('/:riderId/location', changeLocation);
 
@@ -89,17 +89,18 @@ router.delete('/delete_rider_vendor/:id', deleteRider)
 
 router.post('/free-recharge-wallet', assignFreeRechargeToRider)
 // add on vehcile
-router.post('/add-more-vehicle', Protect,upload.array('documents'), addOnVehicle)
+router.post('/add-more-vehicle', Protect, upload.array('documents'), addOnVehicle)
+router.put('/update_vehicle/:vehicleId', Protect, upload.array('documents'), updateVehicle)
 router.get('/get-vehicles-details', Protect, getMyAddOnVehicle)
-router.post('/change-vehicle-for-driver',Protect,updateVehicleDetailsForDriver)
+router.post('/change-vehicle-for-driver', Protect, updateVehicleDetailsForDriver)
 
-router.post('/get_add_on_vehicle_Admin/:id',getAddOnVehicleAdmin)
-router.get('/get_all_add_on_vehicle',getAllAddOnVehicleAdmin)
+router.post('/get_add_on_vehicle_Admin/:id', getAddOnVehicleAdmin)
+router.get('/get_all_add_on_vehicle', getAllAddOnVehicleAdmin)
 
-router.get('/update',updateDriverVehicleAddsOn)
-router.put('/vehicles/:vehicleId/documents/:documentType/approve',approveVehicleDocument)
+router.get('/update', updateDriverVehicleAddsOn)
+router.put('/vehicles/:vehicleId/documents/:documentType/approve', approveVehicleDocument)
 
-router.put('/update_rider_Profile_completed/:id',updateRiderProfileCompleted)
+router.put('/update_rider_Profile_completed/:id', updateRiderProfileCompleted)
 
 
 

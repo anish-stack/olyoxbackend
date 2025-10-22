@@ -6,23 +6,23 @@ const Restaurant = require("../models/Tiifins/Resturant_register.model");
 
 
 
-exports.getAllPartnersNameAndBHAndId = async(req, res) => {
+exports.getAllPartnersNameAndBHAndId = async (req, res) => {
     try {
         console.log('Starting to fetch all partners data');
-        
+
         // Corrected query to select only needed fields instead of using populate incorrectly
         const cabAndParcel = await RiderModel.find({}, 'name BH _id');
         console.log(`Found ${cabAndParcel.length} cab and parcel partners`);
-        
+
         const restaurantUsers = await Restaurant.find({}, 'restaurant_name restaurant_BHID _id');
         console.log(`Found ${restaurantUsers.length} restaurant partners`);
-        
+
         const hotelUsers = await HotelUser.find({}, 'hotel_name bh _id');
         console.log(`Found ${hotelUsers.length} hotel partners`);
-        
+
         const heavyVehicles = await Heavy_vehicle_partners.find({}, 'name Bh_Id _id');
         console.log(`Found ${heavyVehicles.length} heavy vehicle partners`);
-        
+
         // Format the response in a consistent way
         const response = {
             success: true,
@@ -49,10 +49,10 @@ exports.getAllPartnersNameAndBHAndId = async(req, res) => {
                 }))
             }
         };
-        
+
         console.log('Successfully formatted all partners data');
         return res.status(200).json(response);
-        
+
     } catch (error) {
         console.error('Error fetching partners data:', error);
         return res.status(500).json({
@@ -175,24 +175,37 @@ exports.deletePCoupon = async (req, res) => {
 exports.getCouponpAById = async (req, res) => {
     try {
         const { id } = req.params;
+        console.log("🔍 Fetching coupons for user ID:", id);
 
+        // Fetch all coupons with assignedTo populated
+        let coupons = await PersonalCoupon.find({ assignedTo: id })
+            .populate('assignedTo', 'name phone BH aadharNumber isActive');
+        console.log(`📝 Total coupons fetched: ${coupons.length}`);
 
-        let coupons = await PersonalCoupon.find().populate('assignedTo');
+        // Filter coupons assigned to the specific user
+        coupons = coupons.filter((item) => {
+            const assignedId = item?.assignedTo?._id?.toString();
+            const match = assignedId === id;
+            console.log(`Coupon ID: ${item._id}, assignedTo: ${assignedId}, match: ${match}`);
+            return match;
+        });
 
-        coupons = coupons.filter((item) => item?.assignedTo?._id.toString() === id);
-
+        console.log(`✅ Coupons after filtering for user: ${coupons.length}`);
 
         if (coupons.length === 0) {
+            console.log("⚠️ No coupons found for this user");
             return res.status(404).json({ message: 'Coupon not found' });
         }
 
         // Return the found coupons
         return res.status(200).json({
-            success:true,
-            data:coupons
+            success: true,
+            data: coupons,
         });
+
     } catch (error) {
-        console.error(error);
+        console.error("❌ Error in getCouponpAById:", error);
         return res.status(500).json({ message: 'Server error' });
     }
 };
+

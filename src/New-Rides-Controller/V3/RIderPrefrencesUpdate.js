@@ -12,7 +12,7 @@ const getAvailablePreferences = (vehicleType) => {
             return basePreferences;
 
         case 'bike':
-            return basePreferences;
+            return [...basePreferences , "FoodDelivery", "ParcelDelivery"];
 
         case 'mini':
             return [...basePreferences, "OlyoxIntercity"];
@@ -260,7 +260,7 @@ exports.getRiderPreferences = async (req, res) => {
                 currentPreferences: currentPreferences,
 
                 vehicleTypeRules: {
-                    bike: ["OlyoxPriority"],
+                    bike: ["OlyoxPriority", "FoodDelivery", "ParcelDelivery"],
                     mini: ["OlyoxPriority", "OlyoxIntercity"],
                     sedan: ["OlyoxPriority", "OlyoxIntercity", "OlyoxAcceptMiniRides"],
                     suv: ["OlyoxPriority", "OlyoxIntercity", "OlyoxAcceptMiniRides", "OlyoxAcceptSedanRides"],
