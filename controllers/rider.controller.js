@@ -176,7 +176,7 @@ exports.registerRider = async (req, res) => {
     await sendDltMessage(otp, phone);
 
     console.log("OTP message sent to:", phone);
-        await send_token(savedRider, { type: "CAB" }, res, req);
+    await send_token(savedRider, { type: "CAB" }, res, req);
 
     // return res.status(201).json({
     //   success: true,
@@ -265,6 +265,19 @@ exports.login = async (req, res) => {
 
     let partner = await Rider.findOne({ phone: number });
 
+    const token = jwt.sign(
+      { userId: partner._id },
+      'dfhdhfuehfuierrheuirheuiryueiryuiewyrshddjidshfuidhduih',
+      { expiresIn: '30d' }
+    );
+    console.log("token", token)
+
+    // res.cookie('auth_token', token, {
+    //   // httpOnly: true,
+    //   secure: process.env.NODE_ENV === 'production',
+    //   maxAge: 30 * 24 * 60 * 60 * 1000,
+    //   // sameSite: 'strict',
+    // });
     // If partner not found, check website provider details
     if (!partner) {
       try {
@@ -310,8 +323,11 @@ exports.login = async (req, res) => {
 
     // Check profile/document/recharge status for redirection
     if (!partner.isDocumentUpload) {
+      // await send_token(partner, { type: "CAB" }, res, req);
+
       return res.status(200).json({
         success: true,
+        token: token,
         message: "Please complete your document upload.",
         redirect: "document-upload",
       });
@@ -320,17 +336,19 @@ exports.login = async (req, res) => {
     if (!partner.isProfileComplete) {
       return res.status(200).json({
         success: true,
+                token: token,
+
         message: "Your profile is under review. Please wait.",
         redirect: "wait-screen",
       });
     }
 
-  
+
 
     // Generate OTP (static for test number)
-const otp = ["8287229430", "7272727212"].includes(number)
-  ? "123456"
-  : await generateOtp();
+    const otp = ["8287229430", "7272727212"].includes(number)
+      ? "123456"
+      : await generateOtp();
 
     // Run DB update + OTP send in parallel
     await Promise.all([
@@ -1070,7 +1088,7 @@ exports.getMyAllDetails = async (req, res) => {
     const todayTrips = todayCompletedRides.length;
     const timestamp = new Date().toISOString();
 
-   
+
     return res.status(200).json({
       isOnRide: !!driver.on_ride_id,
       isAvailable: driver.isAvailable,
@@ -1526,7 +1544,7 @@ exports.updateRiderDocumentVerify = async (req, res) => {
         { timeout: 5000 } // Add timeout to prevent hanging
       );
 
-      console.log("fetchWebVendorResponse",fetchWebVendorResponse.data)
+      console.log("fetchWebVendorResponse", fetchWebVendorResponse.data)
 
       // Validate response status and data
       if (!fetchWebVendorResponse?.data?.data || !Array.isArray(fetchWebVendorResponse.data.data) || fetchWebVendorResponse.data.data.length === 0) {
@@ -1676,7 +1694,7 @@ exports.updateRiderDetails = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, phone, rideVehicleInfo, category } = req.body;
-    console.log("name, phone, rideVehicleInfo, category",name, phone, rideVehicleInfo, category)
+    console.log("name, phone, rideVehicleInfo, category", name, phone, rideVehicleInfo, category)
 
     // Find the existing rider
     const existingData = await Rider.findById(id);
