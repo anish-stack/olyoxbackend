@@ -338,7 +338,7 @@ const getRouteFromAPI = async (pickup, drop) => {
                     destination: `${drop.latitude},${drop.longitude}`,
                     mode: "driving",
                     units: "metric",
-                    key: apiKey,
+                    key: "AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8",
                 },
                 timeout: 5000,
             }
@@ -740,10 +740,10 @@ const sendDriverNotification = async (driver, ride, io, attempt, isInitial = fal
     }
 
     // 🔹 1.5. Check if driver is available
-    if (!driver.isAvailable) {
-      console.debug(`⏭️ Driver ${driverId} is not available, skipping notification`);
-      return { success: false, reason: 'driver_unavailable' };
-    }
+    // if (!driver.isAvailable) {
+    //   console.debug(`⏭️ Driver ${driverId} is not available, skipping notification`);
+    //   return { success: false, reason: 'driver_unavailable' };
+    // }
 
     // 🔹 2. Check if driver has reached notification limit
     if (hasReachedNotificationLimit(driverId, rideId)) {
