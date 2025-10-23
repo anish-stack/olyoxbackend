@@ -12,6 +12,7 @@ const VehicleAdds = require("../models/AddNewVheicleForDriver");
 const fs = require("fs");
 const path = require("path");
 const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
 
 const Bonus_Model = require("../models/Bonus_Model/Bonus_Model");
 const Parcel_Request = require("../models/Parcel_Models/Parcel_Request");
