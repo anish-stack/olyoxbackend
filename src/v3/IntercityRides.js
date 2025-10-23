@@ -1184,13 +1184,13 @@ exports.getAvailableRides = async (req, res) => {
         // Fetch only intercity rides created in the last 2 days
         const rides = await RideBooking.find({
             isIntercityRides: true,
-         
+
             ride_status: { $in: OnlyThoseStatuses }
         }).sort({ createdAt: -1 })
 
 
-        .select('-notified_riders'); // exclude unnecessary field
-            console.log(`🔍 Found ${rides.length} intercity rides for processing`);
+            .select('-notified_riders'); // exclude unnecessary field
+        console.log(`🔍 Found ${rides.length} intercity rides for processing`);
         if (!rides.length) {
             return res.status(404).json({ success: false, message: "No intercity rides available" });
         }
@@ -1201,7 +1201,7 @@ exports.getAvailableRides = async (req, res) => {
             'preferences.OlyoxIntercity.enabled': true,
         }).select('RechargeData location rideVehicleInfo preferences');
 
-        if (!driverData ) {
+        if (!driverData) {
             return res.status(404).json({ success: false, message: "Driver not found or not eligible" });
         }
 
@@ -1211,7 +1211,7 @@ exports.getAvailableRides = async (req, res) => {
             return res.status(403).json({ success: false, message: "Driver recharge expired" });
         }
 
-        const driverCoords =  driverData.location?.coordinates;
+        const driverCoords = driverData.location?.coordinates;
         if (!driverCoords || driverCoords.length !== 2) {
             return res.status(400).json({ success: false, message: "Driver location not available" });
         }
@@ -1244,7 +1244,7 @@ exports.getAvailableRides = async (req, res) => {
 
             // ✅ Vehicle type check
             const rideVehicleType = ride.vehicle_type?.toUpperCase();
-            const driverVehicleType =  driverData.rideVehicleInfo?.vehicleType?.toUpperCase();
+            const driverVehicleType = driverData.rideVehicleInfo?.vehicleType?.toUpperCase();
 
             let vehicleOk = false;
 
@@ -1253,13 +1253,13 @@ exports.getAvailableRides = async (req, res) => {
             } else if (
                 rideVehicleType === 'SEDAN' &&
                 ['SUV', 'XL', 'SUV/XL', 'MINI'].includes(driverVehicleType) &&
-                ( driverData.preferences?.OlyoxAcceptSedanRides ||  driverData.preferences?.OlyoxIntercity)
+                (driverData.preferences?.OlyoxAcceptSedanRides || driverData.preferences?.OlyoxIntercity)
             ) {
                 vehicleOk = true;
             } else if (
                 rideVehicleType === 'MINI' &&
                 ['SEDAN', 'SUV', 'XL', 'SUV/XL'].includes(driverVehicleType) &&
-                ( driverData.preferences?.OlyoxAcceptMiniRides ||  driverData.preferences?.OlyoxIntercity)
+                (driverData.preferences?.OlyoxAcceptMiniRides || driverData.preferences?.OlyoxIntercity)
             ) {
                 vehicleOk = true;
             }
@@ -1798,45 +1798,56 @@ exports.rateYourInterCity = async (req, res) => {
                 message: "Rating must be a number between 1 and 5"
             });
         }
+
         const points = rating > 3 ? 5 : 2;
 
-        // ✅ Find ride with driver populated
-        const ride = await IntercityRide.findById(rideId).populate("driverId");
+        // ✅ Find ride (normal or intercity)
+        let ride = await RideBooking.findById(rideId).populate("driver");
         if (!ride) {
-            return res.status(404).json({ success: false, message: "Ride not found" });
+            ride = await RideBooking.findOne({ intercityRideModel: rideId }).populate("driver");
+            if (!ride) {
+                return res.status(404).json({ success: false, message: "Ride not found" });
+            }
         }
 
         // ✅ Allow rating only after payment completion
-        if (!ride.payment || ride.payment.status !== "completed") {
-            return res.status(400).json({
-                success: false,
-                message: "You can only rate after payment is completed"
-            });
-        }
+        // if (!ride.payment || ride.payment.status !== "completed") {
+        //     return res.status(400).json({
+        //         success: false,
+        //         message: "You can only rate after payment is completed"
+        //     });
+        // }
 
         // ✅ Prevent duplicate reviews
         const alreadyReviewed = ride.reviews?.some(
             r => r.reviewerId.toString() === reviewerId.toString()
         );
         if (alreadyReviewed) {
+            // Reset passenger and driver references
             if (ride.passengerId) {
                 await User.updateOne(
                     { _id: ride.passengerId },
                     { $set: { IntercityRide: null } }
                 );
             }
-            if (ride.driverId) {
+            if (ride.driver) {
                 await driver.updateOne(
-                    { _id: ride.driverId._id },
+                    { _id: ride.driver._id },
                     {
                         $inc: {
                             TotalRides: 1,
                             points: points,
                             IntercityRideComplete: 1
+                        },
+                        $set: {
+                            intercityRideModel: null,
+                            on_ride_id: ride.driver.on_ride_id?.toString() === rideId.toString() ? null : ride.driver.on_ride_id
                         }
                     }
                 );
             }
+            ride.payment.status = "completed"
+            await ride.save();
             return res.status(200).json({
                 success: true,
                 message: "You have already reviewed this ride"
@@ -1856,7 +1867,7 @@ exports.rateYourInterCity = async (req, res) => {
             createdAt: new Date(),
         });
 
-        // ✅ Update passenger reference if needed
+        // ✅ Update passenger reference
         if (ride.passengerId) {
             await User.updateOne(
                 { _id: ride.passengerId },
@@ -1864,19 +1875,23 @@ exports.rateYourInterCity = async (req, res) => {
             );
         }
 
-        if (ride.driverId) {
+        // ✅ Update driver stats and ride references
+        if (ride.driver) {
             await driver.updateOne(
-                { _id: ride.driverId._id },
+                { _id: ride.driver._id },
                 {
                     $inc: {
                         TotalRides: 1,
                         points: points,
                         IntercityRideComplete: 1
+                    },
+                    $set: {
+                        intercityRideModel: null,
+                        on_ride_id: ride.driver.on_ride_id?.toString() === rideId.toString() ? null : ride.driver.on_ride_id
                     }
                 }
             );
         }
-
 
         // ✅ Save ride with new review
         await ride.save();
@@ -1886,6 +1901,7 @@ exports.rateYourInterCity = async (req, res) => {
             message: "Review submitted successfully",
             ride,
         });
+
     } catch (error) {
         console.error("Error rating ride:", error);
         res.status(500).json({
@@ -1895,6 +1911,7 @@ exports.rateYourInterCity = async (req, res) => {
         });
     }
 };
+
 
 // cron.schedule("*/9 * * * *", async () => {
 //    
