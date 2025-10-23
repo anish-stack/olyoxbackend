@@ -1871,7 +1871,7 @@ exports.rateYourInterCity = async (req, res) => {
       );
     }
 
-    ride.payment.status !== "completed"
+    ride.payment_status !== "completed"
     // ✅ Save the updated ride
     await ride.save();
 
