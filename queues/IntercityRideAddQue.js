@@ -283,7 +283,10 @@ AddRideInModelOfDb.process(1, async (job) => {
                 original_fare: rideData.pricing.originalPrice || rideData.pricing.totalPrice,
             },
             ride_status: "pending",
-            ride_otp: rideData.otp?.code,
+            ride_otp: rideData.otp?.code
+                ? rideData.otp.code.toString().padStart(4, '0').slice(0, 4)
+                : "1290",
+
             payment_method: rideData.payment?.method || 'cash',
             search_radius: 5,
             max_search_radius: 25,
@@ -328,10 +331,17 @@ DriverSearchQueue.process(2, async (job) => {
 
         if (!rideId) throw new Error('No rideId provided');
 
-        const ride = await RideRequestNew.findById(rideId);
+        const ride = await RideRequestNew.findById(rideId)
         if (!ride) {
             await logger.warn(`Ride ${rideId} not found in database`);
             return;
+        }
+
+        if (ride.driver || ride.driver._id) {
+            ride.ride_status = 'driver_assigned'; 
+            await ride.save();
+            await logger.success(`Ride ${rideId} already has a driver assigned, stopping search`);
+            return; // Stop processing this job
         }
 
         const now = new Date();

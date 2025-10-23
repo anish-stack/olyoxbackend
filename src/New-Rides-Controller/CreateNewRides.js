@@ -729,118 +729,128 @@ const fetchEligibleDrivers = async (rideId, rideData) => {
  * Send notification to a single driver with duplicate prevention
  */
 const sendDriverNotification = async (driver, ride, io, attempt, isInitial = false) => {
-    const driverId = driver._id.toString();
-    const rideId = ride._id.toString();
+  const driverId = driver._id.toString();
+  const rideId = ride._id.toString();
 
-    try {
-        // 🔹 1. Check if driver already rejected this ride
-        if (ride.rejected_by_drivers?.some(r => r.driver.toString() === driverId)) {
-            console.debug(`⏭️ Driver ${driverId} already rejected ride ${rideId}, skipping notification`);
-            return { success: false, reason: 'already_rejected' };
-        }
-
-        // 🔹 2. Check if driver has reached notification limit
-        if (hasReachedNotificationLimit(driverId, rideId)) {
-            console.debug(`⏭️ Driver ${driverId} reached limit for ride ${rideId}`);
-            return { success: false, reason: 'limit_reached' };
-        }
-
-        // 🔹 3. Verify ride is still valid
-        const currentRide = await RideBooking.findById(rideId)
-            .select("ride_status driver rejected_by_drivers")
-            .lean();
-
-        if (!currentRide || currentRide.driver || currentRide.ride_status !== "searching") {
-            console.debug(`⏭️ Ride ${rideId} no longer needs driver`);
-            return { success: false, reason: 'ride_no_longer_valid' };
-        }
-
-        // 🔹 4. Increment count BEFORE sending to prevent race conditions
-        const notificationCount = incrementNotificationCount(driverId, rideId);
-        const notificationId = generateNotificationId(rideId);
-        const distanceKm = ((driver.distance || 0) / 1000).toFixed(2);
-
-        // 🔹 5. Prepare FCM payload
-        const fcmPayload = {
-            event: "NEW_RIDE",
-            notificationId,
-            notificationCount,
-            rideDetails: {
-                rideId,
-                distance: ride.route_info?.distance,
-                distance_from_pickup_km: distanceKm,
-                pickup: ride.pickup_address,
-                drop: ride.drop_address,
-                vehicleType: ride.vehicle_type,
-                pricing: ride.pricing,
-                searchAttempt: attempt,
-                urgency: isInitial ? 'high' : 'normal',
-                timestamp: Date.now()
-            },
-            screen: "RideRequest",
-            riderId: driverId
-        };
-
-        // 🔹 6. Send FCM notification
-        await sendNotification.sendNotification(
-            driver.fcmToken,
-            `New Ride Request (#${notificationCount}/${NOTIFICATION_CONFIG.MAX_NOTIFICATIONS_PER_DRIVER})`,
-            isInitial
-                ? "🚀 New ride available nearby! Accept quickly!"
-                : `📍 Ride still waiting for driver...`,
-            fcmPayload,
-            "ride_request_channel"
-        );
-
-        // 🔹 7. Send Socket.IO notification if driver is connected
-        if (io) {
-            try {
-                const socketsInRoom = await io.in(`driver:${driverId}`).allSockets();
-                if (socketsInRoom.size > 0) {
-                    io.to(`driver:${driverId}`).emit("new_ride_request", {
-                        rideId,
-                        notificationId,
-                        notificationCount,
-                        distance_from_pickup_km: distanceKm,
-                        pickup: ride.pickup_address?.formatted_address,
-                        drop: ride.drop_address?.formatted_address,
-                        vehicleType: ride.vehicle_type,
-                        pricing: ride.pricing?.total_fare,
-                        isInitial,
-                        urgency: isInitial ? 'high' : 'normal'
-                    });
-                }
-            } catch (socketError) {
-                console.debug(`Socket notification failed for ${driverId}:`, socketError.message);
-            }
-        }
-
-        console.info(`✅ [${notificationCount}/${NOTIFICATION_CONFIG.MAX_NOTIFICATIONS_PER_DRIVER}] Notification sent to ${driver.name || 'Driver'} (${driverId}) - ${distanceKm}km`);
-
-        return {
-            success: true,
-            driverId,
-            notificationId,
-            notificationCount,
-            distance: driver.distance,
-            timestamp: new Date()
-        };
-
-    } catch (error) {
-        console.error(`❌ Failed to notify driver ${driverId}:`, error);
-
-        // Rollback notification count on failure
-        const driverMap = driverNotificationTracking.get(driverId);
-        if (driverMap) {
-            const currentCount = driverMap.get(rideId) || 0;
-            if (currentCount > 0) {
-                driverMap.set(rideId, currentCount - 1);
-            }
-        }
-
-        return { success: false, reason: error.message };
+  try {
+    // 🔹 1. Check if driver already rejected this ride
+    if (ride.rejected_by_drivers?.some(r => r.driver.toString() === driverId)) {
+      console.debug(`⏭️ Driver ${driverId} already rejected ride ${rideId}, skipping notification`);
+      return { success: false, reason: 'already_rejected' };
     }
+
+    // 🔹 1.5. Check if driver is available
+    if (!driver.isAvailable) {
+      console.debug(`⏭️ Driver ${driverId} is not available, skipping notification`);
+      return { success: false, reason: 'driver_unavailable' };
+    }
+
+    // 🔹 2. Check if driver has reached notification limit
+    if (hasReachedNotificationLimit(driverId, rideId)) {
+      console.debug(`⏭️ Driver ${driverId} reached limit for ride ${rideId}`);
+      return { success: false, reason: 'limit_reached' };
+    }
+
+    // 🔹 3. Verify ride is still valid
+    const currentRide = await RideBooking.findById(rideId)
+      .select("ride_status driver rejected_by_drivers")
+      .lean();
+
+    if (!currentRide || currentRide.driver || currentRide.ride_status !== "searching") {
+      console.debug(`⏭️ Ride ${rideId} no longer needs driver`);
+      return { success: false, reason: 'ride_no_longer_valid' };
+    }
+
+    // 🔹 4. Increment count BEFORE sending to prevent race conditions
+    const notificationCount = incrementNotificationCount(driverId, rideId);
+    const notificationId = generateNotificationId(rideId);
+    const distanceKm = ((driver.distance || 0) / 1000).toFixed(2);
+
+    // 🔹 5. Prepare FCM payload
+    const fcmPayload = {
+      event: "NEW_RIDE",
+      notificationId,
+      notificationCount,
+      rideDetails: {
+        rideId,
+        distance: ride.route_info?.distance,
+        distance_from_pickup_km: distanceKm,
+        pickup: ride.pickup_address,
+        drop: ride.drop_address,
+        vehicleType: ride.vehicle_type,
+        pricing: ride.pricing,
+        searchAttempt: attempt,
+        urgency: isInitial ? 'high' : 'normal',
+        timestamp: Date.now(),
+      },
+      screen: "RideRequest",
+      riderId: driverId,
+    };
+
+    // 🔹 6. Send FCM notification
+    await sendNotification.sendNotification(
+      driver.fcmToken,
+      `New Ride Request (#${notificationCount}/${NOTIFICATION_CONFIG.MAX_NOTIFICATIONS_PER_DRIVER})`,
+      isInitial
+        ? "🚀 New ride available nearby! Accept quickly!"
+        : `📍 Ride still waiting for driver...`,
+      fcmPayload,
+      "ride_request_channel"
+    );
+
+    // 🔹 7. Send Socket.IO notification if driver is connected
+    if (io) {
+      try {
+        const socketsInRoom = await io.in(`driver:${driverId}`).allSockets();
+        if (socketsInRoom.size > 0) {
+          io.to(`driver:${driverId}`).emit("new_ride_request", {
+            rideId,
+            notificationId,
+            notificationCount,
+            distance_from_pickup_km: distanceKm,
+            pickup: ride.pickup_address?.formatted_address,
+            drop: ride.drop_address?.formatted_address,
+            vehicleType: ride.vehicle_type,
+            pricing: ride.pricing?.total_fare,
+            isInitial,
+            urgency: isInitial ? 'high' : 'normal',
+          });
+        }
+      } catch (socketError) {
+        console.debug(`Socket notification failed for ${driverId}:`, socketError.message);
+      }
+    }
+
+    console.info(
+      `✅ [${notificationCount}/${NOTIFICATION_CONFIG.MAX_NOTIFICATIONS_PER_DRIVER}] Notification sent to ${
+        driver.name || "Driver"
+      } (${driverId}) - ${distanceKm}km`
+    );
+
+    return {
+      success: true,
+      driverId,
+      notificationId,
+      notificationCount,
+      distance: driver.distance,
+      timestamp: new Date(),
+    };
+  } catch (error) {
+    console.error(`❌ Failed to notify driver ${driverId}:`, error);
+
+    // Rollback notification count on failure
+    const driverMap = driverNotificationTracking.get(driverId);
+    if (driverMap) {
+      const currentCount = driverMap.get(rideId) || 0;
+      if (currentCount > 0) {
+        driverMap.set(rideId, currentCount - 1);
+      }
+    }
+
+    return { success: false, reason: error.message };
+  }
 };
+
 
 /**
  * Send notifications to multiple drivers in controlled batches
