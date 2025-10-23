@@ -1861,7 +1861,7 @@ exports.rateYourInterCity = async (req, res) => {
             IntercityRideComplete: 1
           },
           $set: {
-            intercityRideModel: null,
+            on_intercity_ride_id: null,
             on_ride_id:
               ride.driver.on_ride_id?.toString() === rideId.toString()
                 ? null
@@ -1871,7 +1871,7 @@ exports.rateYourInterCity = async (req, res) => {
       );
     }
 
-    ride.payment_status !== "completed"
+    ride.payment_status = "completed"
     // ✅ Save the updated ride
     await ride.save();
 
