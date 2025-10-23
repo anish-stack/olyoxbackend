@@ -172,7 +172,25 @@ const RideRequestSchema = new Schema({
     },
 
     chat: [chatSchema],
-
+    reviews: [{
+        reviewerId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        },
+        rating: {
+            type: Number,
+            min: 1,
+            max: 5,
+        },
+        comment: {
+            type: String,
+            maxlength: 500
+        },
+        reviewDate: {
+            type: Date,
+            default: Date.now
+        }
+    }],
     ride_status: {
         type: String,
         enum: ['pending', 'searching', 'driver_assigned', 'driver_arrived', 'in_progress', 'completed', 'cancelled'],
@@ -290,9 +308,9 @@ const RideRequestSchema = new Schema({
         type: Boolean,
         default: true
     },
-    intercityRideModel:{
-          type: mongoose.Schema.Types.ObjectId,
-            ref: 'IntercityRide'
+    intercityRideModel: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'IntercityRide'
     },
     rejected_by_drivers: [{
         driver: {

@@ -1781,135 +1781,113 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 
 exports.rateYourInterCity = async (req, res) => {
-    try {
-        const { reviewerId, rating, comment, rideId } = req.body;
+  try {
+    const { reviewerId, rating, comment, rideId } = req.body;
 
-        // ✅ Validate input
-        if (!rideId || !reviewerId || !rating) {
-            return res.status(400).json({
-                success: false,
-                message: "rideId, reviewerId and rating are required"
-            });
-        }
-
-        if (typeof rating !== "number" || rating < 1 || rating > 5) {
-            return res.status(400).json({
-                success: false,
-                message: "Rating must be a number between 1 and 5"
-            });
-        }
-
-        const points = rating > 3 ? 5 : 2;
-
-        // ✅ Find ride (normal or intercity)
-        let ride = await RideBooking.findById(rideId).populate("driver");
-        if (!ride) {
-            ride = await RideBooking.findOne({ intercityRideModel: rideId }).populate("driver");
-            if (!ride) {
-                return res.status(404).json({ success: false, message: "Ride not found" });
-            }
-        }
-
-        // ✅ Allow rating only after payment completion
-        // if (!ride.payment || ride.payment.status !== "completed") {
-        //     return res.status(400).json({
-        //         success: false,
-        //         message: "You can only rate after payment is completed"
-        //     });
-        // }
-
-        // ✅ Prevent duplicate reviews
-        const alreadyReviewed = ride.reviews?.some(
-            r => r.reviewerId.toString() === reviewerId.toString()
-        );
-        if (alreadyReviewed) {
-            // Reset passenger and driver references
-            if (ride.passengerId) {
-                await User.updateOne(
-                    { _id: ride.passengerId },
-                    { $set: { IntercityRide: null } }
-                );
-            }
-            if (ride.driver) {
-                await driver.updateOne(
-                    { _id: ride.driver._id },
-                    {
-                        $inc: {
-                            TotalRides: 1,
-                            points: points,
-                            IntercityRideComplete: 1
-                        },
-                        $set: {
-                            intercityRideModel: null,
-                            on_ride_id: ride.driver.on_ride_id?.toString() === rideId.toString() ? null : ride.driver.on_ride_id
-                        }
-                    }
-                );
-            }
-            ride.payment.status = "completed"
-            await ride.save();
-            return res.status(200).json({
-                success: true,
-                message: "You have already reviewed this ride"
-            });
-        }
-
-        // ✅ Ensure reviews array exists
-        if (!Array.isArray(ride.reviews)) {
-            ride.reviews = [];
-        }
-
-        // ✅ Add new review
-        ride.reviews.push({
-            reviewerId,
-            rating,
-            comment: comment || "",
-            createdAt: new Date(),
-        });
-
-        // ✅ Update passenger reference
-        if (ride.passengerId) {
-            await User.updateOne(
-                { _id: ride.passengerId },
-                { $set: { IntercityRide: null } }
-            );
-        }
-
-        // ✅ Update driver stats and ride references
-        if (ride.driver) {
-            await driver.updateOne(
-                { _id: ride.driver._id },
-                {
-                    $inc: {
-                        TotalRides: 1,
-                        points: points,
-                        IntercityRideComplete: 1
-                    },
-                    $set: {
-                        intercityRideModel: null,
-                        on_ride_id: ride.driver.on_ride_id?.toString() === rideId.toString() ? null : ride.driver.on_ride_id
-                    }
-                }
-            );
-        }
-
-        // ✅ Save ride with new review
-        await ride.save();
-
-        res.status(200).json({
-            success: true,
-            message: "Review submitted successfully",
-            ride,
-        });
-
-    } catch (error) {
-        console.error("Error rating ride:", error);
-        res.status(500).json({
-            success: false,
-            message: "Server error while submitting review",
-            error: error.message,
-        });
+    // ✅ Validate input
+    if (!rideId || !reviewerId || !rating) {
+      return res.status(400).json({
+        success: false,
+        message: "rideId, reviewerId and rating are required"
+      });
     }
+
+    if (typeof rating !== "number" || rating < 1 || rating > 5) {
+      return res.status(400).json({
+        success: false,
+        message: "Rating must be a number between 1 and 5"
+      });
+    }
+
+    const points = rating > 3 ? 5 : 2;
+
+    // ✅ Find ride
+    let ride = await RideBooking.findById(rideId).populate("driver");
+    if (!ride) {
+      ride = await RideBooking.findOne({ intercityRideModel: rideId }).populate("driver");
+      if (!ride) {
+        return res.status(404).json({ success: false, message: "Ride not found" });
+      }
+    }
+
+    // ✅ Check payment status
+    // if (!ride.payment || ride.payment.status !== "completed") {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "You can only rate after payment is completed"
+    //   });
+    // }
+
+    // ✅ Check duplicate review
+    const alreadyReviewed = ride.reviews?.some(
+      r => r.reviewerId.toString() === reviewerId.toString()
+    );
+    if (alreadyReviewed) {
+      return res.status(200).json({
+        success: true,
+        message: "You have already reviewed this ride"
+      });
+    }
+
+    // ✅ Ensure reviews array
+    if (!Array.isArray(ride.reviews)) {
+      ride.reviews = [];
+    }
+
+    // ✅ Add review
+    ride.reviews.push({
+      reviewerId,
+      rating,
+      comment: comment || "",
+      createdAt: new Date(),
+    });
+
+    // ✅ Update passenger reference
+    if (ride.user) {
+      await User.updateOne(
+        { _id: ride.user },
+        { $set: { IntercityRide: null } }
+      );
+    }
+
+    // ✅ Update driver stats and clear fields
+    if (ride.driver) {
+      await driver.updateOne(
+        { _id: ride.driver._id },
+        {
+          $inc: {
+            TotalRides: 1,
+            points: points,
+            IntercityRideComplete: 1
+          },
+          $set: {
+            intercityRideModel: null,
+            on_ride_id:
+              ride.driver.on_ride_id?.toString() === rideId.toString()
+                ? null
+                : ride.driver.on_ride_id
+          }
+        }
+      );
+    }
+
+    ride.payment.status !== "completed"
+    // ✅ Save the updated ride
+    await ride.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Review submitted successfully",
+      ride,
+    });
+  } catch (error) {
+    console.error("Error rating ride:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while submitting review",
+      error: error.message,
+    });
+  }
 };
 
 
