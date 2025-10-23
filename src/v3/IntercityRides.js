@@ -1223,10 +1223,10 @@ exports.getAvailableRides = async (req, res) => {
             const pickupCoords = ride.pickup_location?.coordinates;
             if (!pickupCoords || pickupCoords.length !== 2) continue;
 
-            const rejectedByDrivers = ride.rejected_by_drivers?.map(r => r.driver.toString()) || [];
+            // const rejectedByDrivers = ride.rejected_by_drivers?.map(r => r.driver.toString()) || [];
 
-            // Skip rejected rides
-            if (rejectedByDrivers.includes(riderId)) continue;
+            // // Skip rejected rides
+            // if (rejectedByDrivers.includes(riderId)) continue;
 
             // If already assigned to this driver
             if (ride.driver && ride.driver.toString() === riderId) {
