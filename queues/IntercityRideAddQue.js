@@ -337,8 +337,8 @@ DriverSearchQueue.process(2, async (job) => {
             return;
         }
 
-        if (ride.driver || ride.driver._id) {
-            ride.ride_status = 'driver_assigned'; 
+        if (ride.driver) {
+            ride.ride_status = 'driver_assigned';
             await ride.save();
             await logger.success(`Ride ${rideId} already has a driver assigned, stopping search`);
             return; // Stop processing this job
