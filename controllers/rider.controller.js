@@ -416,7 +416,7 @@ exports.saveFcmTokenToken = async (req, res) => {
     const diffMinutes = (now - lastUpdate) / (1000 * 60); // difference in minutes
 
     // Update if token/device changed OR last update was more than 10 minutes ago
-    if (rider.fcmToken !== fcmToken || rider.deviceId !== deviceId || diffMinutes > 10) {
+    if (rider.fcmToken !== fcmToken || rider.deviceId !== deviceId) {
       rider.fcmToken = fcmToken;
       rider.deviceId = deviceId;
       rider.platform = platform || "unknown";
