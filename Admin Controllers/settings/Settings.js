@@ -26,9 +26,10 @@ exports.createSetting = async (req, res) => {
 // Get Setting (uses cache if available)
 exports.getSetting = async (req, res) => {
   try {
-    if (settingsCache.has(CACHE_KEY)) {
-      return res.status(200).json(settingsCache.get(CACHE_KEY));
-    }
+    // if (settingsCache.has(CACHE_KEY)) {
+    //   console.log("settingsCache.get(CACHE_KEY)",settingsCache.get(CACHE_KEY))
+    //   return res.status(200).json(settingsCache.get(CACHE_KEY));
+    // }
 
     const setting = await settings.findOne().lean();
     if (!setting) {
@@ -37,9 +38,10 @@ exports.getSetting = async (req, res) => {
 
     // Store in cache
     settingsCache.set(CACHE_KEY, setting);
-
+    console.log("setting",setting)
     res.status(200).json(setting);
   } catch (error) {
+    console.log("error in setting",error)
     res.status(500).json({ message: error.message });
   }
 };
