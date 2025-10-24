@@ -448,26 +448,18 @@ exports.findAllOrdersRides = async (req, res) => {
         message: "User ID not found",
       });
     }
-    const RideData = await NewRideModel.find({
+    const RideData = await NewRideModelModel.find({
       user: userData._id,
       rideStatus: { $in: ['completed'] },
     })
       .select('pickup_location pickup_address drop_location drop_address rideStatus createdAt')
       .sort({ createdAt: -1 });
 
-
-    const orderCounts = {
-      rideRequests: RideData.length,
-
-    };
-
     return res.status(200).json({
       success: true,
+      count:RideData.length,
       message: "Orders fetched successfully",
-      data: {
-
-        RideData
-      },
+      data: RideData,
     });
   } catch (error) {
     console.error("Error fetching orders:", error);
