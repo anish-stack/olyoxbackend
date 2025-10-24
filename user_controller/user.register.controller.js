@@ -450,7 +450,7 @@ exports.findAllOrdersRides = async (req, res) => {
     }
     const RideData = await NewRideModelModel.find({
       user: userData._id,
-      rideStatus: { $in: ['completed'] },
+      ride_status: { $in: ['completed'] },
     })
       .select('pickup_location pickup_address drop_location drop_address rideStatus createdAt')
       .sort({ createdAt: -1 });
