@@ -435,6 +435,51 @@ exports.findAllOrders = async (req, res) => {
     });
   }
 };
+
+
+exports.findAllOrdersRides = async (req, res) => {
+  try {
+    const userData = Array.isArray(req.user.user)
+      ? req.user.user[0]
+      : req.user.user;
+    if (!userData?._id) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID not found",
+      });
+    }
+    const RideData = await NewRideModel.find({
+      user: userData._id,
+      rideStatus: { $in: ['completed'] },
+    })
+      .select('pickup_location pickup_address drop_location drop_address rideStatus createdAt')
+      .sort({ createdAt: -1 });
+
+
+    const orderCounts = {
+      rideRequests: RideData.length,
+
+    };
+
+    return res.status(200).json({
+      success: true,
+      message: "Orders fetched successfully",
+      data: {
+
+        RideData
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching orders:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+
 exports.getAllUser = async (req, res) => {
   try {
     // Extract query params (with defaults)
@@ -446,13 +491,13 @@ exports.getAllUser = async (req, res) => {
     // Build search filter (case-insensitive, only if search is provided)
     const filter = search
       ? {
-          $or: [
-            { name: new RegExp(search, "i") },
-            { email: new RegExp(search, "i") },
-            { number: new RegExp(search, "i") },
-            { platform: new RegExp(search, "i") },
-          ],
-        }
+        $or: [
+          { name: new RegExp(search, "i") },
+          { email: new RegExp(search, "i") },
+          { number: new RegExp(search, "i") },
+          { platform: new RegExp(search, "i") },
+        ],
+      }
       : {};
 
     // Count total documents matching filter
@@ -500,13 +545,13 @@ exports.getAllUserFcm = async (req, res) => {
     // Add search filter if search term is provided
     const searchFilter = search
       ? {
-          $or: [
-            { name: new RegExp(search, "i") },
-            { email: new RegExp(search, "i") },
-            { number: new RegExp(search, "i") },
-            { platform: new RegExp(search, "i") },
-          ],
-        }
+        $or: [
+          { name: new RegExp(search, "i") },
+          { email: new RegExp(search, "i") },
+          { number: new RegExp(search, "i") },
+          { platform: new RegExp(search, "i") },
+        ],
+      }
       : {};
 
     // Combine filters
@@ -546,7 +591,7 @@ exports.getAllUserFcm = async (req, res) => {
 exports.updateProfileDetails = async (req, res) => {
   try {
     const file = req.file || {};
-    const { name, email  } = req.body || {};
+    const { name, email } = req.body || {};
 
     const userData = Array.isArray(req.user.user)
       ? req.user.user[0]
@@ -619,7 +664,7 @@ exports.updateProfileDetails = async (req, res) => {
 
 exports.updateFcmAndDetails = async (req, res) => {
   try {
-    const { notificationPermission, whatsapp_notification, fcmToken, AppVersion ,deviceId} = req.body || {};
+    const { notificationPermission, whatsapp_notification, fcmToken, AppVersion, deviceId } = req.body || {};
 
     // Get user data from req.user
     const userData = Array.isArray(req.user.user)
@@ -656,8 +701,8 @@ exports.updateFcmAndDetails = async (req, res) => {
       user.fcmUpdated = new Date()
     }
 
-    if(deviceId){
-      user.deviceId=deviceId
+    if (deviceId) {
+      user.deviceId = deviceId
     }
     if (AppVersion) {
       user.AppVersion = AppVersion;
