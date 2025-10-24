@@ -5,23 +5,29 @@ const User = require('../../models/normal_user/User.model');
 const driver = require('../../models/Rider.model');
 const cron = require('node-cron')
 const RideBooking = require("../New-Rides-Controller/NewRideModel.model");
-const { AddRideInModelOfDb } = require('../../queues/IntercityRideAddQue');
+const { AddRideInModelOfDb, DriverSearchQueue } = require('../../queues/IntercityRideAddQue');
 
 
+
+/**
+ * Generate a secure 4-digit OTP
+ */
+function generateFourDigitOTP() {
+    return Math.floor(1000 + Math.random() * 9000).toString();
+}
+
+/**
+ * Add ride job to queue for driver search
+ */
 async function addRideJob(rideId) {
     if (!rideId) {
         throw new Error("Ride ID is required to add job");
     }
-
+    const searchDelay = 20 * 1000; // 20 seconds
     try {
-        const job = await AddRideInModelOfDb.add(
-            { id: rideId },   // data sent to the processor
-            {
-                attempts: 5,           // retry 3 times if fails
-                backoff: { type: 'exponential', delay: 5000 }, // retry delay
-                removeOnComplete: 50,  // keep last 50 completed jobs
-                removeOnFail: 100      // keep last 100 failed jobs
-            }
+        const job = await DriverSearchQueue.add(
+            { rideId: rideId.toString(), searchAttempt: 2 },
+            { delay: searchDelay }
         );
 
         console.log(`✅ Ride job added to queue with Job ID: ${job.id}`);
@@ -32,8 +38,9 @@ async function addRideJob(rideId) {
     }
 }
 
-// ===== PASSENGER BOOKING FUNCTIONS =====
-
+/**
+ * Book an intercity ride with comprehensive validation and dual model saving
+ */
 exports.bookIntercityRide = async (req, res) => {
     try {
         const {
@@ -48,14 +55,15 @@ exports.bookIntercityRide = async (req, res) => {
             returnDateTime,
             numberOfDays,
             distance,
+            isLater = false,
             duration,
             pricing,
             coupon
         } = req.body;
 
-        console.log('Booking intercity ride with data:', req.body);
+        console.log('📋 Booking intercity ride with data:', req.body);
 
-        // Input validation
+        // ===== BASIC INPUT VALIDATION =====
         if (!passengerId || !pickup || !dropoff || !vehicle || !goingDateTime || !pricing) {
             return res.status(400).json({
                 success: false,
@@ -87,7 +95,7 @@ exports.bookIntercityRide = async (req, res) => {
             });
         }
 
-        // Date and time validation
+        // ===== DATE AND TIME VALIDATION =====
         const now = new Date();
         const departureTime = new Date(goingDateTime);
 
@@ -99,46 +107,58 @@ exports.bookIntercityRide = async (req, res) => {
             });
         }
 
-        // For scheduled rides, ensure departure time is in the future
-        if (rideCategory === 'scheduled') {
-            const minimumAdvanceTime = new Date(now.getTime() + (30 * 60000)); // 30 minutes from now
+        // Validate departure time based on isLater flag
+        if (!isLater) {
+            // For immediate/scheduled rides (isLater = false), apply time constraints
+            if (rideCategory === 'scheduled') {
+                const minimumAdvanceTime = new Date(now.getTime() + (30 * 60000)); // 30 minutes from now
 
-            if (departureTime <= now) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Scheduled ride departure time cannot be in the past'
-                });
+                if (departureTime <= now) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Scheduled ride departure time cannot be in the past'
+                    });
+                }
+
+                if (departureTime < minimumAdvanceTime) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Scheduled rides must be booked at least 30 minutes in advance'
+                    });
+                }
+
+                // Check if departure time is too far in the future (e.g., 30 days)
+                const maxAdvanceTime = new Date(now.getTime() + (30 * 24 * 60 * 60000)); // 30 days from now
+                if (departureTime > maxAdvanceTime) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Scheduled rides cannot be booked more than 30 days in advance'
+                    });
+                }
             }
 
-            if (departureTime < minimumAdvanceTime) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Scheduled rides must be booked at least 30 minutes in advance'
-                });
+            // For leave-now rides, allow some flexibility but not past times
+            if (rideCategory === 'leave-now') {
+                const maxPastTime = new Date(now.getTime() - (15 * 60000)); // 15 minutes ago
+                if (departureTime < maxPastTime) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Departure time cannot be more than 15 minutes in the past'
+                    });
+                }
             }
-
-            // Check if departure time is too far in the future (e.g., 30 days)
-            const maxAdvanceTime = new Date(now.getTime() + (30 * 24 * 60 * 60000)); // 30 days from now
-            if (departureTime > maxAdvanceTime) {
+        } else {
+            // For later rides (isLater = true), skip time constraints but ensure it's not too far in the past
+            console.log('⏰ Later ride detected - skipping advance time validation');
+            if (departureTime < new Date(now.getTime() - (24 * 60 * 60000))) { // 1 day ago
                 return res.status(400).json({
                     success: false,
-                    message: 'Scheduled rides cannot be booked more than 30 days in advance'
+                    message: 'Departure time cannot be more than 1 day in the past'
                 });
             }
         }
 
-        // For leave-now rides, allow some flexibility but not past times
-        if (rideCategory === 'leave-now') {
-            const maxPastTime = new Date(now.getTime() - (15 * 60000)); // 15 minutes ago
-            if (departureTime < maxPastTime) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Departure time cannot be more than 15 minutes in the past'
-                });
-            }
-        }
-
-        // Validate return date for round trips
+        // ===== VALIDATE RETURN DATE FOR ROUND TRIPS =====
         let returnTime = null;
         if (tripType === 'round-trip') {
             if (!returnDateTime) {
@@ -174,7 +194,7 @@ exports.bookIntercityRide = async (req, res) => {
             }
         }
 
-        // Validate coordinates
+        // ===== VALIDATE COORDINATES =====
         if (!pickup.latitude || !pickup.longitude || !dropoff.latitude || !dropoff.longitude) {
             return res.status(400).json({
                 success: false,
@@ -190,7 +210,7 @@ exports.bookIntercityRide = async (req, res) => {
             });
         }
 
-        // Cross-validate distance using schema method
+        // ===== CALCULATE AND VALIDATE DISTANCE =====
         const calculatedDistance = IntercityRide.calculateDistance(
             pickup.latitude, pickup.longitude,
             dropoff.latitude, dropoff.longitude
@@ -198,30 +218,32 @@ exports.bookIntercityRide = async (req, res) => {
 
         // Validate distance and duration
         if (!distance || distance <= 0 || !duration || duration <= 0) {
+            console.log("Invalid distance or duration:", { distance, duration });
             return res.status(400).json({
                 success: false,
                 message: 'Invalid distance or duration values'
             });
         }
 
+
         // Log distance variance
         const distanceVariance = Math.abs(calculatedDistance - distance) / distance;
         if (distanceVariance > 0.1) {
-            console.warn(`Distance variance detected: provided=${distance}km, calculated=${calculatedDistance.toFixed(2)}km`);
+            console.warn(`⚠️ Distance variance detected: provided=${distance}km, calculated=${calculatedDistance.toFixed(2)}km`);
         }
 
-        // Calculate estimated time using schema method
+        // Calculate estimated time
         const calculatedEstimateTime = IntercityRide.estimateTime(calculatedDistance);
 
-        // Validate minimum intercity distance (e.g., at least 25 km)
-        if (calculatedDistance < 25) {
+        // Validate minimum intercity distance only if NOT a later ride
+        if (!isLater && calculatedDistance < 25) {
             return res.status(400).json({
                 success: false,
                 message: 'Minimum distance for intercity rides is 25 km'
             });
         }
 
-        // Validate pricing
+        // ===== VALIDATE PRICING =====
         if (!pricing.basePrice || pricing.basePrice <= 0 || !pricing.finalPrice || pricing.finalPrice <= 0) {
             return res.status(400).json({
                 success: false,
@@ -229,7 +251,7 @@ exports.bookIntercityRide = async (req, res) => {
             });
         }
 
-        // Validate user exists
+        // ===== VALIDATE USER EXISTS =====
         const user = await User.findById(passengerId);
         if (!user) {
             return res.status(404).json({
@@ -245,39 +267,17 @@ exports.bookIntercityRide = async (req, res) => {
             });
         }
 
-        // Check for duplicate booking
-        const timeBuffer = 30 * 60000; // 30 minutes buffer
-        const existingBooking = await IntercityRide.findOne({
-            passengerId: passengerId,
-            'route.origin.location.coordinates': [pickup.longitude, pickup.latitude],
-            'route.destination.location.coordinates': [dropoff.longitude, dropoff.latitude],
-            'vehicle.type': vehicle.name.toUpperCase(),
-            'schedule.departureTime': {
-                $gte: new Date(departureTime.getTime() - timeBuffer),
-                $lte: new Date(departureTime.getTime() + timeBuffer)
-            },
-            status: { $in: ['scheduled', 'driver_assigned', 'ride_in_progress'] }
-        });
-
-        // if (existingBooking) {
-        //     return res.status(409).json({
-        //         success: false,
-        //         message: 'You already have a similar booking for this time slot. Please check your existing bookings.',
-        //         existingBookingId: existingBooking._id.toString().slice(-8).toUpperCase()
-        //     });
-        // }
-
         // Update username if provided
         if (userName && userName.trim() && user.name !== userName.trim()) {
             user.name = userName.trim();
             await user.save();
+            console.log('✅ User name updated');
         }
 
-        // Calculate arrival time
+        // ===== CALCULATE ARRIVAL TIME =====
         const arrivalTime = new Date(departureTime.getTime() + (duration * 60000));
 
-        // Validate vehicle type
-        // Validate vehicle type
+        // ===== VALIDATE VEHICLE TYPE =====
         const validVehicleTypes = ['SEDAN', 'MINI', 'SUV', 'HATCHBACK', 'SUV/XL', 'XL'];
 
         if (!vehicle.name) {
@@ -297,9 +297,14 @@ exports.bookIntercityRide = async (req, res) => {
             });
         }
 
+        // ===== GENERATE 4-DIGIT OTP =====
+        const rideOTP = generateFourDigitOTP();
+        const otpExpiresAt = new Date(now.getTime() + (10 * 60000)); // 10 minutes validity
 
-        // Create ride object
-        const newRide = new IntercityRide({
+        console.log(`🔐 Generated 4-digit OTP: ${rideOTP}`);
+
+        // ===== CREATE INTERCITY RIDE (Primary Model) =====
+        const newIntercityRide = new IntercityRide({
             passengerId,
             tripType,
             rideCategory,
@@ -320,7 +325,7 @@ exports.bookIntercityRide = async (req, res) => {
                     },
                     address: dropoff.description
                 },
-                distance: calculatedDistance, // Use calculated distance
+                distance: calculatedDistance,
                 estimatedDuration: duration
             },
             schedule: {
@@ -336,30 +341,79 @@ exports.bookIntercityRide = async (req, res) => {
                 currency: pricing.currency || 'INR'
             },
             vehicle: {
-                type: vehicle.name.toUpperCase(),
-                capacity: ["SEDAN", "MINI"].includes(vehicle.name.toUpperCase()) ? 4 : 6
+                type: vehicleName,
+                capacity: ["SEDAN", "MINI"].includes(vehicleName) ? 4 : 6
             },
             coupon: coupon || null,
-            status: 'scheduled'
+            status: 'scheduled',
+            otp: {
+                code: rideOTP,
+                expiresAt: otpExpiresAt
+            },
+            isLater: isLater
         });
-
-
-
 
         // Add initial status to timeline
-        newRide.statusTimeline.push({
+        newIntercityRide.statusTimeline = newIntercityRide.statusTimeline || [];
+        newIntercityRide.statusTimeline.push({
             status: 'scheduled',
             timestamp: new Date(),
-            notes: 'Ride booked successfully'
+            notes: isLater ? 'Later ride booked successfully' : 'Ride booked successfully'
         });
 
-        const savedRide = await newRide.save();
+        const savedIntercityRide = await newIntercityRide.save();
+        console.log(`✅ IntercityRide saved with ID: ${savedIntercityRide._id}`);
 
-        // Generate OTP for ride verification
-        await savedRide.generateOTP();
-        console.log(`OTP generated for ride ${savedRide._id}: ${savedRide.otp.code}`);
+        // ===== CREATE RIDE REQUEST (Secondary Model) =====
+        const newRideRequest = new RideBooking({
+            user: passengerId,
+            intercityRideModel: savedIntercityRide._id,
+            vehicle_type: vehicleName,
+            pickup_location: {
+                type: 'Point',
+                coordinates: [pickup.longitude, pickup.latitude],
+            },
+            pickup_address: { formatted_address: pickup.description },
+            drop_location: {
+                type: 'Point',
+                coordinates: [dropoff.longitude, dropoff.latitude],
+            },
+            drop_address: { formatted_address: dropoff.description },
+            route_info: {
+                distance: calculatedDistance,
+                duration: duration,
+                polyline: pickup.polyline || null,
+            },
+            scheduled_at: departureTime,
+            IntercityPickupTime: departureTime,
+            rideType: tripType,
+            isIntercityRides: true,
+            isLater: isLater,
+            pricing: {
+                total_fare: pricing.finalPrice,
+                currency: pricing.currency || 'INR',
+                original_fare: pricing.basePrice,
+            },
+            ride_status: "pending",
+            ride_otp: rideOTP,
+            payment_method: pricing.paymentMethod || 'cash',
+            search_radius: 5,
+            max_search_radius: 25,
+            auto_increase_radius: true,
+            notified_riders: [],
+            rejected_by_drivers: [],
+            total_notifications_sent: 0,
+        });
 
-        // Enhanced WhatsApp message
+        const savedRideRequest = await newRideRequest.save();
+        console.log(`✅ RideRequestNew saved with ID: ${savedRideRequest._id}`);
+
+        // ===== UPDATE USER WITH RIDE REFERENCE =====
+        user.IntercityRide = savedIntercityRide._id;
+        await user.save();
+        console.log("✅ User updated with IntercityRide reference");
+
+        // ===== PREPARE WHATSAPP MESSAGE =====
         const formatDateTime = (date) => {
             return new Intl.DateTimeFormat('en-IN', {
                 day: '2-digit',
@@ -392,7 +446,11 @@ exports.bookIntercityRide = async (req, res) => {
         let message = `🎉 Hi ${user.name || 'Rider'}!\n\n`;
         message += `✅ Your intercity ${tripType} ride has been *confirmed*!\n\n`;
 
-        message += `🚗 *Vehicle:* ${vehicle.name}\n`;
+        if (isLater) {
+            message += `⏰ *Later Ride Scheduled*\n\n`;
+        }
+
+        message += `🚗 *Vehicle:* ${vehicleName}\n`;
         message += `📍 *From:* ${getPickupCity(pickup.description)}\n`;
         message += `📍 *To:* ${getDropoffCity(dropoff.description)}\n`;
         message += `🛣️ *Distance:* ${calculatedDistance.toFixed(1)} km (~${Math.floor(calculatedEstimateTime / 60)}h ${calculatedEstimateTime % 60}m)\n\n`;
@@ -410,12 +468,14 @@ exports.bookIntercityRide = async (req, res) => {
             message += `🎫 *Coupon Applied:* ${coupon}\n`;
         }
 
-        message += `\n📋 *Booking ID:* ${savedRide._id.toString().slice(-8).toUpperCase()}\n`;
-        message += `🔐 *Ride OTP:* ${savedRide.otp.code}\n`;
-        message += `⏰ *OTP Valid Until:* ${formatTime(savedRide.otp.expiresAt)}\n\n`;
+        message += `\n📋 *Booking ID:* ${savedIntercityRide._id.toString().slice(-8).toUpperCase()}\n`;
+        message += `🔐 *Ride OTP:* ${rideOTP}\n`;
+        message += `⏰ *OTP Valid Until:* ${formatTime(otpExpiresAt)}\n\n`;
 
         // Category-specific instructions
-        if (rideCategory === 'leave-now') {
+        if (isLater) {
+            message += `📅 *Later Ride* - This is a flexible booking. Driver details will be shared closer to your departure time.\n\n`;
+        } else if (rideCategory === 'leave-now') {
             message += `⏰ *Immediate Booking* - A driver will be assigned within *10 minutes*. Please be ready at your pickup point!\n\n`;
         } else if (rideCategory === 'scheduled') {
             const timeUntilDeparture = Math.round((departureTime - now) / (60 * 60000));
@@ -430,7 +490,7 @@ exports.bookIntercityRide = async (req, res) => {
 
         message += `⚠️ *Important Reminders:*\n`;
         message += `• Be ready 5-10 minutes before pickup\n`;
-        message += `• Share the OTP (${savedRide.otp.code}) with your driver\n`;
+        message += `• Share the OTP (${rideOTP}) with your driver\n`;
         message += `• Carry a valid ID for verification\n`;
         message += `• OTP expires in 10 minutes - new OTP will be generated if needed\n`;
         message += `• Contact support for any changes or issues\n\n`;
@@ -439,34 +499,42 @@ exports.bookIntercityRide = async (req, res) => {
         message += `🙏 Thank you for choosing Olyox!\n\n`;
         message += `Safe travels! 🛣️✨`;
 
-
-        if (user) {
-            user.IntercityRide = newRide._id;
-            await user.save();
-            console.log("Passenger updated");
+        // ===== SEND WHATSAPP NOTIFICATION =====
+        try {
+            await SendWhatsAppMessageNormal(message, user.number);
+            console.log('✅ WhatsApp notification sent successfully');
+        } catch (whatsappError) {
+            console.error('⚠️ WhatsApp notification failed:', whatsappError.message);
+            // Don't fail the booking if WhatsApp fails
         }
 
+        // ===== ADD JOB TO QUEUE FOR DRIVER SEARCH =====
+        try {
+            await addRideJob(savedRideRequest._id);
+            console.log('✅ Driver search job queued successfully');
+        } catch (jobError) {
+            console.error('⚠️ Failed to queue driver search job:', jobError.message);
+            // Don't fail the booking if job queuing fails
+        }
 
-        // Send WhatsApp notification
-        await SendWhatsAppMessageNormal(message, user.number);
-
-        //add a job to convert this to in ride model and start searching 
-        await addRideJob(newRide?._id)
-
-
+        // ===== RETURN SUCCESS RESPONSE =====
         return res.status(201).json({
             success: true,
-            ride: savedRide,
+            ride: savedIntercityRide,
+            rideRequest: savedRideRequest,
             message: 'Ride booked successfully and user notified via WhatsApp.',
-            bookingId: savedRide._id.toString().slice(-8).toUpperCase(),
-            otp: savedRide.otp.code,
-            otpExpiresAt: savedRide.otp.expiresAt,
+            bookingId: savedIntercityRide._id.toString().slice(-8).toUpperCase(),
+            otp: rideOTP,
+            otpExpiresAt: otpExpiresAt,
             departureTime: formatDateTime(departureTime),
-            estimatedArrival: formatTime(arrivalTime)
+            estimatedArrival: formatTime(arrivalTime),
+            isLater: isLater,
+            intercityRideId: savedIntercityRide._id,
+            rideRequestId: savedRideRequest._id
         });
 
     } catch (error) {
-        console.error('Error booking intercity ride:', error);
+        console.error('❌ Error booking intercity ride:', error);
 
         // Enhanced error handling
         let errorMessage = 'Something went wrong while booking the ride.';
@@ -487,17 +555,13 @@ exports.bookIntercityRide = async (req, res) => {
         } else if (error.message.includes('timeout')) {
             errorMessage = 'Request timeout. Please try again.';
             statusCode = 408;
-        } else if (error.message.includes('WhatsApp')) {
-            // If WhatsApp fails but ride is saved, still return success
-            console.warn('WhatsApp notification failed:', error.message);
-            errorMessage = 'Ride booked successfully but notification failed. You will receive updates shortly.';
-            statusCode = 201;
         }
 
         return res.status(statusCode).json({
-            success: statusCode === 201, // True only if it's a WhatsApp failure
+            success: false,
             message: errorMessage,
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     }
 };

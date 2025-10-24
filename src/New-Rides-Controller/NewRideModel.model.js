@@ -290,6 +290,10 @@ const RideRequestSchema = new Schema({
         min: 0,
         default: 0
     },
+    isLater: {
+        type: Boolean,
+        default: false
+    },
 
     // Driver Search and Assignment
     search_radius: {

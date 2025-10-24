@@ -172,8 +172,8 @@ async function sendNoDriverWhatsApp(ride, logger) {
         });
 
         const message = `Dear ${user.name || 'Customer'},\n\nWe're sorry, but we couldn't find an available driver for your intercity ride scheduled at ${pickupTime}.\n\nPickup: ${ride.pickup_address.formatted_address}\nDrop: ${ride.drop_address.formatted_address}\n\nPlease try booking again or contact support for assistance.\n\nThank you,\nOlyox Team`;
-
-        await SendWhatsAppMessageNormal(message, user.number);
+        
+        // await SendWhatsAppMessageNormal(message, user.number);
 
         await logger.notification(`WhatsApp sent to user ${user.number} for ride ${ride._id}`);
 

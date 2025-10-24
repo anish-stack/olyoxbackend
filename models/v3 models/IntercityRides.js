@@ -186,12 +186,16 @@ const intercityRidesSchema = new mongoose.Schema({
         enum: ['leave-now', 'scheduled'],
         default: 'scheduled'
     },
+      isLater: {
+        type: Boolean,
+        default: false
+    },
 
     // OTP for verification
     otp: {
         code: {
             type: String,
-            length: 6
+            length: 4
         },
         generatedAt: {
             type: Date
