@@ -30,7 +30,7 @@ async function getCachedOrFetchDirections(req, cacheKey, originKey, destinationK
       params: {
         origin: originKey,
         destination: destinationKey,
-        key: "AIzaSyCr2aKtwOMiUdR0rBMpE0MCWBHvehwoOtM",
+        key: "AIzaSyBfRHuTByG6CiXtLbyzK_aKNpJfDiB4jUo",
         traffic_model: "best_guess",
         departure_time: "now",
         alternatives: true
