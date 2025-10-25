@@ -66,19 +66,6 @@ const initializeFirebase = () => {
 };
 
 const sendNotification = async (token, title, body, eventData = null, channel) => {
-  console.log("🔔 sendNotification() called with args:", {
-    token: token ? token.substring(0, 15) + "..." : null,
-    title,
-    body,
-    channel,
-  });
-
-  if (eventData) {
-    console.log("📌 EventData detected:", eventData.rideDetails || {});
-  } else {
-    console.log("📌 No eventData provided — sending notification-only message.");
-  }
-
   try {
     // Validate input
     if (!token) {
@@ -86,25 +73,20 @@ const sendNotification = async (token, title, body, eventData = null, channel) =
       throw new NotificationError("No FCM token provided", "INVALID_TOKEN");
     }
 
-    console.log("✅ Token looks valid, proceeding...");
-
     // Ensure Firebase is initialized
     try {
-      console.log("⚡ Initializing Firebase...");
       initializeFirebase();
-      console.log("✅ Firebase initialized successfully");
     } catch (initError) {
       console.error("❌ Firebase init failed:", initError.message);
       throw new NotificationError("Failed to initialize Firebase", "INIT_FAILED");
     }
 
-    console.log("ℹ️ Preparing notification payload...");
-
+    // Build base message
     const message = {
       token,
       notification: {
         title: title || "New Ride by server",
-        body: body || "₹119.18 - Sector 99A to Sector 29",
+        body: body || "New ride request",
       },
       android: {
         priority: "high",
@@ -117,46 +99,47 @@ const sendNotification = async (token, title, body, eventData = null, channel) =
       },
     };
 
+    // Add data payload if eventData exists
     if (eventData && Object.keys(eventData).length > 0) {
-      console.log("eventData",eventData)
+      // Safely extract rideDetails with null checks
+      const rideDetails = eventData.rideDetails || {};
+      const pickup = rideDetails.pickup || {};
+      const drop = rideDetails.drop || {};
+      const pricing = rideDetails.pricing || {};
+
       message.data = {
-        event: eventData.event || "DEFAULT_EVENT",
-        distance: String(eventData?.rideDetails?.distance || ""),
-        distance_from_pickup_km: String(eventData?.rideDetails?.distance_from_pickup_km || ""),
-        vehicleType: String(eventData?.rideDetails?.vehicleType || ""),
-        rideId: String(eventData?.rideDetails?.rideId || ""),
-        isRental: String(eventData?.rideDetails.isRental || false),
-        rentalHours: String(eventData.rideDetails?.rentalHours || 0),
-        rental_km_limit: String(eventData?.rideDetails?.rental_km_limit || 0),
-        pickup: String(eventData?.rideDetails?.pickup?.formatted_address || ""),
-        drop: String(eventData?.rideDetails?.drop?.formatted_address || ""),
-        price: String(eventData?.rideDetails?.pricing?.total_fare || ""),
+        event: String(eventData.event || "DEFAULT_EVENT"),
+        distance: String(rideDetails.distance || ""),
+        distance_from_pickup_km: String(rideDetails.distance_from_pickup_km || ""),
+        vehicleType: String(rideDetails.vehicleType || ""),
+        rideId: String(rideDetails.rideId || ""),
+        isRental: String(rideDetails.isRental || false),
+        rentalHours: String(rideDetails.rentalHours || 0),
+        rental_km_limit: String(rideDetails.rental_km_limit || 0),
+        pickup: String(pickup.formatted_address || ""),
+        drop: String(drop.formatted_address || ""),
+        price: String(pricing.total_fare || ""),
       };
     }
 
-
-    console.log("📦 Final payload:", JSON.stringify(message, null, 2));
-
     // Send notification
-    console.log("📤 Sending notification via FCM...");
     const response = await admin.messaging().send(message);
-    console.log("✅ Notification sent successfully. FCM Response:", response);
+    console.log("✅ Notification sent successfully");
 
     return response;
   } catch (error) {
-    console.error("❌ Error while sending notification:", error);
+    console.error("❌ Error sending notification:", error.message);
 
+    // Handle specific error codes
     switch (error.code) {
       case "messaging/invalid-argument":
-        console.warn(`⚠️ Invalid FCM message argument: ${error.message}`);
+        console.warn("⚠️ Invalid FCM message argument");
         break;
       case "messaging/invalid-recipient":
-        console.warn(
-          `⚠️ Invalid FCM token (${token ? token.substring(0, 10) + "..." : "NULL"})`
-        );
+        console.warn("⚠️ Invalid FCM token");
         break;
       case "app/invalid-credential":
-        console.error("❌ Firebase credential error. Check service account.");
+        console.error("❌ Firebase credential error");
         break;
       case "INIT_FAILED":
         console.error("❌ Firebase initialization failed");
@@ -165,18 +148,17 @@ const sendNotification = async (token, title, body, eventData = null, channel) =
         console.warn("⚠️ No FCM token provided");
         break;
       default:
-        console.error(`❌ Notification send failed: ${error.message}`);
+        console.error("❌ Notification send failed:", error.message);
     }
 
     if (error instanceof NotificationError) {
-      console.log("⚠️ Returning null due to NotificationError");
       return null;
     }
 
-    console.log("⚠️ Returning undefined due to unknown error");
-    return;
+    return null;
   }
 };
+
 
 // Test hook for direct module execution
 if (require.main === module) {
