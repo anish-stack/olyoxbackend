@@ -178,7 +178,7 @@ const intercityRidesSchema = new mongoose.Schema({
 
     rideType: {
         type: String,
-        enum: ['one_way', 'round_trip'],
+        enum: ['one_way', 'round_trip','rental'],
         default: 'one_way'
     },
     rideCategory: {

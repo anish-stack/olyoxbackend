@@ -1,5 +1,6 @@
 const axios = require('axios');
 const RidesSuggestionModel = require('../../models/Admin/RidesSuggestion.model');
+const settings = require('../../models/Admin/Settings');
 
 // In-memory cache for directions (simple cache for current session)
 const directionsCache = new Map();
@@ -120,7 +121,7 @@ async function getWeatherCondition(latitude, longitude) {
       params: {
         lat: latitude,
         lon: longitude,
-        appid: apiKey, // Replace with your weather API key
+        appid: apiKey,
         units: "metric"
       },
       timeout: 5000
@@ -141,6 +142,86 @@ async function getWeatherCondition(latitude, longitude) {
   }
 }
 
+/**
+ * Calculate rental prices for vehicles (only if distance < 69 km and isLater = false)
+ */
+async function calculateRentalPrices(distance_km, traffic_duration_minutes) {
+  try {
+    // Fetch rental settings
+    const rentalSettings = await settings.findOne().select('rental');
+
+    if (!rentalSettings || !rentalSettings.rental) {
+      console.warn('⚠️ No rental settings found in database');
+      return [];
+    }
+
+    const rentalVehicles = [];
+    const vehicleTypes = ['mini', 'sedan', 'suv'];
+
+    for (const vehicleType of vehicleTypes) {
+      const rentalConfig = rentalSettings.rental[vehicleType];
+      if (!rentalConfig || !rentalConfig.isAvailable) continue;
+
+      const {
+        baseKmPrice = 0,
+        pricePerKm = 0,
+        pricePerMin = 0,
+        vehicleImage = '',
+        baseFare = 0,
+        fixedKmforBaseFare = 0,
+        showingName = vehicleType.toUpperCase(),
+        isAvailable
+      } = rentalConfig;
+
+      // ✅ Enforce minimum 1-hour (60 min) charge
+      const effectiveMinutes = Math.max(traffic_duration_minutes, 60);
+
+      // ✅ Distance breakdown logic
+      const extraKm = Math.max(0, distance_km - fixedKmforBaseFare);
+
+      // ✅ Cost calculations
+      const extraKmCost = extraKm * pricePerKm;
+      const timeCost = effectiveMinutes * pricePerMin;
+
+      // ✅ Total price
+      const totalPrice = baseFare + extraKmCost + timeCost;
+
+      // ✅ Construct response
+      rentalVehicles.push({
+        vehicleType: showingName,
+        vehicleName: vehicleType.toUpperCase(),
+        vehicleImage,
+        totalPrice: Math.round(totalPrice * 100) / 100,
+        distanceInKm: Math.round(distance_km * 100) / 100,
+        durationInMinutes: Math.round(effectiveMinutes * 100) / 100,
+        pricing: {
+          baseFare: Math.round(baseFare * 100) / 100,
+          baseKmIncluded: fixedKmforBaseFare,
+          extraKm: Math.round(extraKm * 100) / 100,
+          extraKmCost: Math.round(extraKmCost * 100) / 100,
+          timeCost: Math.round(timeCost * 100) / 100,
+          pricePerKm: Math.round(pricePerKm * 100) / 100,
+          pricePerMin: Math.round(pricePerMin * 100) / 100
+        },
+        isRental: true,
+        isAvailable
+      });
+    }
+
+    // Sort results by total price
+    rentalVehicles.sort((a, b) => a.totalPrice - b.totalPrice);
+
+    console.log(`✅ Calculated rental prices for ${rentalVehicles.length} vehicle types`);
+    return rentalVehicles;
+
+  } catch (error) {
+    console.error('❌ Error calculating rental prices:', error.message);
+    return [];
+  }
+}
+
+
+
 // Main price calculation function
 exports.calculateRidePriceForUser = async (req, res) => {
   const startTime = performance.now();
@@ -149,13 +230,16 @@ exports.calculateRidePriceForUser = async (req, res) => {
     const {
       origin,
       destination,
+      distance,
+      isLater = false,
+      duration,
       waitingTimeInMinutes = 0,
       vehicleIds = [],
       isNightTime,
       timezone = 'Asia/Kolkata'
     } = req.body;
 
-    console.log("Request Body for price:", req.body);
+    console.log("📋 Request Body for price:", req.body);
 
     // Input validation
     if (!origin?.latitude || !origin?.longitude ||
@@ -183,23 +267,6 @@ exports.calculateRidePriceForUser = async (req, res) => {
     // Create cache keys
     const directionsCacheKey = `directions:${origin.latitude},${origin.longitude}:${destination.latitude},${destination.longitude}`;
 
-    // Fetch vehicles
-    const vehicleQuery = vehicleIds.length > 0
-      ? { _id: { $in: vehicleIds }, status: true }
-      : { status: true };
-
-    const vehicles = await RidesSuggestionModel.find(vehicleQuery);
-
-    if (!vehicles.length) {
-      return res.status(404).json({
-        success: false,
-        message: vehicleIds.length > 0
-          ? "No active vehicles found for the specified vehicle IDs"
-          : "No active vehicles found",
-        executionTime: `${((performance.now() - startTime) / 1000).toFixed(3)}s`
-      });
-    }
-
     // Get directions data (primary requirement)
     const directionsData = await getDirectionsData(origin, destination, directionsCacheKey);
 
@@ -211,7 +278,7 @@ exports.calculateRidePriceForUser = async (req, res) => {
         new Promise(resolve => setTimeout(() => resolve(false), 3000)) // 3 second timeout
       ]);
     } catch (error) {
-      console.warn('Weather check failed, proceeding without weather data');
+      console.warn('⚠️ Weather check failed, proceeding without weather data');
     }
 
     const { distance_km, traffic_duration_minutes } = directionsData;
@@ -224,6 +291,49 @@ exports.calculateRidePriceForUser = async (req, res) => {
         executionTime: `${((performance.now() - startTime) / 1000).toFixed(3)}s`
       });
     }
+
+    // Determine ride type based on distance and isLater flag
+    const isIntercityRide = distance_km > 69;
+    const shouldCalculateRentals = distance_km < 69;
+
+    console.log(`🚗 Ride Type: ${isIntercityRide ? 'INTERCITY' : 'LOCAL'} | Distance: ${distance_km.toFixed(2)} km | isLater: ${isLater}`);
+
+    // ===== FETCH VEHICLES WITH FILTERING =====
+    let vehicleQuery = { status: true };
+
+    // If specific vehicle IDs are provided, use them
+    if (vehicleIds.length > 0) {
+      vehicleQuery._id = { $in: vehicleIds };
+    }
+
+    // CRITICAL FIX: For intercity rides or later rides, exclude Bike and Auto
+    // The database field is 'name', not 'vehicleName'
+    if (isIntercityRide) {
+      console.log('🚫 Intercity/Later ride detected - Excluding Bike and Auto');
+
+      // Use case-insensitive regex to match all variations of Bike and Auto
+      vehicleQuery.name = {
+        $not: { $regex: /^(bike|auto)$/i }
+      };
+    }
+
+    console.log('🔍 Vehicle Query:', JSON.stringify(vehicleQuery, null, 2));
+
+    const vehicles = await RidesSuggestionModel.find(vehicleQuery);
+
+    if (!vehicles.length) {
+      return res.status(404).json({
+        success: false,
+        message: vehicleIds.length > 0
+          ? "No active vehicles found for the specified vehicle IDs"
+          : isIntercityRide
+            ? "No active vehicles found for intercity rides (Bike and Auto excluded)"
+            : "No active vehicles found",
+        executionTime: `${((performance.now() - startTime) / 1000).toFixed(3)}s`
+      });
+    }
+
+    console.log(`✅ Found ${vehicles.length} eligible vehicles (Bike/Auto excluded: ${isIntercityRide})`);
 
     // Calculate prices for all vehicles
     const vehiclePrices = vehicles.map(vehicle => {
@@ -283,32 +393,51 @@ exports.calculateRidePriceForUser = async (req, res) => {
           isRaining,
           baseKmIncluded: baseKM,
           chargeableDistance: Math.round(chargeableDistance * 100) / 100
-        }
+        },
+        isRental: false
       };
     });
 
+    // Calculate rental prices if conditions are met
+    // Rentals are NOT included for intercity rides or later rides
+    let rentalVehiclePrices = [];
+    if (shouldCalculateRentals) {
+      console.log('🚕 Calculating rental vehicle prices (distance < 69 km and isLater = false)...');
+      rentalVehiclePrices = await calculateRentalPrices(distance_km, traffic_duration_minutes);
+    } else {
+      console.log('🚫 Skipping rental calculations (intercity ride or later ride)');
+    }
+
     const executionTime = `${((performance.now() - startTime) / 1000).toFixed(3)}s`;
 
-    console.log("Price Calculation Summary:", {
+    console.log("💰 Price Calculation Summary:", {
       distance: `${distance_km.toFixed(2)} km`,
       duration: `${traffic_duration_minutes.toFixed(2)} mins`,
       isNightTime: actualIsNightTime,
       isRaining,
-      vehicleCount: vehicles.length,
+      isLater,
+      isIntercityRide,
+      regularVehicleCount: vehicles.length,
+      rentalVehicleCount: rentalVehiclePrices.length,
+      bikeAutoExcluded: isIntercityRide,
       executionTime
     });
 
-    // Sort by price (lowest first)
+    // Sort regular vehicles by price (lowest first)
     vehiclePrices.sort((a, b) => a.totalPrice - b.totalPrice);
 
-    return res.status(200).json({
+    // Prepare response
+    const response = {
       success: true,
       message: "Ride prices calculated successfully",
+      rideType: isIntercityRide ? 'intercity' : 'local',
       routeInfo: {
         distanceInKm: Math.round(distance_km * 100) / 100,
         durationInMinutes: Math.round(traffic_duration_minutes * 100) / 100,
         distanceText: directionsData.distance_text,
         durationText: directionsData.duration_text,
+        isIntercityRide,
+        isLaterRide: isLater,
         conditions: {
           isNightTime: actualIsNightTime,
           isRaining,
@@ -317,11 +446,24 @@ exports.calculateRidePriceForUser = async (req, res) => {
       },
       vehiclePrices,
       executionTime
-    });
+    };
+
+    // Add rental prices to response if available (only for local non-later rides)
+    if (rentalVehiclePrices.length > 0) {
+      response.rentalVehiclePrices = rentalVehiclePrices;
+      response.message = "Ride prices calculated successfully (including rental options)";
+    }
+
+    // Add note about excluded vehicles for intercity/later rides
+    if (isIntercityRide) {
+      response.note = "Bike and Auto excluded for intercity/later rides. Rental vehicles not available.";
+    }
+
+    return res.status(200).json(response);
 
   } catch (error) {
     const executionTime = `${((performance.now() - startTime) / 1000).toFixed(3)}s`;
-    console.error("Error calculating ride price:", error);
+    console.error("❌ Error calculating ride price:", error);
 
     return res.status(500).json({
       success: false,
@@ -329,5 +471,84 @@ exports.calculateRidePriceForUser = async (req, res) => {
       error: process.env.NODE_ENV === 'development' ? error.message : "Internal server error",
       executionTime
     });
+  }
+};
+
+exports.reCalculatePriceForOnlyRentals = async (req, res) => {
+  const startTime = performance.now();
+
+  try {
+    const {
+      rentalType,
+      originalHours,
+      additionalHours,
+      originalDistanceKm,
+      currentFare = 0
+    } = req.body;
+
+    const origHrs = parseFloat(originalHours);
+    const addHrs = parseFloat(additionalHours);
+    const origDist = parseFloat(originalDistanceKm);
+    const currFare = parseFloat(currentFare);
+
+    // Validate input
+    if (isNaN(origHrs) || isNaN(addHrs) || isNaN(origDist) || origHrs < 0 || origDist < 0) {
+      return res.status(400).json({ success: false, message: "Invalid numeric values" });
+    }
+
+    // Fetch rental settings
+    const rentalSettings = await settings.findOne().select("rental");
+    const config = rentalSettings?.rental?.[rentalType];
+    if (!config || !config.isAvailable) {
+      return res.status(400).json({ success: false, message: "Rental type unavailable" });
+    }
+
+    const { pricePerMin } = config;
+
+    let totalHours = origHrs + addHrs;
+    let estimatedDistanceKm = origDist;
+    let additionalTimeCost = 0;
+    let totalFare = currFare;
+
+    // Special case: originalHours = 1 AND additionalHours = 1
+    if (origHrs === 1 && addHrs === 1) {
+      estimatedDistanceKm += 15; // add 15 km
+      totalHours = origHrs;       // keep hours same
+      totalFare = currFare;       // keep fare same
+    } else if (addHrs > 0) {
+      // Normal calculation for other cases
+      const additionalMinutes = addHrs * 60;
+      additionalTimeCost = additionalMinutes * pricePerMin;
+
+      // Extra distance only after first hour
+      const extraHoursAfterFirst = Math.max(totalHours - 1, 0);
+      estimatedDistanceKm = origDist + (extraHoursAfterFirst * 15);
+
+      // Update total fare
+      totalFare = currFare + additionalTimeCost;
+    }
+
+    const response = {
+      success: true,
+     additional: {
+        originalHours: parseFloat(origHrs.toFixed(2)),
+        additionalHours: parseFloat(addHrs.toFixed(2)),
+        current:originalDistanceKm,
+        totalHours: parseFloat(totalHours.toFixed(2)),
+        estimatedDistanceKm: parseFloat(estimatedDistanceKm.toFixed(2)),
+        currentFare: parseFloat(currFare.toFixed(2)),
+        additionalTimeCost: parseFloat(additionalTimeCost.toFixed(2)),
+        totalFare: parseFloat(totalFare.toFixed(2))
+      },
+      executionTime: `${((performance.now() - startTime) / 1000).toFixed(3)}s`
+    };
+
+    console.log("📋 Recalculation:", response.additional);
+
+    return res.status(200).json(response);
+
+  } catch (error) {
+    console.error("❌ Error in reCalculatePriceForOnlyRentals:", error);
+    return res.status(500).json({ success: false, message: error.message || error });
   }
 };

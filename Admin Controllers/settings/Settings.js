@@ -38,7 +38,7 @@ exports.getSetting = async (req, res) => {
 
     // Store in cache
     settingsCache.set(CACHE_KEY, setting);
-    console.log("setting",setting)
+
     res.status(200).json(setting);
   } catch (error) {
     console.log("error in setting",error)

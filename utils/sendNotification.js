@@ -118,17 +118,22 @@ const sendNotification = async (token, title, body, eventData = null, channel) =
     };
 
     if (eventData && Object.keys(eventData).length > 0) {
+      console.log("eventData",eventData)
       message.data = {
         event: eventData.event || "DEFAULT_EVENT",
-        distance:String(eventData?.rideDetails?.distance || ""),
-        distance_from_pickup_km:String(eventData?.rideDetails?.distance_from_pickup_km || ""),
+        distance: String(eventData?.rideDetails?.distance || ""),
+        distance_from_pickup_km: String(eventData?.rideDetails?.distance_from_pickup_km || ""),
         vehicleType: String(eventData?.rideDetails?.vehicleType || ""),
         rideId: String(eventData?.rideDetails?.rideId || ""),
+        isRental: String(eventData?.rideDetails.isRental || false),
+        rentalHours: String(eventData.rideDetails?.rentalHours || 0),
+        rental_km_limit: String(eventData?.rideDetails?.rental_km_limit || 0),
         pickup: String(eventData?.rideDetails?.pickup?.formatted_address || ""),
         drop: String(eventData?.rideDetails?.drop?.formatted_address || ""),
         price: String(eventData?.rideDetails?.pricing?.total_fare || ""),
       };
     }
+
 
     console.log("📦 Final payload:", JSON.stringify(message, null, 2));
 

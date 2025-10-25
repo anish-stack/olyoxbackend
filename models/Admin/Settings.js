@@ -1,5 +1,16 @@
 const mongoose = require('mongoose');
 
+const RentalTypeSchema = new mongoose.Schema({
+    baseKmPrice: { type: Number, default: 0 },
+    pricePerKm: { type: Number, default: 0 },
+    pricePerMin: { type: Number, default: 0 },
+    baseFare: { type: Number, default: 0 },
+    isAvailable: { type: Boolean, default: false },
+    vehicleImage: { type: String, default: '' },   // image URL
+    showingName: { type: String, default: '' },
+    fixedKmforBaseFare: { type: Number, default: 0 }
+}, { _id: false });
+
 const SettingsSchema = new mongoose.Schema({
     appName: {
         type: String,
@@ -101,11 +112,16 @@ const SettingsSchema = new mongoose.Schema({
         type: String
 
     },
-    support_number_driver:{
-        type:String
+    support_number_driver: {
+        type: String
     },
     whatsappNumber: {
         type: String
+    },
+    rental: {
+        mini: { type: RentalTypeSchema, default: () => ({}) },
+        sedan: { type: RentalTypeSchema, default: () => ({}) },
+        suv: { type: RentalTypeSchema, default: () => ({}) },
     }
 }, { timestamps: true });
 

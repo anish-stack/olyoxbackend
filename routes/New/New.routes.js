@@ -2,7 +2,7 @@
 const express = require('express');
 const { NewcreateRequest, BookingDetailsAdmin, ride_status_after_booking, riderFetchPoolingForNewRides, riderActionAcceptOrRejectRide, ride_status_after_booking_for_drivers, changeCurrentRiderRideStatus, verifyRideOtp, collectPayment, cancelRideByPoll, RateYourRider, cancelRideRequest, FetchAllBookedRides, AdminChangeCurrentRiderRideStatus, FindRiderNearByUser, riderActionAcceptOrRejectRideVia, findMyRideNewMode } = require('../../src/New-Rides-Controller/CreateNewRides');
 const Protect = require('../../middleware/Auth');
-const { calculateRidePriceForUser } = require('../../src/New-Rides-Controller/FindPrice');
+const { calculateRidePriceForUser, reCalculatePriceForOnlyRentals } = require('../../src/New-Rides-Controller/FindPrice');
 const { updateRiderPreferences, getRiderPreferences } = require('../../src/New-Rides-Controller/V3/RIderPrefrencesUpdate');
 const { bookIntercityRide, getBookingDetailsById, getAvailableRides, acceptRide, RejectRide, getBookingDetails, verifyRideOTPIntercity, startRide, completeRide, paymentCollect, cancelRide, rateYourInterCity, IntercityRideAll, getDriversForRide } = require('../../src/v3/IntercityRides');
 const { getAllRides } = require('../../controllers/ride.request');
@@ -12,6 +12,7 @@ NewRoutes.post('/new-ride', Protect, NewcreateRequest)
 NewRoutes.post('/new-ride-fake', NewcreateRequest)
 
 NewRoutes.post('/new-price-calculations', calculateRidePriceForUser)
+NewRoutes.post('/recalculate-rental',reCalculatePriceForOnlyRentals)
 NewRoutes.get('/status/:rideId', ride_status_after_booking)
 NewRoutes.post('/find-rider-near-user', FindRiderNearByUser)
 

@@ -19,14 +19,14 @@ function generateFourDigitOTP() {
 /**
  * Add ride job to queue for driver search
  */
-async function addRideJob(rideId) {
+async function addRideJob(rideId,req) {
     if (!rideId) {
         throw new Error("Ride ID is required to add job");
     }
     const searchDelay = 20 * 1000; // 20 seconds
     try {
         const job = await DriverSearchQueue.add(
-            { rideId: rideId.toString(), searchAttempt: 2 },
+            { rideId: rideId.toString(),req, searchAttempt: 2 },
             { delay: searchDelay }
         );
 
@@ -49,6 +49,9 @@ exports.bookIntercityRide = async (req, res) => {
             pickup,
             dropoff,
             vehicle,
+            isRental,
+            rentalHours,
+            estimatedKm,
             userName,
             passengerId,
             goingDateTime,
@@ -80,7 +83,7 @@ exports.bookIntercityRide = async (req, res) => {
         }
 
         // Validate trip type
-        if (!['one-way', 'round-trip'].includes(tripType)) {
+        if (!['one-way', 'round-trip', 'rental'].includes(tripType)) {
             return res.status(400).json({
                 success: false,
                 message: 'Invalid trip type. Must be either "one-way" or "round-trip"'
@@ -217,13 +220,13 @@ exports.bookIntercityRide = async (req, res) => {
         );
 
         // Validate distance and duration
-        if (!distance || distance <= 0 || !duration || duration <= 0) {
-            console.log("Invalid distance or duration:", { distance, duration });
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid distance or duration values'
-            });
-        }
+        // if (!distance || distance <= 0 || !duration || duration <= 0) {
+        //     console.log("Invalid distance or duration:", { distance, duration });
+        //     return res.status(400).json({
+        //         success: false,
+        //         message: 'Invalid distance or duration values'
+        //     });
+        // }
 
 
         // Log distance variance
@@ -318,7 +321,7 @@ exports.bookIntercityRide = async (req, res) => {
                     address: pickup.description
                 },
                 destination: {
-                    city: dropoff.description.split(',').slice(-2).join(',').trim() || "Unknown City",
+                    city: dropoff.description,
                     location: {
                         type: 'Point',
                         coordinates: [dropoff.longitude, dropoff.latitude]
@@ -387,14 +390,18 @@ exports.bookIntercityRide = async (req, res) => {
             scheduled_at: departureTime,
             IntercityPickupTime: departureTime,
             rideType: tripType,
-            isIntercityRides: true,
+            isIntercity: estimatedKm > 69 ? true:false,
+            isIntercityRides: estimatedKm > 69 ? true:false,
             isLater: isLater,
+            is_rental: isRental || false,
+            rentalHours: rentalHours || 0,
+            rental_km_limit: estimatedKm || 0,
             pricing: {
                 total_fare: pricing.finalPrice,
                 currency: pricing.currency || 'INR',
                 original_fare: pricing.basePrice,
             },
-            ride_status: "pending",
+            ride_status: "searching",
             ride_otp: rideOTP,
             payment_method: pricing.paymentMethod || 'cash',
             search_radius: 5,
