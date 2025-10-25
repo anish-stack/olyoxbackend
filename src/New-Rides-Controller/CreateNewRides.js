@@ -1335,7 +1335,7 @@ exports.cancelRideRequest = async (req, res) => {
         console.log("rejectedRiderIds", rejectedRiderIds);
         // Stop background notification loop
         console.log("🧠 Stopping notification loop for ride:", rideId);
-        stopNotificationLoop(rideId);
+        stopBackgroundNotifications(rideId);
 
         // Emit socket event to clear ride request for active notified riders
         if (io && notifiedRiderIds.length > 0) {
@@ -2634,7 +2634,7 @@ const handleRideAcceptance = async (req, res, ride, driver, io) => {
         console.info(`✅ Driver ${driverId} accepted ride ${rideId}`);
 
         // Stop notification loop immediately
-        stopNotificationLoop(rideId);
+       stopBackgroundNotifications(rideId);
 
         // Handle fake rides
         if (assignedRide.isFake) {
@@ -4242,7 +4242,7 @@ exports.cancelRideByPoll = async (req, res) => {
             rideData.cancelled_at = new Date();
             rideData.cancellation_reason = reason || null;
 
-            stopNotificationLoop(rideData._id);
+           stopBackgroundNotifications(rideData._id);
 
             // 🔹 Free driver if assigned
             if (rideData.driver) {
