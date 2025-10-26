@@ -544,7 +544,15 @@ DriverSearchQueue.process(2, async (job) => {
                 vehicleCompatible =
                     driver.preferences?.OlyoxAcceptMiniRides ||
                     driver.preferences?.OlyoxIntercity;
+            } else if (
+                requiredVehicle === "SUV" &&
+                ["SEDAN", "MINI", "XL", "SUV/XL"].includes(driverVehicle)
+            ) {
+                vehicleCompatible =
+                    driver.preferences?.OlyoxAcceptSUVRides ||
+                    driver.preferences?.OlyoxIntercity;
             }
+
 
             if (!vehicleCompatible) {
                 ineligibleReasons.vehicleMismatch++;
