@@ -66,6 +66,8 @@ const initializeFirebase = () => {
 };
 
 const sendNotification = async (token, title, body, eventData = null, channel) => {
+      console.log("✅ channel",channel);
+
   try {
     // Validate input
     if (!token) {

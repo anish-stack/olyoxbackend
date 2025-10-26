@@ -907,7 +907,7 @@ app.get("/rider-light/:tempRide", async (req, res) => {
     console.log("[STEP 3] Fetching lightweight ride data from MongoDB...");
 
     const ride = await NewRideModelModel.findById(tempRide)
-      .select("ride_status payment_status")
+      .select("ride_status payment_status pickup_location")
       .populate({
         path: "driver",
         select: "location", // Only select driver's location field
@@ -927,6 +927,7 @@ app.get("/rider-light/:tempRide", async (req, res) => {
         rideId:tempRide || ride?._id,
         payment_status: ride.payment_status,
         ride_status: ride.ride_status,
+        pickup:ride.pickup_location,
         driver_location: ride.driver?.location,
         updated_at: ride.updatedAt, // Optional: for client-side timestamp tracking
       },

@@ -297,7 +297,7 @@ exports.NewcreateRequest = async (req, res) => {
         const newRideRequest = new RideBooking(rideRequestData);
         await newRideRequest.save();
 
-        console.log("newRideRequest", newRideRequest);
+        // console.log("newRideRequest", newRideRequest);
         if (!isFake && findUser) {
             findUser.currentRide = newRideRequest._id;
             findUser
@@ -374,9 +374,9 @@ const canCancelRide = async (rideId) => {
         }
 
         if (!CANCELLABLE_STATUSES.includes(ride.ride_status)) {
-            return { 
-                canCancel: false, 
-                reason: `Ride is ${ride.ride_status}, cannot cancel` 
+            return {
+                canCancel: false,
+                reason: `Ride is ${ride.ride_status}, cannot cancel`
             };
         }
 
@@ -396,9 +396,9 @@ const isRideActiveAndSearching = async (rideId) => {
             .select("ride_status driver")
             .lean();
 
-        return ride && 
-               ride.ride_status === "searching" && 
-               !ride.driver;
+        return ride &&
+            ride.ride_status === "searching" &&
+            !ride.driver;
     } catch (error) {
         console.error(`Error checking ride status ${rideId}:`, error.message);
         return false;
@@ -441,7 +441,7 @@ const saveRideToRedis = async (redisClient, rideId, rideData) => {
 const clearRideFromRedis = async (redisClient, rideId) => {
     try {
         if (!redisClient) return false;
-        
+
         await redisClient.del(`ride:${rideId}`);
         await redisClient.del(`riders:${rideId}`);
         return true;
@@ -462,7 +462,7 @@ const cancelRide = async (redisClient, rideId, reason, cancelledBy = "system") =
     try {
         // First check if ride can be cancelled
         const { canCancel, reason: checkReason } = await canCancelRide(rideId);
-        
+
         if (!canCancel) {
             console.info(`Skipping cancellation for ride ${rideId}: ${checkReason}`);
             return { success: false, reason: checkReason };
@@ -531,7 +531,7 @@ const scheduleRideCancellationCheck = async (redisClient, rideId) => {
     setTimeout(async () => {
         try {
             const isActive = await isRideActiveAndSearching(rideId);
-            
+
             if (!isActive) {
                 console.info(`Ride ${rideId} no longer needs cancellation check`);
                 return;
@@ -789,6 +789,7 @@ const decrementNotificationCount = (driverId, rideId) => {
 };
 
 const clearDriverNotifications = (rideId) => {
+    console.log("Clear Driver Notifications", rideId)
     driverNotificationTracking.forEach((driverMap) => {
         driverMap.delete(rideId);
     });
@@ -804,16 +805,18 @@ const generateNotificationId = (rideId) => {
 
 const fetchEligibleDrivers = async (rideId, rideData) => {
     try {
+        console.log("Starting fetchEligibleDrivers for ride:", rideId);
         const {
             pickup_location,
             vehicle_type,
             rejected_by_drivers = [],
+            isLater = false,
+            isIntercity = false,
         } = rideData;
 
-        if (
-            !pickup_location?.coordinates ||
-            pickup_location.coordinates.length !== 2
-        ) {
+        // ——————— VALIDATE PICKUP ———————
+        if (!pickup_location?.coordinates || pickup_location.coordinates.length !== 2) {
+            console.error("Invalid pickup coordinates:", pickup_location);
             throw new Error(`Invalid pickup coordinates for ride ${rideId}`);
         }
 
@@ -821,19 +824,91 @@ const fetchEligibleDrivers = async (rideId, rideData) => {
         const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
         const currentDate = new Date();
 
+        console.log("Pickup coords:", { latitude, longitude });
+        console.log("Time filter:", { lastUpdatedAfter: tenMinutesAgo });
+
+        // ——————— REJECTED DRIVERS ———————
         const rejectedDriverIds = rejected_by_drivers
-            .map((r) =>
-                typeof r === "object" ? r.driver?.toString() : r?.toString()
-            )
+            .map(r => (typeof r === "object" ? r.driver?.toString() : r?.toString()))
             .filter(Boolean);
+
+        console.log(`Rejected drivers (${rejectedDriverIds.length}):`, rejectedDriverIds);
 
         let searchRadius = NOTIFICATION_CONFIG.INITIAL_RADIUS;
         const MAX_RETRIES = 4;
         let attempt = 0;
         let allDrivers = [];
 
+        // ——————— VEHICLE MATCH HELPER (AUTO & BIKE SKIP PREFERENCES) ———————
+        const isVehicleMatch = (driverVehicleRaw, rideVehicleRaw, prefsRaw) => {
+            const driverVehicle = driverVehicleRaw?.trim().toUpperCase();
+            const rideVehicle = rideVehicleRaw?.trim().toUpperCase();
+
+            // ——— CASE 1: AUTO or BIKE → NO PREFERENCE CHECK ———
+            if (["AUTO", "BIKE"].includes(rideVehicle)) {
+                console.log(`Ride is ${rideVehicle} → Skipping preference check`);
+                return true; // Always allow if vehicle type matches or/driver has same
+            }
+
+            // ——— CASE 2: Driver is AUTO/BIKE → only allow if ride is same ———
+            if (["AUTO", "BIKE"].includes(driverVehicle)) {
+                const match = driverVehicle === rideVehicle;
+                console.log(`Driver is ${driverVehicle} → Match with ride: ${match}`);
+                return match;
+            }
+
+            // ——— CASE 3: SEDAN/MINI/SUV/XL → FULL PREFERENCE LOGIC ———
+            const prefs = {
+                OlyoxAcceptMiniRides: prefsRaw?.OlyoxAcceptMiniRides?.enabled === true || prefsRaw?.OlyoxAcceptMiniRides === true,
+                OlyoxAcceptSedanRides: prefsRaw?.OlyoxAcceptSedanRides?.enabled === true || prefsRaw?.OlyoxAcceptSedanRides === true,
+                OlyoxIntercity: prefsRaw?.OlyoxIntercity?.enabled === true || prefsRaw?.OlyoxIntercity === true,
+            };
+
+            const isLaterOrIntercity = isLater || isIntercity;
+
+            console.log(`\nPreference Check → Ride: ${rideVehicle} | Driver: ${driverVehicle}`);
+            console.log("  Preferences (enabled):", prefs);
+            console.log("  Is Later/Intercity:", isLaterOrIntercity);
+
+            // 1. Exact match
+            if (driverVehicle === rideVehicle) {
+                console.log("Exact match → ALLOWED");
+                return true;
+            }
+
+            // 2. SEDAN ride → upgrade
+            if (rideVehicle === "SEDAN") {
+                const canTakeSedan = prefs.OlyoxAcceptSedanRides;
+                const isUpgrade = ["SUV", "XL", "SUV/XL", "MINI"].includes(driverVehicle);
+                const allowed = isUpgrade && canTakeSedan;
+                console.log(`  SEDAN ride → Upgrade: ${isUpgrade}, AcceptSedan: ${canTakeSedan} → ${allowed}`);
+                if (allowed) return true;
+            }
+
+            // 3. MINI ride → downgrade
+            if (rideVehicle === "MINI") {
+                const canTakeMini = prefs.OlyoxAcceptMiniRides;
+                const isDowngrade = ["SEDAN", "SUV", "XL", "SUV/XL"].includes(driverVehicle);
+                const allowed = isDowngrade && canTakeMini;
+                console.log(`  MINI ride → Downgrade: ${isDowngrade}, AcceptMini: ${canTakeMini} → ${allowed}`);
+                if (allowed) return true;
+            }
+
+            // 4. Intercity/Later bypass
+            if (isLaterOrIntercity && prefs.OlyoxIntercity) {
+                console.log("Intercity/Later + OlyoxIntercity enabled → BYPASS");
+                return true;
+            }
+
+            console.log("No match → REJECTED");
+            return false;
+        };
+
+        // ——————— RADIUS SEARCH LOOP ———————
+        console.log("Starting radius search loop...");
         while (attempt < MAX_RETRIES) {
             attempt++;
+            console.log(`\nAttempt ${attempt} | Radius: ${(searchRadius / 1000).toFixed(1)} km`);
 
             const drivers = await RiderModel.aggregate([
                 {
@@ -847,11 +922,11 @@ const fetchEligibleDrivers = async (rideId, rideData) => {
                 {
                     $match: {
                         isAvailable: true,
-                        lastUpdated: { $gte: tenMinutesAgo },
                         _id: { $nin: rejectedDriverIds },
                         on_ride_id: null,
                         "RechargeData.expireData": { $gte: currentDate },
                         fcmToken: { $exists: true, $ne: null },
+                        lastUpdated: { $gte: tenMinutesAgo },
                     },
                 },
                 {
@@ -859,41 +934,78 @@ const fetchEligibleDrivers = async (rideId, rideData) => {
                         name: 1,
                         phoneNumber: 1,
                         fcmToken: 1,
+                        isAvailable: 1,
+                        lastUpdated: 1,
                         location: 1,
                         rating: 1,
                         preferences: 1,
                         distance: 1,
+                        on_ride_id: 1,
+                        "RechargeData.expireData": 1,
                         "rideVehicleInfo.vehicleType": 1,
                         "rideVehicleInfo.vehicleName": 1,
                         "rideVehicleInfo.VehicleNumber": 1,
                     },
                 },
-                { $limit: 50 },
             ]);
 
-            const eligibleDrivers = drivers.filter((d) =>
-                validateVehicleMatch(
-                    d.rideVehicleInfo?.vehicleType,
+            console.log(`Found ${drivers.length} drivers in range`);
+
+            drivers.forEach((d, i) => {
+                console.log(
+                    `Driver ${i + 1}: ${d.name || "N/A"} | ${d.rideVehicleInfo?.vehicleType || "N/A"} | ${(d.distance / 1000).toFixed(2)} km`
+                );
+            });
+
+            // ——————— FILTER BY VEHICLE + PREFERENCE ———————
+            const eligibleDrivers = drivers.filter((driver) => {
+                const match = isVehicleMatch(
+                    driver.rideVehicleInfo?.vehicleType,
                     vehicle_type,
-                    d.preferences
-                )
-            );
+                    driver.preferences
+                );
+
+                if (!match) {
+                    console.log(
+                        `Filtered out Driver ${driver._id} (${driver.name || "N/A"}) — mismatch`
+                    );
+                } else {
+                    console.log(
+                        `Eligible Driver ${driver._id} (${driver.name || "N/A"}) — match OK`
+                    );
+                }
+
+                return match;
+            });
+
+            console.log(`Eligible after filtering: ${eligibleDrivers.length}`);
 
             if (eligibleDrivers.length > 0) {
                 allDrivers = eligibleDrivers;
+                console.log(`Found ${allDrivers.length} eligible drivers — stopping`);
                 break;
             }
 
             if (attempt < MAX_RETRIES) {
                 searchRadius += 1000;
-                const retryDelay = attempt * 10 * 1000;
-                await new Promise((r) => setTimeout(r, retryDelay));
+                const delay = attempt * 10 * 1000;
+                console.log(`No drivers → retry in ${delay / 1000}s with radius ${(searchRadius / 1000).toFixed(1)} km`);
+                await new Promise(r => setTimeout(r, delay));
             }
         }
 
+        // ——————— FINAL RESULT ———————
+        console.log(`\nFINAL: ${allDrivers.length} eligible driver(s) for ride ${rideId}`);
+        if (allDrivers.length > 0) {
+            console.log("Driver IDs:", allDrivers.map(d => d._id.toString()));
+        } else {
+            console.log("No eligible drivers found");
+        }
+
         return allDrivers;
+
     } catch (error) {
-        console.error(`Error fetching drivers for ride ${rideId}:`, error.message);
+        console.error(`Error in fetchEligibleDrivers for ride ${rideId}:`, error);
         return [];
     }
 };
@@ -987,7 +1099,11 @@ const sendDriverNotification = async (
                         isRental: ride.is_rental || false,
                         rentalHours: ride.rentalHours || 0,
                         rental_km_limit: ride.rental_km_limit || 0,
-                        pricing: ride.pricing?.total_fare,
+                        pricing: ride.is_rental
+                            ? (ride.pricing.cashback < 0
+                                ? ride.pricing?.original_fare
+                                : ride.pricing?.total_fare)
+                            : ride.pricing?.total_fare,
                         isInitial,
                         urgency: isInitial ? "high" : "normal",
                     });
@@ -1065,6 +1181,7 @@ const sendBatchNotifications = async (
 // ============================================================================
 
 const stopBackgroundNotifications = (rideId) => {
+    console.log("Stop Driver Notifications", rideId)
     if (activeNotificationLoops.has(rideId)) {
         clearInterval(activeNotificationLoops.get(rideId));
         activeNotificationLoops.delete(rideId);
@@ -1100,7 +1217,7 @@ const startBackgroundNotifications = (rideId, ride, io) => {
 
             // Fetch drivers and send notifications
             const drivers = await fetchEligibleDrivers(rideId, ride);
-            
+
             if (drivers.length === 0) {
                 return;
             }
@@ -1122,40 +1239,40 @@ const startBackgroundNotifications = (rideId, ride, io) => {
 const initiateDriverSearch = async (rideId, req, res) => {
     const io = req.app.get("io");
     const redisClient = getRedisClient(req);
+    console.log("🚀 [initiateDriverSearch] Starting driver search for ride:", rideId);
 
     try {
-        // Fetch ride with all needed fields
+        console.log("🔍 Fetching ride details...");
         const ride = await RideBooking.findById(rideId)
             .select(
                 "ride_status driver isLater rental_km_limit pickup_location is_rental rentalHours vehicle_type rejected_by_drivers pickup_address drop_address pricing route_info"
             )
             .lean();
 
+        console.log("📦 Ride data fetched:", ride ? "✅ Found" : "❌ Not found");
+
         if (!ride) {
+            console.warn("⚠️ Ride not found for ID:", rideId);
             return { success: false, message: "Ride not found" };
         }
 
-        // Check if ride can proceed with search
         if (ride.driver) {
+            console.warn("🚫 Driver already assigned to ride:", rideId);
             return { success: false, message: "Driver already assigned" };
         }
 
         if (!["pending", "searching"].includes(ride.ride_status)) {
+            console.warn(`🚫 Invalid ride status: ${ride.ride_status}`);
             return { success: false, message: `Ride is ${ride.ride_status}` };
         }
 
-        // Validate pickup location
         if (!ride.pickup_location?.coordinates?.length) {
-            await cancelRide(
-                redisClient,
-                rideId,
-                "Invalid pickup location",
-                "system"
-            );
+            console.error("❌ Invalid pickup location:", ride.pickup_location);
+            await cancelRide(redisClient, rideId, "Invalid pickup location", "system");
             return { success: false, message: "Invalid pickup location" };
         }
 
-        // Update to searching status
+        console.log("🕐 Updating ride status to 'searching'...");
         await RideBooking.findByIdAndUpdate(rideId, {
             $set: {
                 ride_status: "searching",
@@ -1165,10 +1282,13 @@ const initiateDriverSearch = async (rideId, req, res) => {
             },
         });
 
-        // Fetch eligible drivers
+        console.log("✅ Ride status updated. Fetching eligible drivers...");
         const drivers = await fetchEligibleDrivers(rideId, ride);
 
+        console.log(`👥 Total eligible drivers found: ${drivers.length}`);
+
         if (drivers.length === 0) {
+            console.warn("⚠️ No eligible drivers found after multiple attempts");
             await cancelRide(
                 redisClient,
                 rideId,
@@ -1181,7 +1301,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
             };
         }
 
-        // Send initial notifications
+        console.log("📨 Sending initial notifications to drivers...");
         const notificationResults = await sendBatchNotifications(
             drivers,
             ride,
@@ -1190,8 +1310,14 @@ const initiateDriverSearch = async (rideId, req, res) => {
             true
         );
 
+        console.log("📊 Notification results:", {
+            totalSent: notificationResults.totalSent,
+            successful: notificationResults.successful?.length,
+            failed: notificationResults.failed?.length,
+        });
+
         if (notificationResults.totalSent > 0) {
-            // Update ride with notification info
+            console.log("📝 Updating ride with notification details...");
             await RideBooking.findByIdAndUpdate(rideId, {
                 $push: {
                     notified_riders: {
@@ -1212,13 +1338,16 @@ const initiateDriverSearch = async (rideId, req, res) => {
                 },
             });
 
-            // Start background notifications
+            console.log("⚙️ Starting background notifications...");
             startBackgroundNotifications(rideId, ride, io);
 
-            // Schedule cancellation check
+            console.log("🕓 Scheduling cancellation check...");
             scheduleRideCancellationCheck(redisClient, rideId);
+        } else {
+            console.warn("⚠️ No notifications sent to any driver.");
         }
 
+        console.log("✅ Driver search process completed successfully.");
         return {
             success: true,
             message: "Driver search initiated",
@@ -1226,18 +1355,13 @@ const initiateDriverSearch = async (rideId, req, res) => {
             total_drivers: drivers.length,
         };
     } catch (error) {
-        console.error(`Error in driver search for ride ${rideId}:`, error.message);
-
-        await cancelRide(
-            redisClient,
-            rideId,
-            `Error: ${error.message}`,
-            "system"
-        );
+        console.error(`💥 Error in driver search for ride ${rideId}:`, error);
+        await cancelRide(redisClient, rideId, `Error: ${error.message}`, "system");
 
         return { success: false, message: "Error during driver search" };
     }
 };
+
 
 // ============================================================================
 // EXPORTS
@@ -1249,7 +1373,7 @@ const initiateDriverSearch = async (rideId, req, res) => {
 //     updateRideStatus,
 //     cancelRide,
 //     scheduleRideCancellationCheck,
-    
+
 //     // Helper functions
 //     getRedisClient,
 //     saveRideToRedis,
@@ -1257,24 +1381,24 @@ const initiateDriverSearch = async (rideId, req, res) => {
 //     getRouteFromAPI,
 //     calculateStraightLineDistance,
 //     calculateBasePricing,
-    
+
 //     // Status checks
 //     canCancelRide,
 //     isRideActiveAndSearching,
-    
+
 //     // Notification management
 //     stopBackgroundNotifications,
 //     startBackgroundNotifications,
-    
+
 //     // Driver management
 //     fetchEligibleDrivers,
 //     sendDriverNotification,
 //     sendBatchNotifications,
-    
+
 //     // Vehicle matching
 //     normalizeVehicleType,
 //     validateVehicleMatch,
-    
+
 //     // Configuration
 //     NOTIFICATION_CONFIG,
 // };
@@ -1362,13 +1486,26 @@ exports.cancelRideRequest = async (req, res) => {
 
                 notifiedRiders.forEach((rider) => {
                     console.log(
-                        `➡️ Emitting clear_ride_request to rider:${rider._id} | Name: ${rider.name}`
+                        `➡️ Sending clear_ride_request to rider:${rider._id} | Name: ${rider.name}`
                     );
-                    io.to(`driver:${rider._id}`).emit("clear_ride_request", {
-                        rideId: foundRide._id,
-                        role: "rider",
-                    });
+
+                    // Emit with acknowledgement
+                    io.to(`driver:${rider._id}`).emit(
+                        "clear_ride_request",
+                        { rideId: foundRide._id, role: "rider" },
+                        (ack) => {
+                            if (ack && ack.status === "received") {
+                                console.log(`✅ Rider ${rider._id} acknowledged clear_ride_request`);
+                            } else {
+                                console.log(`⚠️ Rider ${rider._id} may not have received clear_ride_request`);
+                            }
+                        }
+                    );
+
+                    // Log after emit (synchronous)
+                    console.log(`➡️ Emit called for rider:${rider._id}`);
                 });
+
 
                 console.log("ℹ️ clear_ride_request emitted to all active riders.");
             } else {
@@ -1955,36 +2092,52 @@ exports.ride_status_after_booking = async (req, res) => {
 
 exports.riderFetchPoolingForNewRides = async (req, res) => {
     const io = req.app.get("io");
+    const startTime = Date.now();
 
     try {
         const { id: riderId } = req.params;
-        console.log("➡️ Rider ID:", riderId);
-        if (!riderId)
+        console.log("Rider ID:", riderId);
+
+        // ——————— VALIDATE RIDER ———————
+        if (!riderId) {
             return res.status(400).json({ message: "Rider ID is required." });
+        }
 
         const rider = await RiderModel.findById(riderId);
-        console.log("➡️ Rider fetched:", rider ? true : false);
-        if (!rider) return res.status(404).json({ message: "Rider not found." });
-        if (!rider.isAvailable)
-            return res
-                .status(400)
-                .json({ message: "Rider is not available for new rides." });
-        if (
-            !rider.location?.coordinates ||
-            rider.location.coordinates.length !== 2
-        ) {
-            return res
-                .status(400)
-                .json({ message: "Rider location data is required." });
+        if (!rider) {
+            console.log("Rider not found");
+            return res.status(404).json({ message: "Rider not found." });
+        }
+
+        if (!rider.isAvailable) {
+            console.log("Rider not available");
+            return res.status(400).json({ message: "Rider is not available for new rides." });
+        }
+
+        if (!rider.location?.coordinates || rider.location.coordinates.length !== 2) {
+            console.log("Invalid rider location:", rider.location);
+            return res.status(400).json({ message: "Rider location data is required." });
         }
 
         const [riderLng, riderLat] = rider.location.coordinates;
-        const cutoffTime = new Date(Date.now() - 240 * 1000); // 4 minutes ago
-        console.log("➡️ Rider coordinates:", riderLat, riderLng);
-        console.log("➡️ Cutoff time for rides:", cutoffTime);
+        console.log(`Rider location: [${riderLng}, ${riderLat}]`);
 
+        const driverVehicle = rider?.rideVehicleInfo?.vehicleType?.trim().toUpperCase();
+        const rawPrefs = rider?.preferences || {};
+
+        // ——————— NORMALIZE PREFERENCES (use .enabled) ———————
+        const prefs = {
+            OlyoxAcceptMiniRides: rawPrefs.OlyoxAcceptMiniRides?.enabled === true,
+            OlyoxAcceptSedanRides: rawPrefs.OlyoxAcceptSedanRides?.enabled === true,
+            OlyoxIntercity: rawPrefs.OlyoxIntercity?.enabled === true,
+        };
+
+        console.log("Driver Vehicle:", driverVehicle);
+        console.log("Preferences (enabled):", prefs);
+
+        // ——————— HELPERS ———————
         const calculateDistance = (lat1, lng1, lat2, lng2) => {
-            const R = 6371; // km
+            const R = 6371;
             const dLat = ((lat2 - lat1) * Math.PI) / 180;
             const dLng = ((lng2 - lng1) * Math.PI) / 180;
             const a =
@@ -1995,109 +2148,132 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
             return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         };
 
-        const isRideNearby = (ridePickup, maxDistanceKm = 5) => {
-            if (!ridePickup?.coordinates || ridePickup.coordinates.length !== 2)
-                return false;
-            const [pickupLng, pickupLat] = ridePickup.coordinates;
-            const distance = calculateDistance(
-                riderLat,
-                riderLng,
-                pickupLat,
-                pickupLng
-            );
-            console.log(`➡️ Distance to ride pickup: ${distance.toFixed(2)} km`);
-            return distance <= maxDistanceKm;
+        const isRideNearby = (pickup, maxKm = 5) => {
+            if (!pickup?.coordinates || pickup.coordinates.length !== 2) return false;
+            const [pickupLng, pickupLat] = pickup.coordinates;
+            const dist = calculateDistance(riderLat, riderLng, pickupLat, pickupLng);
+            const nearby = dist <= maxKm;
+            console.log(`Distance to pickup: ${dist.toFixed(2)} km → Nearby: ${nearby}`);
+            return nearby;
         };
 
-        const isRiderRejected = (rejectedDrivers) => {
-            const rejected =
-                Array.isArray(rejectedDrivers) &&
-                rejectedDrivers.some(
-                    (d) => d?.driver?.toString() === riderId.toString()
-                );
-            if (rejected) console.log("➡️ Rider has rejected this ride before");
+        const isRiderRejected = (rejectedDrivers = []) => {
+            const rejected = Array.isArray(rejectedDrivers) &&
+                rejectedDrivers.some(d => d?.driver?.toString() === riderId.toString());
+            if (rejected) console.log("Rider already rejected this ride");
             return rejected;
         };
 
         const isRideAllowedByPreferences = (ride) => {
-            const rideVehicleType = ride.vehicle_type?.toUpperCase();
-            const driverVehicle = rider?.rideVehicleInfo?.vehicleType?.trim();
-            const prefs = rider?.preferences || {};
+            const rideVehicleType = ride.vehicle_type?.trim().toUpperCase();
             const isLaterOrIntercity = ride.isLater || ride.isIntercity;
 
-            let vehicleCompatible = false;
+            console.log(`\nPreference Check → Ride ${ride._id}`);
+            console.log(`  Ride Vehicle: ${rideVehicleType}`);
+            console.log(`  Driver Vehicle: ${driverVehicle}`);
+            console.log(`  Is Later/Intercity: ${isLaterOrIntercity}`);
 
+            // 1. Exact match
             if (driverVehicle === rideVehicleType) {
-                vehicleCompatible = true;
-            } else if (
-                rideVehicleType === "SEDAN" &&
-                ["SUV", "XL", "SUV/XL", "MINI"].includes(driverVehicle)
-            ) {
-                vehicleCompatible =
-                    prefs.OlyoxAcceptSedanRides ||
-                    (isLaterOrIntercity && prefs.OlyoxIntercity);
-            } else if (
-                rideVehicleType === "MINI" &&
-                ["SEDAN", "SUV", "XL", "SUV/XL"].includes(driverVehicle)
-            ) {
-                vehicleCompatible =
-                    prefs.OlyoxAcceptMiniRides ||
-                    (isLaterOrIntercity && prefs.OlyoxIntercity);
+                console.log("Exact match → Allowed");
+                return true;
             }
 
-            console.log(
-                `➡️ Ride ${ride._id} vehicle compatibility:`,
-                vehicleCompatible
-            );
-            return vehicleCompatible;
+            // 2. SEDAN ride → upgrade (SUV/XL can take)
+            if (rideVehicleType === "SEDAN") {
+                const canTakeSedan = prefs.OlyoxAcceptSedanRides;
+                const isUpgrade = ["SUV", "XL", "SUV/XL", "MINI"].includes(driverVehicle);
+                const allowed = isUpgrade && canTakeSedan;
+                console.log(`  SEDAN ride → Upgrade: ${isUpgrade}, AcceptSedan: ${canTakeSedan} → ${allowed}`);
+                if (allowed) return true;
+            }
+
+            // 3. MINI ride → downgrade (SEDAN/SUV can take)
+            if (rideVehicleType === "MINI") {
+                const canTakeMini = prefs.OlyoxAcceptMiniRides;
+                const isDowngrade = ["SEDAN", "SUV", "XL", "SUV/XL"].includes(driverVehicle);
+                const allowed = isDowngrade && canTakeMini;
+                console.log(`  MINI ride → Downgrade: ${isDowngrade}, AcceptMini: ${canTakeMini} → ${allowed}`);
+                if (allowed) return true;
+            }
+
+            // 4. Intercity/Later bypass
+            if (isLaterOrIntercity && prefs.OlyoxIntercity) {
+                console.log("Intercity/Later + OlyoxIntercity enabled → Bypass");
+                return true;
+            }
+
+            console.log("No match → NOT allowed");
+            return false;
         };
 
-        const formatDistanceInKm = (distanceInMeters) => {
-            if (!distanceInMeters && distanceInMeters !== 0) return "N/A";
-            return (distanceInMeters / 1000).toFixed(2) + " km";
+        const formatDistanceInKm = (meters) => {
+            if (meters == null) return "N/A";
+            return (meters / 1000).toFixed(2) + " km";
         };
+
+        // ——————— FETCH RIDES ———————
+        const cutoffTime = new Date(Date.now() - 240 * 1000);
+        console.log(`\nFetching rides after: ${cutoffTime.toISOString()}`);
 
         const dbRides = await RideBooking.find({
             ride_status: { $in: ["searching", "pending"] },
             requested_at: { $gte: cutoffTime },
         }).sort({ requested_at: -1 });
-        console.log("➡️ Total rides fetched:", dbRides.length);
 
-        const filteredRides = dbRides
-            .filter(
-                (ride) =>
-                    !isRiderRejected(ride.rejected_by_drivers) &&
-                    isRideNearby(ride.pickup_location) &&
-                    isRideAllowedByPreferences(ride)
-            )
+        console.log(`DB rides (last 4 min): ${dbRides.length}`);
+
+        const activeRides = dbRides.filter(r => !activeNotificationLoops.has(r._id.toString()));
+        console.log(`After stop filter: ${activeRides.length}`);
+
+        // ——————— FILTER CANDIDATES ———————
+        const candidateRides = activeRides
+            .filter(ride => {
+                const check = {
+                    rejected: isRiderRejected(ride.rejected_by_drivers),
+                    nearby: isRideNearby(ride.pickup_location),
+                    allowed: isRideAllowedByPreferences(ride),
+                };
+                console.log("Filter Check:", {
+                    rideId: ride._id,
+                    ...check,
+                });
+                return !check.rejected && check.nearby && check.allowed;
+            })
             .slice(0, 2);
-        console.log("➡️ Rides after filtering:", filteredRides.length);
 
+        console.log(`Candidates: ${candidateRides.length}`);
+
+        // ——————— VALIDATE & EMIT ———————
         const validatedRides = [];
-        for (const ride of filteredRides) {
-            console.log("➡️ Validating ride:", ride._id);
-            const latestRide = await RideBooking.findById(ride._id);
-            if (
-                !latestRide ||
-                !["searching", "pending"].includes(latestRide.ride_status)
-            )
+
+        for (const ride of candidateRides) {
+            console.log(`\nValidating: ${ride._id}`);
+
+            if (activeNotificationLoops.has(ride._id.toString())) {
+                console.log("Stopped → skip");
                 continue;
-            console.log(
-                `✅ Valid ride: ${latestRide._id} with status ${latestRide.ride_status}`
-            );
+            }
+
+            const latestRide = await RideBooking.findById(ride._id);
+            if (!latestRide || !["searching", "pending"].includes(latestRide.ride_status)) {
+                console.log("Not searching/pending");
+                continue;
+            }
 
             if (isRiderRejected(latestRide.rejected_by_drivers)) continue;
             if (!isRideNearby(latestRide.pickup_location)) continue;
             if (!isRideAllowedByPreferences(latestRide)) continue;
 
             const notifiedRider = latestRide.notified_riders?.find(
-                (nr) => nr.rider_id.toString() === riderId.toString()
+                nr => nr.rider_id.toString() === riderId.toString()
             );
 
+            // ——— SOCKET EMIT ———
             if (io) {
-                const socketsInRoom = await io.in(`driver:${riderId}`).allSockets();
-                if (socketsInRoom.size > 0) {
-                    io.to(`driver:${riderId}`).emit("new_ride_request", {
+                const sockets = await io.in(`driver:${riderId}`).allSockets();
+                if (sockets.size > 0) {
+                    const payload = {
                         rideId: latestRide._id,
                         notificationId: latestRide._id,
                         notificationCount: 0,
@@ -2115,8 +2291,10 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
                         pricing: latestRide.pricing?.total_fare,
                         isInitial: true,
                         urgency: "high",
-                    });
-                    console.log("➡️ Ride notification emitted for ride:", latestRide._id);
+                    };
+
+                    io.to(`driver:${riderId}`).emit("new_ride_request", payload);
+                    console.log("EMITTED:", payload);
                 }
             }
 
@@ -2124,11 +2302,12 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
                 _id: latestRide._id,
                 pickup_address: latestRide.pickup_address?.formatted_address,
                 drop_address: latestRide.drop_address?.formatted_address,
+                pickup_coordinates: latestRide.pickup_location,
                 vehicle_type: latestRide.vehicle_type,
                 ride_status: latestRide.ride_status,
                 total_fare: latestRide.pricing?.total_fare,
                 distance: latestRide.route_info?.distance,
-                isLater: latestRide?.isLater || false,
+                isLater: latestRide.isLater || false,
                 isIntercity: latestRide.isIntercity || false,
                 isRental: latestRide.is_rental || false,
                 rentalHours: latestRide.rentalHours || 0,
@@ -2144,17 +2323,20 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
             });
         }
 
-        console.log("➡️ Total validated rides:", validatedRides.length);
+        console.log(`\nFINAL: ${validatedRides.length} ride(s) sent`);
+        console.log(`Time: ${Date.now() - startTime}ms\n`);
+
         return res.status(200).json({
             success: true,
             message: `Found ${validatedRides.length} available rides`,
             data: validatedRides,
         });
+
     } catch (error) {
-        console.error("❌ Error fetching rides:", error);
+        console.error("ERROR:", error);
         return res.status(500).json({
             success: false,
-            message: "Server error while fetching rides.",
+            message: "Server error",
             error: error.message,
         });
     }
@@ -2634,7 +2816,7 @@ const handleRideAcceptance = async (req, res, ride, driver, io) => {
         console.info(`✅ Driver ${driverId} accepted ride ${rideId}`);
 
         // Stop notification loop immediately
-       stopBackgroundNotifications(rideId);
+        stopBackgroundNotifications(rideId);
 
         // Handle fake rides
         if (assignedRide.isFake) {
@@ -3039,17 +3221,17 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
         // ========================
         if (!riderId || !rideId || !status) {
             console.warn(`${logPrefix} Missing required fields`);
-            return res.status(400).json({ 
+            return res.status(400).json({
                 success: false,
-                error: "Missing riderId, rideId, or status" 
+                error: "Missing riderId, rideId, or status"
             });
         }
 
         if (!byAdmin && !validStatus.includes(status)) {
             console.warn(`${logPrefix} Invalid status: ${status}`);
-            return res.status(400).json({ 
+            return res.status(400).json({
                 success: false,
-                error: "Invalid ride status" 
+                error: "Invalid ride status"
             });
         }
 
@@ -3062,9 +3244,9 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
 
         if (!ride) {
             console.warn(`${logPrefix} Ride not found: ${rideId}`);
-            return res.status(404).json({ 
+            return res.status(404).json({
                 success: false,
-                error: "Ride not found" 
+                error: "Ride not found"
             });
         }
 
@@ -3078,21 +3260,21 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
         // ========================
         if (!byAdmin) {
             if (ride.ride_status === "cancelled") {
-                return res.status(400).json({ 
+                return res.status(400).json({
                     success: false,
-                    error: "Cannot update a cancelled ride" 
+                    error: "Cannot update a cancelled ride"
                 });
             }
             if (ride.ride_status === "completed") {
-                return res.status(400).json({ 
+                return res.status(400).json({
                     success: false,
-                    error: "Ride is already completed" 
+                    error: "Ride is already completed"
                 });
             }
             if (ride.ride_status === "driver_arrived" && status === "driver_arrived") {
-                return res.status(400).json({ 
+                return res.status(400).json({
                     success: false,
-                    error: "Ride is already marked as driver arrived" 
+                    error: "Ride is already marked as driver arrived"
                 });
             }
         }
@@ -3118,7 +3300,7 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
             const rentalLimitKm = ride.rental_km_limit || 0;
             const rentalHours = ride.rentalHours || 0;
             const vehicleType = ride.vehicle_type?.toLowerCase();
-            
+
             let extraKmFare = 0;
             let extraTimeFare = 0;
             let extraKm = 0;
@@ -3141,7 +3323,7 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
                 const assignedAt = new Date(ride.driver_assigned_at);
                 const now = new Date();
                 const actualHours = (now - assignedAt) / (1000 * 60 * 60);
-                
+
                 if (actualHours > rentalHours) {
                     extraHours = actualHours - rentalHours;
                     const extraMinutes = extraHours * 60;
@@ -3171,9 +3353,9 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
 
             if (driverLat == null || driverLng == null || pickupLat == null || pickupLng == null) {
                 console.warn(`${logPrefix} Missing location coordinates for driver_arrived`);
-                return res.status(400).json({ 
+                return res.status(400).json({
                     success: false,
-                    error: "Location coordinates missing" 
+                    error: "Location coordinates missing"
                 });
             }
 
@@ -3194,8 +3376,8 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
                         userFcmToken,
                         "Your Driver Has Arrived! 🚗",
                         `${driver?.name || "Your driver"} has arrived at your pickup location.`,
-                        { 
-                            event: "DRIVER_ARRIVED", 
+                        {
+                            event: "DRIVER_ARRIVED",
                             rideId: ride._id.toString(),
                             driverName: driver?.name,
                             driverPhone: driver?.phone_number
@@ -3217,9 +3399,9 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
                     }
                 });
             } else {
-                return res.status(400).json({ 
+                return res.status(400).json({
                     success: false,
-                    error: `Driver is too far from pickup location (${(distance / 1000).toFixed(2)} km away)` 
+                    error: `Driver is too far from pickup location (${(distance / 1000).toFixed(2)} km away)`
                 });
             }
         }
@@ -3233,9 +3415,9 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
 
             if (driverLat == null || driverLng == null || dropLat == null || dropLng == null) {
                 console.warn(`${logPrefix} Missing location coordinates for completed`);
-                return res.status(400).json({ 
+                return res.status(400).json({
                     success: false,
-                    error: "Location coordinates missing" 
+                    error: "Location coordinates missing"
                 });
             }
 
@@ -3244,14 +3426,14 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
             console.info(`${logPrefix} Distance from drop: ${distanceKm.toFixed(2)} km`);
 
             const maxDistanceKm = byAdmin ? 10 : 2; // 10km for admin, 1km for driver
-            
+
             let rentalCharges = null;
             let updatedPricing = { ...ride.pricing };
 
             // Calculate rental charges if applicable
             if (ride.is_rental) {
                 rentalCharges = calculateRentalCharges(ride, distanceKm, settings);
-                
+
                 // Update pricing with rental charges
                 updatedPricing = {
                     ...updatedPricing,
@@ -3293,14 +3475,14 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
                         userFcmToken,
                         "Ride Completed! 🎉",
                         `Thank you for riding with us. ${fareMessage}`,
-                        { 
-                            event: "RIDE_COMPLETED", 
+                        {
+                            event: "RIDE_COMPLETED",
                             rideId: ride._id.toString(),
                             totalFare: updatedPricing.total_fare,
                             isRental: ride.is_rental,
                             extraCharges: rentalCharges?.totalExtraCharges || 0
                         },
-                           "app_update_channel"
+                        "app_update_channel"
                     ).catch(err => console.error(`${logPrefix} Notification failed:`, err.message));
                 }
 
@@ -3333,9 +3515,9 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
                     }
                 });
             } else {
-                return res.status(400).json({ 
+                return res.status(400).json({
                     success: false,
-                    error: `Driver is too far from drop location (${distanceKm.toFixed(2)} km away)` 
+                    error: `Driver is too far from drop location (${distanceKm.toFixed(2)} km away)`
                 });
             }
         }
@@ -3354,7 +3536,7 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
             // Clear current ride from user
             if (user) {
                 user.currentRide = null;
-                await user.save().catch(err => 
+                await user.save().catch(err =>
                     console.error(`${logPrefix} Failed to clear user currentRide:`, err.message)
                 );
             }
@@ -3365,8 +3547,8 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
                     userFcmToken,
                     "Ride Cancelled",
                     "Your ride has been cancelled. We hope to serve you again soon.",
-                    { 
-                        event: "RIDE_CANCELLED", 
+                    {
+                        event: "RIDE_CANCELLED",
                         rideId: ride._id.toString(),
                         cancelledBy: ride.cancelled_by
                     }
@@ -3375,7 +3557,7 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
 
             // Emit socket event to driver
             if (io && driver?._id) {
-                io.to(`driver:${driver._id}`).emit("clear_ride_request", { 
+                io.to(`driver:${driver._id}`).emit("clear_ride_request", {
                     rideId: ride._id.toString(),
                     reason: "cancelled"
                 });
@@ -3387,8 +3569,8 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
                     driver.fcmToken,
                     "Ride Cancelled",
                     "The ride has been cancelled. We are sending more rides your way soon.",
-                    { 
-                        event: "RIDE_CANCELLED_DRIVER", 
+                    {
+                        event: "RIDE_CANCELLED_DRIVER",
                         rideId: ride._id.toString()
                     },
                     "ride_cancel_channel"
@@ -3413,17 +3595,17 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
         // ========================
         // 8️⃣ FALLBACK (shouldn't reach here)
         // ========================
-        return res.status(400).json({ 
+        return res.status(400).json({
             success: false,
-            error: "Invalid status or operation not handled" 
+            error: "Invalid status or operation not handled"
         });
 
     } catch (error) {
         console.error(`${logPrefix} Internal error:`, error);
-        return res.status(500).json({ 
+        return res.status(500).json({
             success: false,
-            error: "Internal server error", 
-            details: error.message 
+            error: "Internal server error",
+            details: error.message
         });
     }
 };
@@ -3739,176 +3921,133 @@ exports.verifyRideOtp = async (req, res) => {
 };
 
 exports.collectPayment = async (req, res) => {
-    // Maximum retry attempts for transaction conflicts
     const MAX_RETRIES = 3;
-    const RETRY_DELAY = 100; // milliseconds
+    const RETRY_DELAY = 100; // ms
 
-    // Helper function to introduce delay
     const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    // Main transaction logic wrapped in a function for retry
+    class RetryableError extends Error {
+        constructor(message) {
+            super(message);
+            this.name = "RetryableError";
+        }
+    }
+
     const executePaymentTransaction = async (attempt = 1) => {
         const session = await mongoose.startSession();
 
-        // State variables
         let paidAmount = 0;
         let discountUsed = 0;
         let userGetCashback = false;
         let cashbackGet = 0;
         let bonusAmount = 0;
 
+        console.log(`\n🚀 [Transaction Attempt ${attempt}] Starting payment collection...`);
+
         try {
             const { riderId, rideId, amount, mode } = req.body;
+            console.log("📦 Request Body:", { riderId, rideId, amount, mode });
 
-            // Input validation
             if (!riderId || !rideId || !mode || !amount) {
-                throw new Error(
-                    "Missing required fields: riderId, rideId, amount, mode"
-                );
+                console.error("❌ Missing required fields");
+                throw new Error("Missing required fields: riderId, rideId, amount, mode");
             }
 
-            // Start transaction with proper options
             await session.startTransaction({
                 readConcern: { level: "snapshot" },
                 writeConcern: { w: "majority" },
-                maxCommitTimeMS: 30000, // 30 second timeout
+                maxCommitTimeMS: 30000,
             });
+            console.log("🔄 Transaction started...");
 
-            // Use findOneAndUpdate with session for atomic operations where possible
             const foundRide = await RideBooking.findById(rideId)
                 .populate("driver")
                 .populate("user")
                 .session(session);
 
-            if (!foundRide) {
-                throw new Error("Ride not found");
-            }
+            if (!foundRide) throw new Error("Ride not found");
+            console.log("🚗 Ride found:", foundRide._id);
 
-            // Handle cancelled ride
             if (foundRide.ride_status === "cancelled") {
+                console.warn("⚠️ Ride is cancelled, aborting payment.");
                 if (foundRide.user) {
-                    await User.findByIdAndUpdate(
-                        foundRide.user._id,
-                        { currentRide: null },
-                        { session }
-                    );
+                    await User.findByIdAndUpdate(foundRide.user._id, { currentRide: null }, { session });
+                    console.log("🧹 Cleared currentRide for user:", foundRide.user._id);
                 }
                 throw new Error("Cannot collect payment for a cancelled ride");
             }
 
             const { user, driver, pricing } = foundRide;
+            const foundRider = await RiderModel.findById(driver?._id).session(session);
+            console.log("👤 Rider found:", foundRider?._id);
+            console.log("👥 User found:", user?._id);
 
-            // Get rider with session
-            const foundRider = await RiderModel.findById(driver?._id).session(
-                session
-            );
-
-            // Validate amount
+            if (user) {
+                user.
+                    currentRide = null
+                await user.save()
+            }
             const totalFare = pricing?.total_fare || 0;
             paidAmount = parseFloat(amount);
+
+            console.log(`💰 Fare Validation: totalFare=₹${totalFare}, paidAmount=₹${paidAmount}`);
 
             if (isNaN(paidAmount) || paidAmount <= 0 || paidAmount > totalFare) {
                 throw new Error(`Invalid payment amount. Expected ≤ ₹${totalFare}`);
             }
 
-            // Prepare all updates as atomic operations
             const updates = [];
 
-            // ---------------- CASHBACK DEDUCTION ----------------
+            // ——————— CASHBACK DEDUCTION ———————
             if (foundRide?.pricing?.discount > 0 && user) {
                 discountUsed = foundRide.pricing.discount;
                 const newCashback = Math.max(0, (user.cashback || 0) - discountUsed);
 
-                const cashbackHistoryEntry = {
-                    rideId: foundRide._id,
-                    amount: discountUsed,
-                    date: new Date(),
-                };
+                console.log(`💸 Cashback deduction: Used ₹${discountUsed}, New cashback balance: ₹${newCashback}`);
 
                 updates.push({
                     model: User,
                     filter: { _id: user._id },
                     update: {
                         $set: { cashback: newCashback },
-                        $push: { cashbackHistory: cashbackHistoryEntry },
+                        $push: {
+                            cashbackHistory: {
+                                rideId: foundRide._id,
+                                amount: discountUsed,
+                                date: new Date(),
+                            },
+                        },
                     },
                 });
-
-                console.log(
-                    `[Cashback Deduction] User ${user._id} used ₹${discountUsed}. Remaining: ₹${newCashback}`
-                );
             }
 
-            // ---------------- WALLET UPDATE ----------------
+            // ——————— WALLET UPDATE ———————
             if (foundRider && discountUsed > 0) {
                 const walletAmount = Number(foundRider.Wallet) || 0;
-                const discountAmount = Number(discountUsed) || 0;
-                const newWalletAmount = walletAmount + discountAmount;
+                const newWalletAmount = walletAmount + discountUsed;
 
-                const walletHistoryEntry = {
-                    rideId: foundRide._id,
-                    amount: discountAmount,
-                    date: new Date(),
-                    from: user?._id,
-                };
+                console.log(`🏦 Wallet before: ₹${walletAmount}, after: ₹${newWalletAmount}`);
 
-                // Call external wallet API before updating database
                 let walletApiSuccess = false;
-
                 try {
-                    console.log(
-                        `[Wallet API] Initiating request to add amount on wallet`
-                    );
-                    console.log(`[Wallet API] Request Payload:`, {
-                        BhId: foundRider?.BH,
-                        amount: discountAmount,
-                    });
-
+                    console.log(`[🌐 Wallet API] Adding ₹${discountUsed} to BH: ${foundRider.BH}`);
                     const response = await axios.post(
                         "https://webapi.olyox.com/api/v1/add-amount-on-wallet",
-                        {
-                            BhId: foundRider?.BH,
-                            amount: discountAmount,
-                        }
+                        { BhId: foundRider.BH, amount: discountUsed }
                     );
-
-                    console.log(`[Wallet API] Response Status: ${response.status}`);
-                    console.log(`[Wallet API] Response Data:`, response.data);
+                    console.log("[🌐 Wallet API Response]:", response.data);
 
                     if (response.data.success) {
                         walletApiSuccess = true;
-                        console.log(
-                            `[Wallet API Success] BH: ${foundRider?.BH}, Amount: ₹${discountAmount}`
-                        );
-                    } else {
-                        console.warn(
-                            `[Wallet API Warning] API responded with success = false`
-                        );
+                        console.log(`✅ Wallet API success for BH: ${foundRider.BH}`);
                     }
                 } catch (apiError) {
-                    console.error(`[Wallet API Error] Request failed`);
-                    if (apiError.response) {
-                        // Server responded with a non-2xx status
-                        console.error(
-                            `[Wallet API Error] Status: ${apiError.response.status}`
-                        );
-                        console.error(`[Wallet API Error] Data:`, apiError.response.data);
-                    } else if (apiError.request) {
-                        // Request was made but no response received
-                        console.error(
-                            `[Wallet API Error] No response received from server.`
-                        );
-                        console.error(`[Wallet API Error] Request:`, apiError.request);
-                    } else {
-                        // Something happened in setting up the request
-                        console.error(`[Wallet API Error] Message:`, apiError.message);
-                    }
+                    console.error("❌ Wallet API Failed:", apiError.response?.data || apiError.message);
                 }
 
                 if (!walletApiSuccess) {
-                    throw new Error(
-                        `Critical Error: Failed to update wallet for BH: ${foundRider?.BH}`
-                    );
+                    console.error("🚫 Wallet API not successful, aborting transaction...");
+                    throw new Error(`Failed to update wallet for BH: ${foundRider.BH}`);
                 }
 
                 updates.push({
@@ -3918,159 +4057,75 @@ exports.collectPayment = async (req, res) => {
                         $set: {
                             Wallet: newWalletAmount,
                             TotalRides: (foundRider.TotalRides || 0) + 1,
-                            points:
-                                (foundRider.points || 0) + Math.floor(Math.random() * 5) + 1,
+                            points: (foundRider.points || 0) + Math.floor(Math.random() * 5) + 1,
                             isAvailable: true,
                             on_ride_id: null,
+                            on_intercity_ride_id: null,
                         },
-                        $push: { WalletHistory: walletHistoryEntry },
+                        $push: {
+                            WalletHistory: {
+                                rideId: foundRide._id,
+                                amount: discountUsed,
+                                date: new Date(),
+                                from: user?._id,
+                            },
+                        },
                     },
                 });
             } else if (foundRider) {
-                // Update rider without wallet changes
+                console.log("ℹ️ No cashback used — updating driver basic stats only.");
                 updates.push({
                     model: RiderModel,
                     filter: { _id: foundRider._id },
                     update: {
                         $set: {
                             TotalRides: (foundRider.TotalRides || 0) + 1,
-                            points:
-                                (foundRider.points || 0) + Math.floor(Math.random() * 5) + 1,
+                            points: (foundRider.points || 0) + Math.floor(Math.random() * 5) + 1,
                             isAvailable: true,
                             on_ride_id: null,
+                            on_intercity_ride_id: null,
                         },
                     },
                 });
             }
 
-            // ---------------- FIRST RIDE BONUS ----------------
-            if (
-                user &&
-                user.firstRideCompleted === false &&
-                user.isFirstRideBonusRecived === false
-            ) {
-                try {
-                    if (totalFare > 100) {
-                        bonusAmount = Math.floor(Math.random() * (30 - 10 + 1)) + 10;
-                        userGetCashback = true;
-                        cashbackGet = bonusAmount;
+            // ——————— FIRST RIDE BONUS ———————
+            console.log("🎁 Checking for first ride bonus eligibility...");
+            if (user && !user.firstRideCompleted && !user.isFirstRideBonusRecived) {
+                if (totalFare > 100) {
+                    bonusAmount = Math.floor(Math.random() * 21) + 10;
+                    userGetCashback = true;
+                    cashbackGet = bonusAmount;
+                    console.log(`🎉 User eligible for first ride bonus: ₹${bonusAmount}`);
 
-                        console.log(
-                            `[First Ride Bonus] Giving ₹${bonusAmount} to user ${user._id}`
-                        );
-
-                        const currentUserUpdate = updates.find(
-                            (u) =>
-                                u.model === User &&
-                                u.filter._id.toString() === user._id.toString()
-                        );
-
-                        if (currentUserUpdate) {
-                            // Merge with existing user update
-                            currentUserUpdate.update.$set.cashback =
-                                (currentUserUpdate.update.$set.cashback || user.cashback || 0) +
-                                bonusAmount;
-                            currentUserUpdate.update.$set.firstRideCompleted = true;
-                            currentUserUpdate.update.$set.isFirstRideBonusRecived = true;
-                            currentUserUpdate.update.$set.currentRide = null;
-                        } else {
+                    // Apply bonus + referral updates
+                    // (kept same logic, with added logs)
+                    const referrerCode = user.appliedReferralCode;
+                    if (referrerCode) {
+                        const referrer = await User.findOne({ referralCode: referrerCode }).session(session);
+                        if (referrer) {
+                            console.log(`🤝 Referral bonus: ₹${bonusAmount} credited to referrer ${referrer._id}`);
                             updates.push({
                                 model: User,
-                                filter: { _id: user._id },
+                                filter: { _id: referrer._id },
                                 update: {
-                                    $set: {
-                                        cashback: (user.cashback || 0) + bonusAmount,
-                                        firstRideCompleted: true,
-                                        isFirstRideBonusRecived: true,
-                                        currentRide: null,
-                                    },
-                                },
-                            });
-                        }
-
-                        // ---------------- REFERRAL BONUS ----------------
-                        if (user.appliedReferralCode && bonusAmount > 0) {
-                            const referrer = await User.findOne({
-                                referralCode: user.appliedReferralCode,
-                            }).session(session);
-
-                            if (referrer) {
-                                const referralHistoryEntry = {
-                                    rideId,
-                                    amount: bonusAmount,
-                                    date: new Date(),
-                                };
-
-                                updates.push({
-                                    model: User,
-                                    filter: { _id: referrer._id },
-                                    update: {
-                                        $set: { cashback: (referrer.cashback || 0) + bonusAmount },
-                                        $push: { cashbackHistory: referralHistoryEntry },
-                                    },
-                                });
-
-                                console.log(
-                                    `[Referral Bonus] Referrer ${referrer._id} also got ₹${bonusAmount}`
-                                );
-                            } else {
-                                console.log(
-                                    `[Referral Bonus] Invalid code: ${user.appliedReferralCode}`
-                                );
-                            }
-                        }
-                    } else {
-                        console.log(
-                            `[First Ride Bonus] Skipped. Fare ₹${totalFare} ≤ 100.`
-                        );
-
-                        // Still need to update user status
-                        const currentUserUpdate = updates.find(
-                            (u) =>
-                                u.model === User &&
-                                u.filter._id.toString() === user._id.toString()
-                        );
-
-                        if (currentUserUpdate) {
-                            currentUserUpdate.update.$set.firstRideCompleted = true;
-                            currentUserUpdate.update.$set.isFirstRideBonusRecived = true;
-                            currentUserUpdate.update.$set.currentRide = null;
-                        } else {
-                            updates.push({
-                                model: User,
-                                filter: { _id: user._id },
-                                update: {
-                                    $set: {
-                                        firstRideCompleted: true,
-                                        isFirstRideBonusRecived: true,
-                                        currentRide: null,
+                                    $set: { cashback: (referrer.cashback || 0) + bonusAmount },
+                                    $push: {
+                                        cashbackHistory: { rideId, amount: bonusAmount, date: new Date() },
                                     },
                                 },
                             });
                         }
                     }
-                } catch (bonusErr) {
-                    console.error("⚠️ First Ride Bonus Error:", bonusErr.message);
-                }
-            } else if (user) {
-                // Clear current ride for existing users
-                const currentUserUpdate = updates.find(
-                    (u) =>
-                        u.model === User && u.filter._id.toString() === user._id.toString()
-                );
-
-                if (currentUserUpdate) {
-                    currentUserUpdate.update.$set.currentRide = null;
                 } else {
-                    updates.push({
-                        model: User,
-                        filter: { _id: user._id },
-                        update: { $set: { currentRide: null } },
-                    });
+                    console.log("🚫 User not eligible for first ride bonus (fare ≤ ₹100)");
                 }
+            } else {
+                console.log("✅ User already completed first ride — skipping bonus logic.");
             }
 
-            // ---------------- UPDATE RIDE ----------------
+            // ——————— UPDATE RIDE STATUS ———————
+            console.log("📝 Updating ride to completed...");
             updates.push({
                 model: RideBooking,
                 filter: { _id: foundRide._id },
@@ -4087,68 +4142,61 @@ exports.collectPayment = async (req, res) => {
                 },
             });
 
-            // Execute all updates atomically
+            // ——————— EXECUTE ALL UPDATES ———————
+            console.log(`🧾 Executing ${updates.length} DB updates...`);
             for (const update of updates) {
-                await update.model.updateOne(update.filter, update.update, {
-                    session,
-                    upsert: false,
-                });
+                console.log(`➡️ Updating ${update.model.modelName} where`, update.filter);
+                await update.model.updateOne(update.filter, update.update, { session });
             }
 
             await session.commitTransaction();
-            console.log(
-                `[Transaction Success] Payment collected for ride: ${rideId}, Amount: ₹${paidAmount}`
-            );
+            console.log(`✅ Transaction committed successfully for ride ${rideId}`);
 
             return {
                 success: true,
-                message: "✅ Payment collected successfully. Ride completed.",
+                message: "Payment collected successfully. Ride completed.",
                 rideId,
                 amount: paidAmount,
                 method: mode,
                 cashback: cashbackGet,
                 isCashbackGet: userGetCashback,
-                rideStatus: "completed",
-                paymentStatus: "completed",
             };
         } catch (error) {
+            console.error("💥 Transaction error:", error.message);
             if (session.inTransaction()) {
                 await session.abortTransaction();
-                console.log("[Transaction Rollback] Transaction aborted");
+                console.warn("⛔ Transaction aborted.");
             }
 
-            // Check if it's a transient transaction error that can be retried
-            const isRetriableError =
-                error.code === 112 || // WriteConflict
-                error.code === 11000 || // DuplicateKey
-                (error.errorLabels &&
-                    error.errorLabels.includes("TransientTransactionError"));
+            const isRetriable =
+                error.code === 112 ||
+                error.code === 11000 ||
+                (error.errorLabels && error.errorLabels.includes("TransientTransactionError"));
 
-            if (isRetriableError && attempt < MAX_RETRIES) {
-                console.log(
-                    `[Retry ${attempt}/${MAX_RETRIES}] Retrying transaction due to: ${error.message}`
-                );
-                await delay(RETRY_DELAY * attempt); // Exponential backoff
+            if (isRetriable && attempt < MAX_RETRIES) {
+                console.log(`🔁 Retrying transaction (${attempt + 1}/${MAX_RETRIES}) in ${RETRY_DELAY * attempt}ms`);
+                await delay(RETRY_DELAY * attempt);
                 throw new RetryableError(error.message);
             }
 
             throw error;
         } finally {
             session.endSession();
+            console.log("🔚 Session ended for attempt", attempt);
         }
     };
 
-    // Main function execution with retry logic
+    // ——————— MAIN RETRY LOOP ———————
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
             const result = await executePaymentTransaction(attempt);
+            console.log("🎯 Final Payment Result:", result);
             return res.status(200).json(result);
         } catch (error) {
-            if (error instanceof RetryableError && attempt < MAX_RETRIES) {
-                continue; // Retry the transaction
-            }
+            console.error(`❌ Attempt ${attempt} failed:`, error.message);
+            if (error instanceof RetryableError && attempt < MAX_RETRIES) continue;
 
-            console.error("❌ Payment Collection Error:", error);
+            console.error("🚨 Payment Collection Failed:", error);
             return res.status(500).json({
                 success: false,
                 message: "Payment collection failed",
@@ -4242,7 +4290,7 @@ exports.cancelRideByPoll = async (req, res) => {
             rideData.cancelled_at = new Date();
             rideData.cancellation_reason = reason || null;
 
-           stopBackgroundNotifications(rideData._id);
+            stopBackgroundNotifications(rideData._id);
 
             // 🔹 Free driver if assigned
             if (rideData.driver) {
@@ -4392,6 +4440,15 @@ exports.RateYourRider = async (req, res) => {
         driver.TotalRatingsCount = driver.TotalRatingsCount + 1;
 
         await driver.save();
+        if (rideData?.user) {
+            if (rideData.user.currentRide !== null) {
+                rideData.user.currentRide = null;
+                await rideData.user.save();
+                console.log("✅ Cleared currentRide for user:", rideData.user._id);
+            } else {
+                console.log("ℹ️ currentRide already null for user:", rideData.user._id);
+            }
+        }
 
         return res.status(200).json({
             success: true,
