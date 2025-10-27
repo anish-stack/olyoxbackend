@@ -30,7 +30,14 @@ cloudinary.config({
 exports.registerRider = async (req, res) => {
   try {
     const { name, phone, rideVehicleInfo, BH, role, aadharNumber } = req.body;
-    const { vehicleName, vehicleType, PricePerKm, VehicleNumber, RcExpireDate } = rideVehicleInfo;
+
+    const {
+      vehicleName,
+      vehicleType,
+      PricePerKm,
+      VehicleNumber,
+      RcExpireDate,
+    } = rideVehicleInfo;
 
     // Validate input
     if (!BH) {
@@ -58,15 +65,61 @@ exports.registerRider = async (req, res) => {
       });
     }
 
-    // Check if phone number already registered
-    const existingRider = await Rider.findOne({ phone });
+    // Check if phone number is already registered
+    let existingRider = await Rider.findOne({ phone });
     console.log("Existing Rider by Phone:", existingRider);
 
     if (existingRider) {
-      console.log("Phone already registered");
+      if (!existingRider.isOtpVerify) {
+        console.log("Rider exists but OTP not verified");
+
+        if (existingRider.howManyTimesHitResend >= 5) {
+          console.log("Too many OTP resend attempts");
+
+          existingRider.isOtpBlock = true;
+          existingRider.isDocumentUpload = false;
+          existingRider.otpUnblockAfterThisTime = new Date(
+            Date.now() + 30 * 60 * 1000
+          ); // 30 mins block
+          await existingRider.save();
+
+          await SendWhatsAppMessage(
+            `Hi ${existingRider.name || "User"
+            },\n\nYou’ve attempted OTP verification too many times.\nYour account has been temporarily locked for 30 minutes. Please try again later.\n\n- Team Olyox`,
+            phone
+          );
+
+          return res.status(429).json({
+            success: false,
+            message: "Too many OTP attempts. You are blocked for 30 minutes.",
+          });
+        }
+
+        // Resend OTP
+        const otp = generateOtp();
+        existingRider.otp = otp;
+        existingRider.howManyTimesHitResend += 1;
+        existingRider.isDocumentUpload = false;
+        await existingRider.save();
+        console.log("OTP resent:", otp);
+
+        await SendWhatsAppMessage(
+          `Hi ${existingRider.name || "User"
+          },\n\nYour OTP for registering as ${role} rider is: ${otp}\n\nPlease use this to complete your registration.\n\n- Team Olyox`,
+          phone
+        );
+        await sendDltMessage(otp, phone);
+
+        return res.status(200).json({
+          success: true,
+          message: `OTP resent. Please verify to continue registration.`,
+        });
+      }
+
+      console.log("Phone already registered and verified");
       return res.status(409).json({
         success: false,
-        message: `Phone number already registered with another account.`,
+        message: `Phone number already registered with a verified account.`,
       });
     }
 
@@ -79,7 +132,7 @@ exports.registerRider = async (req, res) => {
       });
     }
 
-    // Check if vehicle number already registered
+    // Check if vehicle number is already registered
     const existingVehicle = await Rider.findOne({
       "rideVehicleInfo.VehicleNumber": VehicleNumber,
     });
@@ -91,7 +144,10 @@ exports.registerRider = async (req, res) => {
       });
     }
 
-    // ✅ Create new rider (no OTP)
+    // Create new rider with OTP
+    const otp = generateOtp();
+    console.log("Generated OTP:", otp);
+
     const newRider = new Rider({
       name,
       phone,
@@ -105,27 +161,38 @@ exports.registerRider = async (req, res) => {
       BH,
       category: role,
       aadharNumber,
-      isOtpVerify: true, // directly verified since OTP removed
+      otp,
+      isOtpVerify: true,
       isDocumentUpload: false,
       howManyTimesHitResend: 0,
       isOtpBlock: false,
     });
 
     const savedRider = await newRider.save();
-    console.log("✅ New Rider Registered:", savedRider._id);
+    console.log("New Rider Saved:", savedRider);
 
-    // Generate token and respond
-    await send_token(savedRider, { type: "CAB" }, res, req);
+    // Send OTP via WhatsApp
+    const message = `Hi ${name},\n\nWelcome to Olyox!\nYour OTP for registering as a ${role} rider is: ${otp}.\n\nPlease verify your OTP to complete your registration.\n\nThank you for choosing us!\n- Team Olyox`;
+    await SendWhatsAppMessage(message, phone);
+    await sendDltMessage(otp, phone);
 
+    console.log("OTP message sent to:", phone);
+    // await send_token(savedRider, { type: "CAB" }, res, req);
+
+    return res.status(201).json({
+      success: true,
+      message: "Rider registration initiated. OTP sent successfully.",
+      rider: savedRider,
+    });
   } catch (error) {
-    console.error("❌ Error registering rider:", error);
+    console.error("Error registering rider:", error);
     return res.status(500).json({
       success: false,
-      message: "Something went wrong during registration. Please try again later.",
+      message:
+        "Something went wrong during registration. Please try again later.",
     });
   }
 };
-
 exports.getSingleRider = async (req, res) => {
   try {
   } catch (error) {
