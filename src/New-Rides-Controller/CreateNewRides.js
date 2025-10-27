@@ -81,9 +81,11 @@ exports.NewcreateRequest = async (req, res) => {
             rentalHours,
             estimatedKm,
             fakeRiderPhone = null,
+            searchAreaLimit
         } = req.body;
 
         console.info(`${logPrefix} Booking request received`, req.body);
+        console.log("searchAreaLimit",searchAreaLimit)
 
         // ---------------------------
         // 2️⃣ Validation (basic)
@@ -312,7 +314,7 @@ exports.NewcreateRequest = async (req, res) => {
             scheduleRideCancellationCheck(getRedisClient(req), newRideRequest._id)
         );
         setImmediate(() =>
-            initiateDriverSearch(newRideRequest._id, req, res).catch(console.error)
+            initiateDriverSearch(newRideRequest._id, searchAreaLimit, req, res).catch(console.error)
         );
 
         // ---------------------------
@@ -803,7 +805,7 @@ const generateNotificationId = (rideId) => {
 // DRIVER FETCHING
 // ============================================================================
 
-const fetchEligibleDrivers = async (rideId, rideData) => {
+const fetchEligibleDrivers = async (rideId, rideData, searchAreaLimit) => {
     try {
         console.log("Starting fetchEligibleDrivers for ride:", rideId);
         const {
@@ -833,8 +835,10 @@ const fetchEligibleDrivers = async (rideId, rideData) => {
             .filter(Boolean);
 
         console.log(`Rejected drivers (${rejectedDriverIds.length}):`, rejectedDriverIds);
-
-        let searchRadius = NOTIFICATION_CONFIG.INITIAL_RADIUS;
+        console.log('NOTIFICATION_CONFIG.INITIAL_RADIUS', NOTIFICATION_CONFIG.INITIAL_RADIUS)
+        const searchLimit = searchAreaLimit * 1000
+        let searchRadius = searchLimit || NOTIFICATION_CONFIG.INITIAL_RADIUS;
+        console.log("searchRadius",searchRadius)
         const MAX_RETRIES = 4;
         let attempt = 0;
         let allDrivers = [];
@@ -844,31 +848,30 @@ const fetchEligibleDrivers = async (rideId, rideData) => {
             const driverVehicle = driverVehicleRaw?.trim().toUpperCase();
             const rideVehicle = rideVehicleRaw?.trim().toUpperCase();
 
-            // ——— CASE 1: AUTO or BIKE → NO PREFERENCE CHECK ———
-            if (["AUTO", "BIKE"].includes(rideVehicle)) {
-                console.log(`Ride is ${rideVehicle} → Skipping preference check`);
-                return true; // Always allow if vehicle type matches or/driver has same
+            console.log("Comparing → Driver:", driverVehicle, "| Ride:", rideVehicle);
+
+            // ——— CASE 1: BIKE or AUTO → MUST EXACT MATCH ———
+            if (["BIKE", "AUTO"].includes(rideVehicle)) {
+                const match = driverVehicle === rideVehicle;
+                console.log(`Ride is ${rideVehicle} → Exact match required → ${match}`);
+                return match;
             }
 
-            // ——— CASE 2: Driver is AUTO/BIKE → only allow if ride is same ———
-            if (["AUTO", "BIKE"].includes(driverVehicle)) {
+            // ——— CASE 2: Driver is BIKE/AUTO → can only take same type ———
+            if (["BIKE", "AUTO"].includes(driverVehicle)) {
                 const match = driverVehicle === rideVehicle;
-                console.log(`Driver is ${driverVehicle} → Match with ride: ${match}`);
+                console.log(`Driver is ${driverVehicle} → Can only take ${driverVehicle} rides → ${match}`);
                 return match;
             }
 
             // ——— CASE 3: SEDAN/MINI/SUV/XL → FULL PREFERENCE LOGIC ———
             const prefs = {
-                OlyoxAcceptMiniRides: prefsRaw?.OlyoxAcceptMiniRides?.enabled === true || prefsRaw?.OlyoxAcceptMiniRides === true,
-                OlyoxAcceptSedanRides: prefsRaw?.OlyoxAcceptSedanRides?.enabled === true || prefsRaw?.OlyoxAcceptSedanRides === true,
-                OlyoxIntercity: prefsRaw?.OlyoxIntercity?.enabled === true || prefsRaw?.OlyoxIntercity === true,
+                OlyoxAcceptMiniRides: prefsRaw?.OlyoxAcceptMiniRides?.enabled === true,
+                OlyoxAcceptSedanRides: prefsRaw?.OlyoxAcceptSedanRides?.enabled === true,
+                OlyoxIntercity: prefsRaw?.OlyoxIntercity?.enabled === true,
             };
 
             const isLaterOrIntercity = isLater || isIntercity;
-
-            console.log(`\nPreference Check → Ride: ${rideVehicle} | Driver: ${driverVehicle}`);
-            console.log("  Preferences (enabled):", prefs);
-            console.log("  Is Later/Intercity:", isLaterOrIntercity);
 
             // 1. Exact match
             if (driverVehicle === rideVehicle) {
@@ -876,25 +879,25 @@ const fetchEligibleDrivers = async (rideId, rideData) => {
                 return true;
             }
 
-            // 2. SEDAN ride → upgrade
+            // 2. SEDAN ride → allow upgrade from MINI? No — only higher
             if (rideVehicle === "SEDAN") {
                 const canTakeSedan = prefs.OlyoxAcceptSedanRides;
-                const isUpgrade = ["SUV", "XL", "SUV/XL", "MINI"].includes(driverVehicle);
+                const isUpgrade = ["SUV", "XL", "SUV/XL"].includes(driverVehicle); // MINI cannot upgrade to SEDAN
                 const allowed = isUpgrade && canTakeSedan;
-                console.log(`  SEDAN ride → Upgrade: ${isUpgrade}, AcceptSedan: ${canTakeSedan} → ${allowed}`);
-                if (allowed) return true;
+                console.log(`SEDAN ride → Upgrade: ${isUpgrade}, AcceptSedan: ${canTakeSedan} → ${allowed}`);
+                return allowed;
             }
 
-            // 3. MINI ride → downgrade
+            // 3. MINI ride → allow downgrade
             if (rideVehicle === "MINI") {
                 const canTakeMini = prefs.OlyoxAcceptMiniRides;
                 const isDowngrade = ["SEDAN", "SUV", "XL", "SUV/XL"].includes(driverVehicle);
                 const allowed = isDowngrade && canTakeMini;
-                console.log(`  MINI ride → Downgrade: ${isDowngrade}, AcceptMini: ${canTakeMini} → ${allowed}`);
-                if (allowed) return true;
+                console.log(`MINI ride → Downgrade: ${isDowngrade}, AcceptMini: ${canTakeMini} → ${allowed}`);
+                return allowed;
             }
 
-            // 4. Intercity/Later bypass
+            // 4. Intercity/Later bypass (only if driver has intercity enabled)
             if (isLaterOrIntercity && prefs.OlyoxIntercity) {
                 console.log("Intercity/Later + OlyoxIntercity enabled → BYPASS");
                 return true;
@@ -909,6 +912,7 @@ const fetchEligibleDrivers = async (rideId, rideData) => {
         while (attempt < MAX_RETRIES) {
             attempt++;
             console.log(`\nAttempt ${attempt} | Radius: ${(searchRadius / 1000).toFixed(1)} km`);
+            console.log("searchRadius inside", searchRadius)
 
             const drivers = await RiderModel.aggregate([
                 {
@@ -952,8 +956,9 @@ const fetchEligibleDrivers = async (rideId, rideData) => {
             console.log(`Found ${drivers.length} drivers in range`);
 
             drivers.forEach((d, i) => {
+                const minsAgo = ((Date.now() - new Date(d.lastUpdated).getTime()) / 60000).toFixed(1);
                 console.log(
-                    `Driver ${i + 1}: ${d.name || "N/A"} | ${d.rideVehicleInfo?.vehicleType || "N/A"} | ${(d.distance / 1000).toFixed(2)} km`
+                    `Driver ${i + 1}: ${d.name} | ${d.rideVehicleInfo?.vehicleType} | ${minsAgo} mins ago | Available: ${d.isAvailable} | on_ride: ${d.on_ride_id}`
                 );
             });
 
@@ -966,16 +971,18 @@ const fetchEligibleDrivers = async (rideId, rideData) => {
                 );
 
                 if (!match) {
-                    console.log(
-                        `Filtered out Driver ${driver._id} (${driver.name || "N/A"}) — mismatch`
-                    );
+                    console.log(`REJECTED ${driver._id} (${driver.name}) — Vehicle Mismatch`);
+                } else if (new Date(driver.lastUpdated) < tenMinutesAgo) {
+                    console.log(`REJECTED ${driver._id} (${driver.name}) — Last updated >10 mins ago`);
+                } else if (driver.on_ride_id) {
+                    console.log(`REJECTED ${driver._id} — On another ride`);
+                } else if (!driver.isAvailable) {
+                    console.log(`REJECTED ${driver._id} — Not available`);
                 } else {
-                    console.log(
-                        `Eligible Driver ${driver._id} (${driver.name || "N/A"}) — match OK`
-                    );
+                    console.log(`ELIGIBLE ${driver._id} (${driver.name})`);
                 }
 
-                return match;
+                return match && new Date(driver.lastUpdated) >= tenMinutesAgo;
             });
 
             console.log(`Eligible after filtering: ${eligibleDrivers.length}`);
@@ -1236,10 +1243,10 @@ const startBackgroundNotifications = (rideId, ride, io) => {
 // MAIN DRIVER SEARCH FUNCTION
 // ============================================================================
 
-const initiateDriverSearch = async (rideId, req, res) => {
+const initiateDriverSearch = async (rideId, searchAreaLimit, req, res) => {
     const io = req.app.get("io");
     const redisClient = getRedisClient(req);
-    console.log("🚀 [initiateDriverSearch] Starting driver search for ride:", rideId);
+    console.log("🚀 [initiateDriverSearch] Starting driver search for ride:", rideId,searchAreaLimit);
 
     try {
         console.log("🔍 Fetching ride details...");
@@ -1272,18 +1279,18 @@ const initiateDriverSearch = async (rideId, req, res) => {
             return { success: false, message: "Invalid pickup location" };
         }
 
-        console.log("🕐 Updating ride status to 'searching'...");
+        console.log("🕐 Updating ride status to 'searching'...", NOTIFICATION_CONFIG.INITIAL_RADIUS / 1000);
         await RideBooking.findByIdAndUpdate(rideId, {
             $set: {
                 ride_status: "searching",
                 search_started_at: new Date(),
                 retry_count: 0,
-                search_radius: NOTIFICATION_CONFIG.INITIAL_RADIUS / 1000,
+                search_radius: searchAreaLimit || NOTIFICATION_CONFIG.INITIAL_RADIUS / 1000,
             },
         });
 
         console.log("✅ Ride status updated. Fetching eligible drivers...");
-        const drivers = await fetchEligibleDrivers(rideId, ride);
+        const drivers = await fetchEligibleDrivers(rideId, ride, searchAreaLimit);
 
         console.log(`👥 Total eligible drivers found: ${drivers.length}`);
 
