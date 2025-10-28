@@ -256,6 +256,7 @@ exports.login = async (req, res) => {
   try {
     const { number, otpType, fcmToken, AppVersion } = req.body;
 
+    // ✅ Step 1: Basic validation
     if (!number) {
       return res.status(400).json({
         success: false,
@@ -263,22 +264,10 @@ exports.login = async (req, res) => {
       });
     }
 
+    // ✅ Step 2: Find partner (Rider)
     let partner = await Rider.findOne({ phone: number });
 
-    const token = jwt.sign(
-      { userId: partner._id },
-      'dfhdhfuehfuierrheuirheuiryueiryuiewyrshddjidshfuidhduih',
-      { expiresIn: '30d' }
-    );
-    console.log("token", token)
-
-    // res.cookie('auth_token', token, {
-    //   // httpOnly: true,
-    //   secure: process.env.NODE_ENV === 'production',
-    //   maxAge: 30 * 24 * 60 * 60 * 1000,
-    //   // sameSite: 'strict',
-    // });
-    // If partner not found, check website provider details
+    // ✅ Step 3: Handle not-found partner (check website provider)
     if (!partner) {
       try {
         const { data } = await axios.post(
@@ -294,7 +283,7 @@ exports.login = async (req, res) => {
             redirect: "complete-profile",
           });
         }
-      } catch (error) {
+      } catch (err) {
         return res.status(402).json({
           success: false,
           message:
@@ -303,6 +292,15 @@ exports.login = async (req, res) => {
       }
     }
 
+    // ✅ Step 4: Generate token (partner confirmed)
+    const token = jwt.sign(
+      { userId: partner._id },
+      "dfhdhfuehfuierrheuirheuiryueiryuiewyrshddjidshfuidhduih",
+      { expiresIn: "30d" }
+    );
+    console.log("[LOGIN] token:", token);
+
+    // ✅ Step 5: Check admin block
     if (partner.isBlockByAdmin) {
       return res.status(401).json({
         success: false,
@@ -310,7 +308,7 @@ exports.login = async (req, res) => {
       });
     }
 
-    // OTP block check
+    // ✅ Step 6: OTP block check
     if (partner.isOtpBlock && partner.otpUnblockAfterThisTime) {
       const unblockTime = new Date(partner.otpUnblockAfterThisTime);
       if (new Date() < unblockTime) {
@@ -321,13 +319,11 @@ exports.login = async (req, res) => {
       }
     }
 
-    // Check profile/document/recharge status for redirection
+    // ✅ Step 7: Check profile/document completion
     if (!partner.isDocumentUpload) {
-      // await send_token(partner, { type: "CAB" }, res, req);
-
       return res.status(200).json({
         success: true,
-        token: token,
+        token,
         message: "Please complete your document upload.",
         redirect: "document-upload",
       });
@@ -336,21 +332,19 @@ exports.login = async (req, res) => {
     if (!partner.isProfileComplete) {
       return res.status(200).json({
         success: true,
-                token: token,
-
+        token,
         message: "Your profile is under review. Please wait.",
         redirect: "wait-screen",
       });
     }
 
+    // ✅ Step 8: Generate OTP
+    const otp =
+      ["8287229430", "7272727212"].includes(number) // test numbers
+        ? "123456"
+        : await generateOtp();
 
-
-    // Generate OTP (static for test number)
-    const otp = ["8287229430", "7272727212"].includes(number)
-      ? "123456"
-      : await generateOtp();
-
-    // Run DB update + OTP send in parallel
+    // ✅ Step 9: Update DB + send OTP in parallel
     await Promise.all([
       Rider.updateOne(
         { _id: partner._id },
@@ -372,19 +366,22 @@ exports.login = async (req, res) => {
 
     console.log("[LOGIN] OTP:", otp);
 
-    res.status(201).json({
+    // ✅ Step 10: Send final success response
+    return res.status(201).json({
       success: true,
       message: "Please verify OTP sent to your phone.",
-      otp, // ⚠️ remove in production
+      otp, // ⚠️ remove this in production
     });
+
   } catch (error) {
     console.error("[LOGIN] Error:", error);
-    res.status(501).json({
+    return res.status(501).json({
       success: false,
       error: error.message || "Something went wrong",
     });
   }
 };
+
 
 exports.saveFcmTokenToken = async (req, res) => {
   try {
