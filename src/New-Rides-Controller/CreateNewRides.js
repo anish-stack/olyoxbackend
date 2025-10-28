@@ -2204,7 +2204,7 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
                 if (allowed) return true;
             }
             if (rideVehicleType === "SUV" || rideVehicleType === "SUV_RENTAL") {
-                const canTakeSUV = prefs.OlyoxAcceptSUVRides;
+                const canTakeSUV = prefs.OlyoxIntercity;
                 const isDowngrade = ["SEDAN", "MINI", "XL", "SUV/XL"].includes(driverVehicle);
                 const allowed = isDowngrade && canTakeSUV;
                 console.log(`  SUV ride → Downgrade: ${isDowngrade}, AcceptSUV: ${canTakeSUV} → ${allowed}`);
