@@ -895,6 +895,13 @@ const fetchEligibleDrivers = async (rideId, rideData, searchAreaLimit) => {
                 const allowed = isDowngrade && canTakeMini;
                 console.log(`MINI ride → Downgrade: ${isDowngrade}, AcceptMini: ${canTakeMini} → ${allowed}`);
                 return allowed;
+            }  
+                  if (rideVehicle === "SUV" || rideVehicle === "SUV/XL") {
+                const canTakeMini = prefs.OlyoxIntercity;
+                const isDowngrade = ["SEDAN", "SUV", "XL", "SUV/XL"].includes(driverVehicle);
+                const allowed = isDowngrade && canTakeMini;
+                console.log(`SUV ride → Downgrade: ${isDowngrade}, AcceptMini: ${canTakeMini} → ${allowed}`);
+                return allowed;
             }
 
             // 4. Intercity/Later bypass (only if driver has intercity enabled)
@@ -2203,11 +2210,11 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
                 console.log(`  MINI ride → Downgrade: ${isDowngrade}, AcceptMini: ${canTakeMini} → ${allowed}`);
                 if (allowed) return true;
             }
-            if (rideVehicleType === "SUV" || rideVehicleType === "SUV_RENTAL") {
+            if (rideVehicleType === "SUV" || rideVehicleType ==="SUV/XL" || rideVehicleType === "SUV_RENTAL") {
                 const canTakeSUV = prefs.OlyoxIntercity;
-                const isDowngrade = ["SEDAN", "MINI", "XL", "SUV/XL"].includes(driverVehicle);
+                const isDowngrade = ["SEDAN", "MINI", "XL", "SUV/XL","SUV"].includes(driverVehicle);
                 const allowed = isDowngrade && canTakeSUV;
-                console.log(`  SUV ride → Downgrade: ${isDowngrade}, AcceptSUV: ${canTakeSUV} → ${allowed}`);
+                console.log(`SUV ride → Downgrade: ${isDowngrade}, AcceptSUV: ${canTakeSUV} → ${allowed}`);
                 if (allowed) return true;
             }
 
