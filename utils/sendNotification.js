@@ -79,7 +79,9 @@ const initializeFirebase = () => {
 if (serviceAccount) {
   console.log("🔥 Initializing Firebase with serviceAccount JSON file");
   console.log("📄 Service Account Project ID:", serviceAccount.project_id);
-
+  if (serviceAccount.private_key && serviceAccount.private_key.includes("\\n")) {
+    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+  }
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
     databaseURL: process.env.FIREBASE_DATABASE_URL || "",
