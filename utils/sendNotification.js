@@ -61,7 +61,7 @@ const initializeFirebase = () => {
     );
   }
 
-  const privateKey = "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCwZFFhSzax3WGG\nUSNeMqdhu/Tua0iesgd6pOMvhxNFFh/naEfrWw//4U3WJNoi3NQJK3C/ZHx/pwb/\nHbUHMXRXRS4+WJcwYeHYrBm9dBmUtHXabbjsR0FvC8PuygAam+94DhAli+uQyuS6\nuvQubZk8kLY9HKHMjaHpBMOheNAjBCLIScL7AZHKaHlSmpkg/2GRGM7mHcGNz9S/\nwaCvzRpfIpLgIQjPIR7mdsuNzn5hBz2qb/FId7UWJONgv/1IUSVGW0SZ22R5VM+U\nj48LatvN32hWIyWhwwXMNW+RH5kNOwEf+SYSpfceMGCo+kQuWPw+brVNKKobI6IO\nsZoYkFWdAgMBAAECggEAAVl/JRXy8O7Dk5mr6tq0C0lpknPg0nozASHJ+O5TTXEK\nggppsYw71zfsqCYhtzn6uRD3FuX58uGhwV4sHZHcOrkptsGKcyQolRjiufyEwvNl\nVqCR4PumrXJxnubCQqwKiMLS92TCMX0qGp/rs5bIlW6Rvr+jOEf3C8j8QEqBDVvi\nsddB8ZJ4jjFOrEVd8pT8woxDzmK6R3g18ljsV6oMIa7ildNHtb4VC8qDnSCBLGSR\nvvRsU44l3Va2vsfYir4fSOcq6gvRUDWlgjRCqhAwY89ieUFFXIhcmeKCuwjyx9iM\n2bnC4eIVW7HjMrEkAEGuL0Zm58JSn8NY3pcjy6kVIQKBgQDWh5gjqnoTwhnNc5it\nYmzOUhEOiPj7ILbsjQ3qpznPT3vX2Io4tMRDqo9RVBRVaCheq6sLaedtqyiA3by2\nWFhkME7tL9GLC7h35RKaCE9gfU1QB7ceKZ9L+J1gqpJAVmNq1cBEoUQwNg6KXhe+\ndfiYyV53vpX2xljQCl0maq6cYQKBgQDSfWcQ8CyNKSIObEpFWMDh/YSVNF1Ta2uE\niEKlYn92mC1IYz3MgY0VIPRHImz5NT7T6drtj8qaOYcvYSqWFWacPrHxILo+CWRH\n437JtNl16HpfXL42eC0sEqKAB/WCW8Y1sTZsdLrBFztEkB82cSsUMiCLK1e2ORZK\nA31dYCIivQKBgDnnRVgzFloo5MAAeHAsBcQ2gGYU8GcP8G+urtfsJP1grcOXrc8a\nc3L0IVTJRee7glHzMeqVviJqtTb7IolxFQKNy2/XnU5Tbonl6Xxry8j2aRy1yGY6\nw8VEqG3D/E+jQZg/c3LSuE3u+UO9m9kLjHrotzfI2D9QT/5vHa9V0iVhAoGBALHK\ncpAADeF96OI93c4NVX6NYLuWa23Wwg5D+ecv93H4v+bwzHY8xyodl7euAFXO/66H\nTQB0ADGcfe8rJ4l1siIvYqXFewqDbEy8f49oTnYlU5fRAmmHwMAFTXTPRDRDyHv5\nn3qkbkpCkTEsevDFThnU7WAf0Ap+1bDWmcGRPcQRAoGBALrWHLixfYiUS04KGhJt\nfwmqDdX4aQX5oMnFrHmtY7nBlTaY/Ixk5cjYHD7XXDr9QevKAmDnN+LKRqsHL2JZ\nJOVZ9sIkIRZ2iLuT+9c0/d5ABHaa499XnC7FVV1Kx+vtin7EIPhbrd0WyGKtyEkU\nQBQHXpKohPyYmJTnJUOAU142\n-----END PRIVATE KEY-----\n"
+  const privateKey = "-----BEGIN PRIVATE KEY-----\nMIIEuwIBADANBgkqhkiG9w0BAQEFAASCBKUwggShAgEAAoIBAQC+Oql0e46R29KK\nuwGJgF8+geOHJvkZWYdYG+z8M908oXoFrSrBSAfalXDe9zznRVS1mzvrLMU+mCCZ\nboUYsOx+q6TWHSUqpAyWxKmugHQWaGUAPNB9BRLPHC/OL7vzzwU3dBLpDWbgOgHL\nMRfwussePLpVFQ9Zc8D3AtzVyhOen0nhNy+r9axhWv7MMUXcJfYJFg3yACEBld/e\nkTa+MsBaSPOrnIQ8Ao72a+YTyL8rQ2lvg6/91f7pa8LuSSTVCEiAeLiv/yWL2jT9\nQxOLDxfeW0HZCIOAHYKdgkRCsb9LEEAcstnl6Cvlmky3zPm5zvLDEZpebn37lPn2\nbGYWVQHFAgMBAAECgf808Z64DKthbQzsD6Ad5NydSQlKVE5//6rrmtoaV1T7yvVr\nHwcHRETrUSxY4fbRZzpsUQgcLBm5kh2AloH0nUk0+BCohvQRKhdW3uVa6+VjVyrF\nJifgo8jYW7/yYtasxLFu/Z9FvbUkMwDMzJ0dIt/lSoGRrIrZGp5aITHVTqinPLKA\nHKGJhNi96bRmMwg1rwkg89wFJraKRPdhvK2jVKy89knxCwNL0EVc4vumVthqE3OV\niV8hwlaiLQf/9f+BTIKmvvKA9IRG2rtqlv/0nC/10HtL2oMcCxt/vrKxSNTGzx+q\nuvhOOE/K0l49OFgtIX4d8T06BCrvl2zm2q+BFskCgYEA9jPZrZk57xxOc3J97WrV\nsXvcRu71nW2iV7toro8QI3Rf5c+nfxSHKANKM7vDXTvk8PV3wqwp5X+ZKU5tWCVU\nviRmimYNVC50wUVWyuvP5fdWKdaQ+ZM9X/hQ2QC9ngioNOBfuLovYBBGkjQaaoQv\nBafk0qO1NSAbdWjMNTPdGW0CgYEAxcyXa/rXGqYGct/iTRecoqSfUlaKIBVcmnUQ\n9jgVz9m912mV+EInn828v6/KHafKvfbyCXUh4E+423aRQK6iaxmUEnHRaFXGbkEY\nmU0cjF9g7H8EWnNpr4R9D9yDw59R8ivITtoyiVG0Ka2ZG7VDsrpl4vfI7zReK6ar\njemQ6rkCgYEAsNml71E1kFCg+cSwOC6ZuZfjLwDPZXovNx3joCAb05vwlr+G7X3t\naAyU7HxfZUV0urFYiXnpznTNrCIt4TdPnBXBooCT6nhEXeBU7AZfnC0Cs6LxGJVv\nbNSOHpKtoitNyE2z9JmpFjQavUK4BvNUY5eqgrQdoj+h+cCBj2Xl2DECgYBQuEp/\nJXHNDT4KeTVIEr+4XAgsuOZLa4xL+ERAxuiX1xszIoKyOoUjIPnLHDkWWxhQ58sk\ncumtObuNzFhAlkPwAxM7Z7l2o7KD4grg3OgunOnX+YnUQ884co/6/hnDpmvxsU5g\nZ4lCItasP40BErsa4BieRFJ609suYykVk+Cw+QKBgESucGLE/tj3qDS4IXFxBfD+\nes5IxfGcnVbi8aHpAIBngG7lLeVNlEkLlcZyAGSs/5XyVRxeRDbMO9f1Rpw0LcFx\n/4wE25lJumar6YBeJP7ZLq7AzXz39+LXs474XHWCjATTO4RngN6r1WDWtX7mNBVX\nn1BXVTgumgGxmXwml9fq\n-----END PRIVATE KEY-----\n"
   try {
 
     if (privateKey && privateKey.includes("\\n")) {
@@ -96,6 +96,11 @@ const initializeFirebase = () => {
     logger.info("✅ Firebase Admin SDK initialized successfully");
     return admin;
   } catch (error) {
+    if (error.message.includes("invalid_grant")) {
+      console.error("⚠️ HINT: Check server time (NTP sync) and service account validity.");
+      console.log("🕒 Current Server Time:", new Date().toISOString());
+    }
+
     logger.error(`🔥 Firebase Initialization Failed: ${error.message}`);
     throw new FirebaseInitializationError(error.message);
   }
