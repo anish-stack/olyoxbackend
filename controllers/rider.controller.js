@@ -173,17 +173,17 @@ exports.registerRider = async (req, res) => {
 
     // Send OTP via WhatsApp
     const message = `Hi ${name},\n\nWelcome to Olyox!\nYour OTP for registering as a ${role} rider is: ${otp}.\n\nPlease verify your OTP to complete your registration.\n\nThank you for choosing us!\n- Team Olyox`;
-    await SendWhatsAppMessage(message, phone);
-    await sendDltMessage(otp, phone);
+    // await SendWhatsAppMessage(message, phone);
+    // await sendDltMessage(otp, phone);
 
     console.log("OTP message sent to:", phone);
-    // await send_token(savedRider, { type: "CAB" }, res, req);
+    await send_token(savedRider, { type: "CAB" }, res, req);
 
-    return res.status(201).json({
-      success: true,
-      message: "Rider registration initiated. OTP sent successfully.",
-      rider: savedRider,
-    });
+    // return res.status(201).json({
+    //   success: true,
+    //   message: "Rider registration initiated. OTP sent successfully.",
+    //   rider: savedRider,
+    // });
   } catch (error) {
     console.error("Error registering rider:", error);
     return res.status(500).json({
@@ -324,6 +324,7 @@ exports.login = async (req, res) => {
       return res.status(200).json({
         success: true,
         token,
+        rider: partner,
         message: "Please complete your document upload.",
         redirect: "document-upload",
       });
@@ -333,6 +334,7 @@ exports.login = async (req, res) => {
       return res.status(200).json({
         success: true,
         token,
+        rider: partner,
         message: "Your profile is under review. Please wait.",
         redirect: "wait-screen",
       });
@@ -369,6 +371,7 @@ exports.login = async (req, res) => {
     // ✅ Step 10: Send final success response
     return res.status(201).json({
       success: true,
+      rider: partner,
       message: "Please verify OTP sent to your phone.",
       otp, // ⚠️ remove this in production
     });
