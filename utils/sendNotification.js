@@ -1,5 +1,4 @@
 const admin = require("firebase-admin");
-const { FIREBASE_CREDENTIALS_BASE64 } = require("./Key");
 
 // Custom error classes for more specific error handling
 class FirebaseInitializationError extends Error {
@@ -67,7 +66,7 @@ const initializeFirebase = () => {
 
 const sendNotification = async (token, title, body, eventData = null, channel) => {
       console.log("✅ channel",channel);
-
+initializeFirebase();
   try {
     // Validate input
     if (!token) {
