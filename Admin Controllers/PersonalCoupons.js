@@ -118,7 +118,7 @@ exports.getAllPCoupons = async (req, res) => {
 exports.getCouponPById = async (req, res) => {
     try {
         const { id } = req.params;
-        const coupon = await PersonalCoupon.findById(id).populate('assignedTo');
+        const coupon = await PersonalCoupon.find({assignedTo:id}).populate('assignedTo');
 
         if (!coupon) {
             return res.status(404).json({ message: 'Coupon not found' });
