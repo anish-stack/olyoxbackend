@@ -341,30 +341,34 @@ exports.login = async (req, res) => {
     }
 
     // ✅ Step 8: Generate OTP
-    const otp =
-      ["8287229430", "7272727212"].includes(number) // test numbers
-        ? "123456"
-        : await generateOtp();
+    const isTestNumber = ["8287229430", "7272727212"].includes(number);
+    const otp = isTestNumber ? "123456" : await generateOtp();
 
-    // ✅ Step 9: Update DB + send OTP in parallel
-    await Promise.all([
-      Rider.updateOne(
-        { _id: partner._id },
-        {
-          $set: {
-            otp,
-            AppVersion: AppVersion || "1.0.1",
-            fcmToken: fcmToken || partner.fcmToken,
-            isOtpBlock: false,
-            otpUnblockAfterThisTime: null,
-            howManyTimesHitResend: 0,
-          },
-        }
-      ),
-      otpType === "text"
-        ? sendDltMessage(otp, number)
-        : SendWhatsAppMessage(`Your OTP for CaB registration is: ${otp}`, number),
-    ]);
+
+    const updatePromise = Rider.updateOne(
+      { _id: partner._id },
+      {
+        $set: {
+          otp,
+          AppVersion: AppVersion || "1.0.1",
+          fcmToken: fcmToken || partner.fcmToken,
+          isOtpBlock: false,
+          otpUnblockAfterThisTime: null,
+          howManyTimesHitResend: 0,
+        },
+      }
+    );
+
+    // ✅ Only send OTP if not test number
+    let otpSendPromise = Promise.resolve();
+    if (!isTestNumber) {
+      otpSendPromise =
+        otpType === "text"
+          ? sendDltMessage(otp, number)
+          : SendWhatsAppMessage(`Your OTP for CaB registration is: ${otp}`, number);
+    }
+
+    await Promise.all([updatePromise, otpSendPromise]);
 
     console.log("[LOGIN] OTP:", otp);
 
