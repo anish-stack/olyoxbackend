@@ -663,24 +663,57 @@ exports.getAllRiders = async (req, res) => {
     const skip = (page - 1) * limit;
     const search = req.query.search?.trim();
 
-    let filter = {};
-    if (search) {
-      const regex = new RegExp(search, "i"); // case-insensitive
+    // New filter params
+    const category = req.query.category; // 'parcel', 'non-parcel', 'all'
+    const document = req.query.document; // 'verified', 'under-review', 'not-verified', 'all'
+    const duty = req.query.duty; // 'on-duty', 'off-duty', 'all'
 
-      filter = {
-        $or: [
-          // Only match _id if it's a valid ObjectId
-          search.match(/^[0-9a-fA-F]{24}$/) ? { _id: search } : null,
-          { name: regex },
-          { phone: regex },
-          { aadharNumber: regex },
-          { "rideVehicleInfo.vehicleName": regex },
-          { "rideVehicleInfo.vehicleType": regex },
-          { "rideVehicleInfo.VehicleNumber": regex },
-          { BH: regex },
-          { category: regex },
-        ].filter(Boolean), // remove null if _id is not valid
-      };
+    let filter = {};
+
+    // Search filter
+    if (search) {
+      const regex = new RegExp(search, "i");
+      const orConditions = [
+        search.match(/^[0-9a-fA-F]{24}$/) ? { _id: search } : null,
+        { name: regex },
+        { phone: regex },
+        { aadharNumber: regex },
+        { "rideVehicleInfo.vehicleName": regex },
+        { "rideVehicleInfo.vehicleType": regex },
+        { "rideVehicleInfo.VehicleNumber": regex },
+        { BH: regex },
+        { category: regex },
+      ].filter(Boolean);
+
+      if (orConditions.length > 0) {
+        filter.$or = orConditions;
+      }
+    }
+
+    // Category filter
+    if (category && category !== 'all') {
+      if (category === 'non-parcel') {
+        filter.category = { $ne: 'parcel' };
+      } else {
+        filter.category = category;
+      }
+    }
+
+    // Document status filter
+    if (document && document !== 'all') {
+      if (document === 'verified') {
+        filter.DocumentVerify = true;
+      } else if (document === 'under-review') {
+        filter.isDocumentUpload = true;
+        filter.DocumentVerify = false;
+      } else if (document === 'not-verified') {
+        filter.DocumentVerify = false;
+      }
+    }
+
+    // Duty status filter
+    if (duty && duty !== 'all') {
+      filter.isAvailable = duty === 'on-duty';
     }
 
     const [riders, total] = await Promise.all([
@@ -688,9 +721,7 @@ exports.getAllRiders = async (req, res) => {
         .skip(skip)
         .limit(limit)
         .sort({ createdAt: -1 })
-        .select(
-          "-preferences -updateLogs -activityLog -howManyTimesHitResend -her_referenced -rides"
-        )
+        .select("-preferences -updateLogs -activityLog -howManyTimesHitResend -her_referenced -rides")
         .lean(),
       Rider.countDocuments(filter),
     ]);
