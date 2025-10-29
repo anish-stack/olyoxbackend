@@ -1,6 +1,6 @@
 require("dotenv").config(); // ✅ Ensure .env variables are loaded early
 const admin = require("firebase-admin");
-const serviceAccount = require('./service.json');
+
 // ──────────────────────────────
 // Custom Error Classes
 // ──────────────────────────────
@@ -34,55 +34,69 @@ const logger = {
 // ──────────────────────────────
 const initializeFirebase = () => {
   if (admin.apps.length > 0) {
-    console.log("✅ Firebase already initialized");
+    logger.info("Firebase already initialized");
     return admin;
   }
 
-  console.log("🚀 Starting Firebase initialization...");
+  // ✅ Required Firebase keys
+  const requiredEnvVars = [
+    "FIREBASE_PROJECT_ID",
+    "FIREBASE_PRIVATE_KEY_ID",
+    "FIREBASE_PRIVATE_KEY",
+    "FIREBASE_CLIENT_ID",
+    "FIREBASE_AUTH_URI",
+    "FIREBASE_TOKEN_URI",
+    "FIREBASE_AUTH_PROVIDER_CERT_URL",
+    "FIREBASE_CERT_URL",
+  ];
+  //  ❌ 🚫 Missing Firebase environment variables: FIREBASE_CLIENT_EMAIL, FIREBASE_CERT_URL
 
+
+  const missingVars = requiredEnvVars.filter((key) => !process.env[key]);
+  if (missingVars.length > 0) {
+    const missingList = missingVars.join(", ");
+    logger.error(`🚫 Missing Firebase environment variables: ${missingList}`);
+    throw new FirebaseInitializationError(
+      `Missing Firebase env vars: ${missingList}`
+    );
+  }
+
+  const privateKey = "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCwZFFhSzax3WGG\nUSNeMqdhu/Tua0iesgd6pOMvhxNFFh/naEfrWw//4U3WJNoi3NQJK3C/ZHx/pwb/\nHbUHMXRXRS4+WJcwYeHYrBm9dBmUtHXabbjsR0FvC8PuygAam+94DhAli+uQyuS6\nuvQubZk8kLY9HKHMjaHpBMOheNAjBCLIScL7AZHKaHlSmpkg/2GRGM7mHcGNz9S/\nwaCvzRpfIpLgIQjPIR7mdsuNzn5hBz2qb/FId7UWJONgv/1IUSVGW0SZ22R5VM+U\nj48LatvN32hWIyWhwwXMNW+RH5kNOwEf+SYSpfceMGCo+kQuWPw+brVNKKobI6IO\nsZoYkFWdAgMBAAECggEAAVl/JRXy8O7Dk5mr6tq0C0lpknPg0nozASHJ+O5TTXEK\nggppsYw71zfsqCYhtzn6uRD3FuX58uGhwV4sHZHcOrkptsGKcyQolRjiufyEwvNl\nVqCR4PumrXJxnubCQqwKiMLS92TCMX0qGp/rs5bIlW6Rvr+jOEf3C8j8QEqBDVvi\nsddB8ZJ4jjFOrEVd8pT8woxDzmK6R3g18ljsV6oMIa7ildNHtb4VC8qDnSCBLGSR\nvvRsU44l3Va2vsfYir4fSOcq6gvRUDWlgjRCqhAwY89ieUFFXIhcmeKCuwjyx9iM\n2bnC4eIVW7HjMrEkAEGuL0Zm58JSn8NY3pcjy6kVIQKBgQDWh5gjqnoTwhnNc5it\nYmzOUhEOiPj7ILbsjQ3qpznPT3vX2Io4tMRDqo9RVBRVaCheq6sLaedtqyiA3by2\nWFhkME7tL9GLC7h35RKaCE9gfU1QB7ceKZ9L+J1gqpJAVmNq1cBEoUQwNg6KXhe+\ndfiYyV53vpX2xljQCl0maq6cYQKBgQDSfWcQ8CyNKSIObEpFWMDh/YSVNF1Ta2uE\niEKlYn92mC1IYz3MgY0VIPRHImz5NT7T6drtj8qaOYcvYSqWFWacPrHxILo+CWRH\n437JtNl16HpfXL42eC0sEqKAB/WCW8Y1sTZsdLrBFztEkB82cSsUMiCLK1e2ORZK\nA31dYCIivQKBgDnnRVgzFloo5MAAeHAsBcQ2gGYU8GcP8G+urtfsJP1grcOXrc8a\nc3L0IVTJRee7glHzMeqVviJqtTb7IolxFQKNy2/XnU5Tbonl6Xxry8j2aRy1yGY6\nw8VEqG3D/E+jQZg/c3LSuE3u+UO9m9kLjHrotzfI2D9QT/5vHa9V0iVhAoGBALHK\ncpAADeF96OI93c4NVX6NYLuWa23Wwg5D+ecv93H4v+bwzHY8xyodl7euAFXO/66H\nTQB0ADGcfe8rJ4l1siIvYqXFewqDbEy8f49oTnYlU5fRAmmHwMAFTXTPRDRDyHv5\nn3qkbkpCkTEsevDFThnU7WAf0Ap+1bDWmcGRPcQRAoGBALrWHLixfYiUS04KGhJt\nfwmqDdX4aQX5oMnFrHmtY7nBlTaY/Ixk5cjYHD7XXDr9QevKAmDnN+LKRqsHL2JZ\nJOVZ9sIkIRZ2iLuT+9c0/d5ABHaa499XnC7FVV1Kx+vtin7EIPhbrd0WyGKtyEkU\nQBQHXpKohPyYmJTnJUOAU142\n-----END PRIVATE KEY-----\n"
   try {
-    // 🔍 Check if serviceAccount object is available
-    if (!serviceAccount) {
-      console.error("❌ No serviceAccount JSON found. Please ensure the file is loaded correctly.");
-      throw new FirebaseInitializationError("Missing serviceAccount configuration file.");
-    }
 
-    // 🧩 Show key details for verification
-    console.log("📄 Service Account Loaded:");
-    console.log("  ├─ Project ID:", serviceAccount.project_id || "❌ Missing");
-    console.log("  ├─ Client Email:", serviceAccount.client_email || "❌ Missing");
-    console.log("  ├─ Private Key Present:", !!serviceAccount.private_key);
-
-    // ⚙️ Fix escaped newlines if needed
-    if (serviceAccount.private_key && serviceAccount.private_key.includes("\\n")) {
+    if (privateKey && privateKey.includes("\\n")) {
       console.log("🔧 Fixing escaped newlines (\\n) in private key...");
-      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
+      privateKey = privateKey.replace(/\\n/g, "\n");
     }
 
     // 🔐 Validate private key format
-    if (!serviceAccount.private_key.includes("BEGIN PRIVATE KEY") || !serviceAccount.private_key.includes("END PRIVATE KEY")) {
-      console.error("❌ Invalid PEM key format in serviceAccount.private_key!");
+    if (!privateKey.includes("BEGIN PRIVATE KEY") || !privateKey.includes("END PRIVATE KEY")) {
+      console.error("❌ Invalid PEM key format in privateKey!");
       throw new FirebaseInitializationError("Invalid PEM formatted message in private_key");
     }
+    const credentialConfig = {
+      type: process.env.FIREBASE_TYPE || "service_account",
+      project_id: process.env.FIREBASE_PROJECT_ID,
+      private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
+      private_key: privateKey,
+      client_email: process.env.FIREBASE_CLIENT_EMAIL || "firebase-adminsdk-fbsvc@olyox-6215a.iam.gserviceaccount.com",
+      client_id: process.env.FIREBASE_CLIENT_ID,
+      auth_uri: process.env.FIREBASE_AUTH_URI,
+      token_uri: process.env.FIREBASE_TOKEN_URI,
+      auth_provider_x509_cert_url:
+        process.env.FIREBASE_AUTH_PROVIDER_CERT_URL,
+      client_x509_cert_url: process.env.FIREBASE_CERT_URL,
+    };
 
-    // 🚀 Initialize Firebase with the fixed serviceAccount
-    console.log("🔥 Initializing Firebase Admin SDK with serviceAccount...");
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
+      credential: admin.credential.cert(credentialConfig),
       databaseURL: process.env.FIREBASE_DATABASE_URL || "",
     });
 
-    console.log("✅ Firebase Admin SDK initialized successfully");
-    console.log("📡 Realtime Database URL:", process.env.FIREBASE_DATABASE_URL || "⚠️ Not provided");
-    console.log("──────────────────────────────────────────────");
-
+    logger.info("✅ Firebase Admin SDK initialized successfully");
     return admin;
   } catch (error) {
-    console.error("❌ 🔥 Firebase Initialization Failed:");
-    console.error("   → Error Name:", error.name);
-    console.error("   → Error Message:", error.message);
-    console.error("   → Stack Trace:\n", error.stack);
-    console.log("──────────────────────────────────────────────");
+    logger.error(`🔥 Firebase Initialization Failed: ${error.message}`);
     throw new FirebaseInitializationError(error.message);
   }
 };
