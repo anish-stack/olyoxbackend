@@ -1,0 +1,12 @@
+{
+  "type": "service_account",
+  "project_id": "olyox-6215a",
+  "private_key_id": "4da8bfa42dd26d4186c6d509003bcc8502733caf",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCwZFFhSzax3WGG...\n-----END PRIVATE KEY-----\n",
+  "client_email": "firebase-adminsdk-fbsvc@olyox-6215a.iam.gserviceaccount.com",
+  "client_id": "101134084110555398761",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40olyox-6215a.iam.gserviceaccount.com"
+}

@@ -1,6 +1,6 @@
 require("dotenv").config(); // ✅ Ensure .env variables are loaded early
 const admin = require("firebase-admin");
-
+const serviceAccount = require('./service.json');
 // ──────────────────────────────
 // Custom Error Classes
 // ──────────────────────────────
@@ -76,10 +76,34 @@ const initializeFirebase = () => {
       client_x509_cert_url: process.env.FIREBASE_CERT_URL,
     };
 
-    admin.initializeApp({
-      credential: admin.credential.cert(credentialConfig),
-      databaseURL: process.env.FIREBASE_DATABASE_URL || "",
-    });
+if (serviceAccount) {
+  console.log("🔥 Initializing Firebase with serviceAccount JSON file");
+  console.log("📄 Service Account Project ID:", serviceAccount.project_id);
+
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: process.env.FIREBASE_DATABASE_URL || "",
+  });
+} else {
+  console.log("🔥 Initializing Firebase with ENV variables (credentialConfig)");
+  console.log("📄 Firebase Project ID:", credentialConfig.project_id);
+  console.log(
+    "🔑 Firebase Private Key Preview:",
+    credentialConfig.private_key
+      ? credentialConfig.private_key.substring(0, 40) + "...[hidden]"
+      : "❌ Missing"
+  );
+  console.log("📧 Firebase Client Email:", credentialConfig.client_email);
+
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      ...credentialConfig,
+      private_key: credentialConfig.private_key.replace(/\\n/g, '\n'), // ✅ ensure proper PEM formatting
+    }),
+    databaseURL: process.env.FIREBASE_DATABASE_URL || "",
+  });
+}
+
 
     logger.info("✅ Firebase Admin SDK initialized successfully");
     return admin;
