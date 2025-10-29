@@ -197,7 +197,10 @@ router.post("/:rideId/messages", async (req, res) => {
     const { rideId } = req.params;
     const { from, fromType, message } = req.body;
 
+    console.log("💬 Incoming Chat Message:", { rideId, from, fromType, message });
+
     if (!from || !fromType || !message) {
+      console.warn("⚠️ Missing required fields:", { from, fromType, message });
       return res.status(400).json({
         success: false,
         message: "from, fromType, and message are required",
@@ -210,21 +213,23 @@ router.post("/:rideId/messages", async (req, res) => {
       .populate("driver", "fcmToken name");
 
     if (!ride) {
+      console.error("❌ Ride not found:", rideId);
       return res.status(404).json({ success: false, message: "Ride not found" });
     }
 
     // Prepare chat message
     const chatData = {
       from,
-      fromType, // 'user' or 'driver'. "driver", "user"
+      fromType, // 'user' or 'driver'
       message,
       createdAt: new Date(),
       seen: false,
     };
 
-    // Save to DB
+    // Save message
     ride.chat.push(chatData);
     await ride.save();
+    console.log("✅ Message saved in DB:", chatData);
 
     // Determine recipient
     let targetFcmToken = null;
@@ -232,15 +237,15 @@ router.post("/:rideId/messages", async (req, res) => {
     let body = "";
 
     if (fromType === "driver") {
-      // message sent by driver → notify user
       targetFcmToken = ride.user?.fcmToken;
-      title = "New message from your driver";
+      title = `New message from your driver`;
       body = message.length > 50 ? message.substring(0, 50) + "..." : message;
+      console.log(`📨 Driver -> User (${ride.user?.name || "Unknown"})`);
     } else if (fromType === "user") {
-      // message sent by user → notify driver
       targetFcmToken = ride.driver?.fcmToken;
-      title = "New message from your rider";
+      title = `New message from your rider`;
       body = message.length > 50 ? message.substring(0, 50) + "..." : message;
+      console.log(`📨 User -> Driver (${ride.driver?.name || "Unknown"})`);
     }
 
     // Build FCM payload
@@ -252,8 +257,15 @@ router.post("/:rideId/messages", async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    // Send notification if valid token
+    // Send notification
     if (targetFcmToken) {
+      console.log("📤 Sending FCM Notification:", {
+        target: targetFcmToken,
+        title,
+        body,
+        fcmPayload,
+      });
+
       await sendNotification.sendNotification(
         targetFcmToken,
         title,
@@ -261,6 +273,10 @@ router.post("/:rideId/messages", async (req, res) => {
         fcmPayload,
         "chat_channel"
       );
+
+      console.log("✅ Notification sent successfully");
+    } else {
+      console.warn("⚠️ No FCM token available for recipient");
     }
 
     res.json({ success: true, message: "Message sent", chat: chatData });
@@ -269,6 +285,7 @@ router.post("/:rideId/messages", async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
+
 
 
 module.exports = router;
