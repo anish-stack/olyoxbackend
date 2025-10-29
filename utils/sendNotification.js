@@ -34,83 +34,55 @@ const logger = {
 // ──────────────────────────────
 const initializeFirebase = () => {
   if (admin.apps.length > 0) {
-    logger.info("Firebase already initialized");
+    console.log("✅ Firebase already initialized");
     return admin;
   }
 
-  // ✅ Required Firebase keys
-  const requiredEnvVars = [
-    "FIREBASE_PROJECT_ID",
-    "FIREBASE_PRIVATE_KEY_ID",
-    "FIREBASE_PRIVATE_KEY",
-    "FIREBASE_CLIENT_ID",
-    "FIREBASE_AUTH_URI",
-    "FIREBASE_TOKEN_URI",
-    "FIREBASE_AUTH_PROVIDER_CERT_URL",
-    "FIREBASE_CERT_URL",
-  ];
-  //  ❌ 🚫 Missing Firebase environment variables: FIREBASE_CLIENT_EMAIL, FIREBASE_CERT_URL
-
-
-  const missingVars = requiredEnvVars.filter((key) => !process.env[key]);
-  if (missingVars.length > 0) {
-    const missingList = missingVars.join(", ");
-    logger.error(`🚫 Missing Firebase environment variables: ${missingList}`);
-    throw new FirebaseInitializationError(
-      `Missing Firebase env vars: ${missingList}`
-    );
-  }
+  console.log("🚀 Starting Firebase initialization...");
 
   try {
-    const credentialConfig = {
-      type: process.env.FIREBASE_TYPE || "service_account",
-      project_id: process.env.FIREBASE_PROJECT_ID,
-      private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
-      private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      client_email: process.env.FIREBASE_CLIENT_EMAIL || "firebase-adminsdk-fbsvc@olyox-6215a.iam.gserviceaccount.com",
-      client_id: process.env.FIREBASE_CLIENT_ID,
-      auth_uri: process.env.FIREBASE_AUTH_URI,
-      token_uri: process.env.FIREBASE_TOKEN_URI,
-      auth_provider_x509_cert_url:
-        process.env.FIREBASE_AUTH_PROVIDER_CERT_URL,
-      client_x509_cert_url: process.env.FIREBASE_CERT_URL,
-    };
+    // 🔍 Check if serviceAccount object is available
+    if (!serviceAccount) {
+      console.error("❌ No serviceAccount JSON found. Please ensure the file is loaded correctly.");
+      throw new FirebaseInitializationError("Missing serviceAccount configuration file.");
+    }
 
-if (serviceAccount) {
-  console.log("🔥 Initializing Firebase with serviceAccount JSON file");
-  console.log("📄 Service Account Project ID:", serviceAccount.project_id);
-  if (serviceAccount.private_key && serviceAccount.private_key.includes("\\n")) {
-    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
-  }
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    databaseURL: process.env.FIREBASE_DATABASE_URL || "",
-  });
-} else {
-  console.log("🔥 Initializing Firebase with ENV variables (credentialConfig)");
-  console.log("📄 Firebase Project ID:", credentialConfig.project_id);
-  console.log(
-    "🔑 Firebase Private Key Preview:",
-    credentialConfig.private_key
-      ? credentialConfig.private_key.substring(0, 40) + "...[hidden]"
-      : "❌ Missing"
-  );
-  console.log("📧 Firebase Client Email:", credentialConfig.client_email);
+    // 🧩 Show key details for verification
+    console.log("📄 Service Account Loaded:");
+    console.log("  ├─ Project ID:", serviceAccount.project_id || "❌ Missing");
+    console.log("  ├─ Client Email:", serviceAccount.client_email || "❌ Missing");
+    console.log("  ├─ Private Key Present:", !!serviceAccount.private_key);
 
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      ...credentialConfig,
-      private_key: credentialConfig.private_key.replace(/\\n/g, '\n'), // ✅ ensure proper PEM formatting
-    }),
-    databaseURL: process.env.FIREBASE_DATABASE_URL || "",
-  });
-}
+    // ⚙️ Fix escaped newlines if needed
+    if (serviceAccount.private_key && serviceAccount.private_key.includes("\\n")) {
+      console.log("🔧 Fixing escaped newlines (\\n) in private key...");
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
+    }
 
+    // 🔐 Validate private key format
+    if (!serviceAccount.private_key.includes("BEGIN PRIVATE KEY") || !serviceAccount.private_key.includes("END PRIVATE KEY")) {
+      console.error("❌ Invalid PEM key format in serviceAccount.private_key!");
+      throw new FirebaseInitializationError("Invalid PEM formatted message in private_key");
+    }
 
-    logger.info("✅ Firebase Admin SDK initialized successfully");
+    // 🚀 Initialize Firebase with the fixed serviceAccount
+    console.log("🔥 Initializing Firebase Admin SDK with serviceAccount...");
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      databaseURL: process.env.FIREBASE_DATABASE_URL || "",
+    });
+
+    console.log("✅ Firebase Admin SDK initialized successfully");
+    console.log("📡 Realtime Database URL:", process.env.FIREBASE_DATABASE_URL || "⚠️ Not provided");
+    console.log("──────────────────────────────────────────────");
+
     return admin;
   } catch (error) {
-    logger.error(`🔥 Firebase Initialization Failed: ${error.message}`);
+    console.error("❌ 🔥 Firebase Initialization Failed:");
+    console.error("   → Error Name:", error.name);
+    console.error("   → Error Message:", error.message);
+    console.error("   → Stack Trace:\n", error.stack);
+    console.log("──────────────────────────────────────────────");
     throw new FirebaseInitializationError(error.message);
   }
 };
