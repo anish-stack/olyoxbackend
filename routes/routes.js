@@ -60,7 +60,7 @@ const NewRideModelModel = require("../src/New-Rides-Controller/NewRideModel.mode
 const userModel = require("../models/normal_user/User.model");
 const DriverModel = require("../models/Rider.model");
 
-const { sendNotification } = require("../utils/sendNotification");
+const  sendNotification  = require("../utils/sendNotification");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
