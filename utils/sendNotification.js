@@ -50,6 +50,8 @@ const initializeFirebase = () => {
     "FIREBASE_AUTH_PROVIDER_CERT_URL",
     "FIREBASE_CERT_URL",
   ];
+  //  ❌ 🚫 Missing Firebase environment variables: FIREBASE_CLIENT_EMAIL, FIREBASE_CERT_URL
+
 
   const missingVars = requiredEnvVars.filter((key) => !process.env[key]);
   if (missingVars.length > 0) {
