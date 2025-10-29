@@ -22,9 +22,10 @@ const NOTIFICATION_CONFIG = {
     RETRY_DELAY_MS: 10000,
     INITIAL_RADIUS: 1500,
     RADIUS_INCREMENT: 500,
-    MAX_NOTIFICATIONS_PER_DRIVER: 3,
-    BACKGROUND_DURATION_MS: 60000,
-    BACKGROUND_INTERVAL_MS: 15000,
+    MAX_NOTIFICATIONS_PER_DRIVER: 3, // Changed from 3-4 to exactly 3
+    MIN_NOTIFICATION_GAP_MS: 10000, // 10 seconds between notifications to same driver
+    BACKGROUND_DURATION_MS: 60000, // 60 seconds total
+    BACKGROUND_INTERVAL_MS: 15000, // Check every 15 seconds
     BATCH_SIZE: 25,
     BATCH_DELAY_MS: 200,
     FCM_DELAY_MS: 100,
@@ -40,7 +41,7 @@ const ACTIVE_STATUSES = ["driver_assigned", "driver_arrived", "in_progress", "co
 const activeNotificationLoops = new Map();
 const driverNotificationTracking = new Map();
 const processingLocks = new Map();
-
+const driverLastNotificationTime = new Map(); 
 // ============================================================================
 // HELPER FUNCTIONS - RIDE STATUS CHECKS
 // ============================================================================
@@ -389,6 +390,80 @@ const canCancelRide = async (rideId) => {
     }
 };
 
+const canSendNotificationToDriver = (driverId, rideId) => {
+    const driverIdStr = driverId.toString();
+    const rideIdStr = rideId.toString();
+    
+    // Check notification count limit
+    const notificationCount = getDriverNotificationCount(driverIdStr, rideIdStr);
+    if (notificationCount >= 3) {
+        console.log(`❌ Driver ${driverIdStr} reached max notifications (3) for ride ${rideIdStr}`);
+        return false;
+    }
+    
+    // Check time gap (10 seconds)
+    if (!driverLastNotificationTime.has(driverIdStr)) {
+        return true;
+    }
+    
+    const rideTimestamps = driverLastNotificationTime.get(driverIdStr);
+    const lastNotificationTime = rideTimestamps.get(rideIdStr);
+    
+    if (!lastNotificationTime) {
+        return true;
+    }
+    
+    const timeSinceLastNotification = Date.now() - lastNotificationTime;
+    const minGapMs = 10000; // 10 seconds
+    
+    if (timeSinceLastNotification < minGapMs) {
+        const remainingTime = Math.ceil((minGapMs - timeSinceLastNotification) / 1000);
+        console.log(`⏳ Driver ${driverIdStr} needs to wait ${remainingTime}s before next notification`);
+        return false;
+    }
+    
+    return true;
+};
+const recordNotificationSent = (driverId, rideId) => {
+    const driverIdStr = driverId.toString();
+    const rideIdStr = rideId.toString();
+    
+    if (!driverLastNotificationTime.has(driverIdStr)) {
+        driverLastNotificationTime.set(driverIdStr, new Map());
+    }
+    
+    const rideTimestamps = driverLastNotificationTime.get(driverIdStr);
+    rideTimestamps.set(rideIdStr, Date.now());
+    
+    console.log(`✅ Notification recorded for driver ${driverIdStr} at ${new Date().toISOString()}`);
+};
+
+/**
+ * Get driver notification count for a ride
+ */
+const getDriverNotificationCount = (driverId, rideId) => {
+    const driverMap = driverNotificationTracking.get(driverId);
+    if (!driverMap) return 0;
+    return driverMap.get(rideId) || 0;
+};
+const clearRideNotificationTracking = (rideId) => {
+    const rideIdStr = rideId.toString();
+    
+    // Clear notification counts
+    clearDriverNotifications(rideIdStr);
+    
+    // Clear last notification times
+    driverLastNotificationTime.forEach((rideTimestamps, driverId) => {
+        rideTimestamps.delete(rideIdStr);
+        if (rideTimestamps.size === 0) {
+            driverLastNotificationTime.delete(driverId);
+        }
+    });
+    
+    console.log(`🧹 Cleared all notification tracking for ride ${rideIdStr}`);
+};
+
+
 /**
  * Check if ride is still active and needs drivers
  */
@@ -551,70 +626,6 @@ const scheduleRideCancellationCheck = async (redisClient, rideId) => {
     }, CANCELLATION_TIMEOUT_MS);
 };
 
-// ============================================================================
-// RIDE STATUS UPDATE
-// ============================================================================
-
-const updateRideStatus = async (
-    redisClient,
-    rideId,
-    status,
-    additionalData = {},
-    riderId
-) => {
-    try {
-        const validStatuses = [
-            "pending",
-            "searching",
-            "driver_assigned",
-            "driver_arrived",
-            "in_progress",
-            "completed",
-            "cancelled",
-        ];
-
-        if (!validStatuses.includes(status)) {
-            throw new Error(`Invalid ride status: ${status}`);
-        }
-
-        const updateData = {
-            ride_status: status,
-            driver: riderId,
-            updated_at: new Date(),
-            ...additionalData,
-        };
-
-        const updatedRide = await RideBooking.findByIdAndUpdate(
-            rideId,
-            { $set: updateData },
-            { new: true }
-        ).populate("user");
-
-        if (!updatedRide) {
-            throw new Error("Ride not found");
-        }
-
-        // Clear user's current ride if cancelled
-        if (status === "cancelled" && updatedRide.user) {
-            await User.findByIdAndUpdate(updatedRide.user._id, {
-                $set: { currentRide: null },
-            });
-        }
-
-        // Update Redis cache
-        await saveRideToRedis(redisClient, rideId, updatedRide);
-
-        // Stop notifications if ride is no longer searching
-        if (status !== "searching") {
-            stopBackgroundNotifications(rideId);
-        }
-
-        return updatedRide;
-    } catch (error) {
-        console.error(`Failed to update ride ${rideId} status:`, error.message);
-        throw error;
-    }
-};
 
 // ============================================================================
 // ROUTE AND PRICING CALCULATIONS
@@ -718,43 +729,7 @@ const normalizeVehicleType = (type) => {
     return type.toString().toUpperCase().trim();
 };
 
-const validateVehicleMatch = (
-    driverVehicleType,
-    requestedType,
-    preferences = {}
-) => {
-    const driverType = normalizeVehicleType(driverVehicleType);
-    const reqType = normalizeVehicleType(requestedType);
 
-    if (!driverType || !reqType) return false;
-
-    const vehicleHierarchy = {
-        BIKE: ["BIKE"],
-        AUTO: ["AUTO"],
-        MINI: ["MINI", "SEDAN", "SUV", "XL", "SUV/XL"],
-        SEDAN: ["SEDAN", "SUV", "XL", "SUV/XL"],
-        SUV: ["SUV", "XL", "SUV/XL"],
-        XL: ["SUV", "XL", "SUV/XL"],
-        "SUV/XL": ["SUV", "XL", "SUV/XL"],
-    };
-
-    const allowedTypes = vehicleHierarchy[reqType] || [];
-
-    if (driverType === reqType) return true;
-
-    if (
-        reqType === "MINI" &&
-        ["SEDAN", "SUV", "XL", "SUV/XL"].includes(driverType)
-    ) {
-        return preferences.OlyoxAcceptMiniRides?.enabled === true;
-    }
-
-    if (reqType === "SEDAN" && ["SUV", "XL", "SUV/XL"].includes(driverType)) {
-        return preferences.OlyoxAcceptSedanRides?.enabled === true;
-    }
-
-    return allowedTypes.includes(driverType);
-};
 
 // ============================================================================
 // DRIVER NOTIFICATION TRACKING
@@ -791,7 +766,6 @@ const decrementNotificationCount = (driverId, rideId) => {
 };
 
 const clearDriverNotifications = (rideId) => {
-    console.log("Clear Driver Notifications", rideId)
     driverNotificationTracking.forEach((driverMap) => {
         driverMap.delete(rideId);
     });
@@ -1043,24 +1017,30 @@ const sendDriverNotification = async (
         if (
             ride.rejected_by_drivers?.some((r) => r.driver.toString() === driverId)
         ) {
+            console.log(`🚫 Driver ${driverId} already rejected ride ${rideId}`);
             return { success: false, reason: "already_rejected" };
         }
 
-        // Check notification limit
-        if (hasReachedNotificationLimit(driverId, rideId)) {
-            return { success: false, reason: "limit_reached" };
+        // Check if driver can receive notification (throttling + limit)
+        if (!canSendNotificationToDriver(driverId, rideId)) {
+            return { success: false, reason: "throttled_or_limit_reached" };
         }
 
         // Verify ride is still valid and searching
         const isActive = await isRideActiveAndSearching(rideId);
         if (!isActive) {
+            console.log(`⚠️ Ride ${rideId} no longer active`);
             return { success: false, reason: "ride_no_longer_valid" };
         }
 
-        // Increment count before sending
+        // Increment count and record time BEFORE sending
         const notificationCount = incrementNotificationCount(driverId, rideId);
+        recordNotificationSent(driverId, rideId);
+        
         const notificationId = generateNotificationId(rideId);
         const distanceKm = ((driver.distance || 0) / 1000).toFixed(2);
+
+        console.log(`📨 Sending notification ${notificationCount}/3 to driver ${driver.name} (${driverId})`);
 
         // Prepare FCM payload
         const fcmPayload = {
@@ -1089,7 +1069,7 @@ const sendDriverNotification = async (
         // Send FCM notification
         await sendNotification.sendNotification(
             driver.fcmToken,
-            `New Ride Request (#${notificationCount}/${NOTIFICATION_CONFIG.MAX_NOTIFICATIONS_PER_DRIVER})`,
+            `New Ride Request (#${notificationCount}/3)`,
             isInitial
                 ? "🚀 New ride available nearby! Accept quickly!"
                 : `📍 Ride still waiting for driver...`,
@@ -1121,11 +1101,14 @@ const sendDriverNotification = async (
                         isInitial,
                         urgency: isInitial ? "high" : "normal",
                     });
+                    console.log(`📡 Socket notification sent to driver ${driverId}`);
                 }
             } catch (socketError) {
-                // Socket errors are non-critical, continue
+                console.warn(`⚠️ Socket error for driver ${driverId}:`, socketError.message);
             }
         }
+
+        console.log(`✅ Notification sent successfully to driver ${driver.name}`);
 
         return {
             success: true,
@@ -1136,11 +1119,16 @@ const sendDriverNotification = async (
             timestamp: new Date(),
         };
     } catch (error) {
-        console.error(`Failed to notify driver ${driverId}:`, error.message);
+        console.error(`❌ Failed to notify driver ${driverId}:`, error.message);
+        // Rollback on failure
         decrementNotificationCount(driverId, rideId);
         return { success: false, reason: error.message };
     }
 };
+
+// ============================================================================
+// UPDATED BATCH NOTIFICATION WITH THROTTLING
+// ============================================================================
 
 const sendBatchNotifications = async (
     drivers,
@@ -1152,40 +1140,50 @@ const sendBatchNotifications = async (
     const results = {
         successful: [],
         failed: [],
+        throttled: [],
         totalSent: 0,
     };
 
     if (!drivers || drivers.length === 0) {
+        console.log("⚠️ No drivers provided for batch notification");
         return results;
     }
 
-    for (let i = 0; i < drivers.length; i += NOTIFICATION_CONFIG.BATCH_SIZE) {
-        const batch = drivers.slice(i, i + NOTIFICATION_CONFIG.BATCH_SIZE);
+    console.log(`📦 Processing batch of ${drivers.length} drivers...`);
 
-        const batchResults = await Promise.allSettled(
-            batch.map((driver) =>
-                sendDriverNotification(driver, ride, io, attempt, isInitial)
-            )
-        );
-
-        batchResults.forEach((result, index) => {
-            if (result.status === "fulfilled" && result.value.success) {
-                results.successful.push(result.value);
+    // Process drivers one by one with throttling respect
+    for (const driver of drivers) {
+        try {
+            const result = await sendDriverNotification(driver, ride, io, attempt, isInitial);
+            
+            if (result.success) {
+                results.successful.push(result);
                 results.totalSent++;
+            } else if (result.reason === "throttled_or_limit_reached") {
+                results.throttled.push({
+                    driverId: driver._id.toString(),
+                    reason: result.reason,
+                });
             } else {
                 results.failed.push({
-                    driverId: batch[index]._id.toString(),
-                    reason: result.value?.reason || result.reason,
+                    driverId: driver._id.toString(),
+                    reason: result.reason,
                 });
             }
-        });
-
-        if (i + NOTIFICATION_CONFIG.BATCH_SIZE < drivers.length) {
-            await new Promise((resolve) =>
-                setTimeout(resolve, NOTIFICATION_CONFIG.BATCH_DELAY_MS)
-            );
+            
+            // Small delay between notifications to avoid overwhelming FCM
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+        } catch (error) {
+            console.error(`Error processing driver ${driver._id}:`, error.message);
+            results.failed.push({
+                driverId: driver._id.toString(),
+                reason: error.message,
+            });
         }
     }
+
+    console.log(`📊 Batch complete: ${results.totalSent} sent, ${results.throttled.length} throttled, ${results.failed.length} failed`);
 
     return results;
 };
@@ -1194,14 +1192,6 @@ const sendBatchNotifications = async (
 // BACKGROUND NOTIFICATION LOOP
 // ============================================================================
 
-const stopBackgroundNotifications = (rideId) => {
-    console.log("Stop Driver Notifications", rideId)
-    if (activeNotificationLoops.has(rideId)) {
-        clearInterval(activeNotificationLoops.get(rideId));
-        activeNotificationLoops.delete(rideId);
-        clearDriverNotifications(rideId);
-    }
-};
 
 const startBackgroundNotifications = (rideId, ride, io) => {
     // Stop any existing loop
@@ -1210,12 +1200,15 @@ const startBackgroundNotifications = (rideId, ride, io) => {
     const startTime = Date.now();
     let attemptCount = 1;
 
+    console.log(`🔄 Starting background notifications for ride ${rideId}`);
+
     const intervalId = setInterval(async () => {
         try {
             const elapsed = Date.now() - startTime;
 
-            // Stop after duration limit
+            // Stop after duration limit (60 seconds)
             if (elapsed >= NOTIFICATION_CONFIG.BACKGROUND_DURATION_MS) {
+                console.log(`⏱️ Background notification timeout for ride ${rideId}`);
                 stopBackgroundNotifications(rideId);
                 return;
             }
@@ -1223,28 +1216,50 @@ const startBackgroundNotifications = (rideId, ride, io) => {
             // Check if ride still needs drivers
             const isActive = await isRideActiveAndSearching(rideId);
             if (!isActive) {
+                console.log(`✅ Ride ${rideId} no longer needs notifications`);
                 stopBackgroundNotifications(rideId);
                 return;
             }
 
             attemptCount++;
+            console.log(`🔁 Background notification attempt ${attemptCount} for ride ${rideId}`);
 
-            // Fetch drivers and send notifications
+            // Fetch drivers and send notifications (with throttling)
             const drivers = await fetchEligibleDrivers(rideId, ride);
 
             if (drivers.length === 0) {
+                console.log(`⚠️ No eligible drivers found in attempt ${attemptCount}`);
                 return;
             }
 
-            await sendBatchNotifications(drivers, ride, io, attemptCount, false);
+            const results = await sendBatchNotifications(drivers, ride, io, attemptCount, false);
+            
+            console.log(`📈 Attempt ${attemptCount}: ${results.totalSent} notifications sent, ${results.throttled.length} throttled`);
 
         } catch (error) {
-            console.error(`Background notification error for ride ${rideId}:`, error.message);
+            console.error(`❌ Background notification error for ride ${rideId}:`, error.message);
         }
-    }, NOTIFICATION_CONFIG.BACKGROUND_INTERVAL_MS);
+    }, NOTIFICATION_CONFIG.BACKGROUND_INTERVAL_MS); // 15 seconds
 
     activeNotificationLoops.set(rideId, intervalId);
+    console.log(`✅ Background notifications scheduled for ride ${rideId}`);
 };
+
+// ============================================================================
+// UPDATED STOP FUNCTION
+// ============================================================================
+
+const stopBackgroundNotifications = (rideId) => {
+    console.log(`🛑 Stopping background notifications for ride ${rideId}`);
+    
+    if (activeNotificationLoops.has(rideId)) {
+        clearInterval(activeNotificationLoops.get(rideId));
+        activeNotificationLoops.delete(rideId);
+        clearRideNotificationTracking(rideId);
+        console.log(`✅ Background notifications stopped and tracking cleared for ride ${rideId}`);
+    }
+};
+
 
 // ============================================================================
 // MAIN DRIVER SEARCH FUNCTION
