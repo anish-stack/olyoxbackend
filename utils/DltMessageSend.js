@@ -8,19 +8,21 @@ exports.sendDltMessage = async (otp, number) => {
   let apiResponse = null;
 
   try {
-    // === 1. Input Validation ===
+    // ================== 1️⃣ Validate Inputs ==================
     if (!otp || !number) {
-      console.warn('OTP or phone number missing');
+      console.warn('[DLT] Missing OTP or phone number');
+      await saveFailedRecord('Missing OTP or phone number', number);
       return { success: false, error: 'Missing OTP or phone number' };
     }
 
-    const cleanNumber = String(number).trim();
-    if (!/^\d{10,12}$/.test(cleanNumber.replace(/^\+91/, ''))) {
-      console.warn('Invalid phone number:', cleanNumber);
+    const cleanNumber = String(number).trim().replace(/^\+91/, '');
+    if (!/^\d{10,12}$/.test(cleanNumber)) {
+      console.warn('[DLT] Invalid phone number:', cleanNumber);
+      await saveFailedRecord('Invalid phone number', cleanNumber);
       return { success: false, error: 'Invalid phone number' };
     }
 
-    // === 2. Build SMS Message ===
+    // ================== 2️⃣ Prepare Message ==================
     const smsMessage = `Dear Customer, your OTP for verification is ${otp}. Please do not share this OTP with anyone.\n\n- OLYOX Pvt. Ltd.`;
 
     const smsParams = {
@@ -33,68 +35,80 @@ exports.sendDltMessage = async (otp, number) => {
       TemplateID: process.env.SMS_TEMPLATE_ID,
     };
 
-    console.log('Sending DLT SMS to:', cleanNumber);
+    console.log('[DLT] Sending DLT SMS to:', cleanNumber);
+    console.log('[DLT] SMS Params:', smsParams);
 
-    // === 3. Call NimbusIT SMS API ===
-    const response = await axios.get('http://nimbusit.biz/api/SmsApi/SendSingleApi', {
-      params: smsParams,
-      timeout: 10000,
-    });
+    // ================== 3️⃣ Retry Mechanism ==================
+    let attempt = 0;
+    const maxAttempts = 3;
+    let lastError = null;
 
-    apiResponse = response.data;
-    console.log('NimbusIT SMS Response:', apiResponse);
+    while (attempt < maxAttempts) {
+      try {
+        attempt++;
+        console.log(`[DLT] Attempt ${attempt}/${maxAttempts} sending SMS...`);
 
-    // === 4. Extract Message ID ===
-    if (apiResponse?.Status === 'OK' && apiResponse?.Response?.Message) {
-      const match = apiResponse.Response.Message.match(/Message ID:\s*(\d+)/i);
-      messageId = match ? match[1] : null;
-      console.log('SMS sent. Message ID:', messageId);
-    } else {
-      console.warn('SMS failed at provider:', apiResponse);
+        const response = await axios.get('http://nimbusit.biz/api/SmsApi/SendSingleApi', {
+          params: smsParams,
+          timeout: 10000,
+        });
+
+        apiResponse = response.data;
+        console.log('[DLT] NimbusIT Response:', apiResponse);
+
+        if (apiResponse?.Status === 'OK' && apiResponse?.Response?.Message) {
+          const match = apiResponse.Response.Message.match(/Message ID:\s*(\d+)/i);
+          messageId = match ? match[1] : null;
+
+          console.log('[DLT] SMS Sent Successfully, Message ID:', messageId);
+          break; // ✅ Success → stop retrying
+        } else {
+          throw new Error(`Invalid provider response: ${JSON.stringify(apiResponse)}`);
+        }
+      } catch (err) {
+        lastError = err;
+        console.warn(`[DLT] Attempt ${attempt} failed:`, err.message);
+
+        // Wait 2 seconds before retrying
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
     }
 
-    // === 5. Save to Main DB via API ===
+    // ================== 4️⃣ Save Result to DB ==================
     const payload = {
       messageId,
-      messageResponse: apiResponse,
+      messageResponse: apiResponse || { error: lastError?.message || 'Unknown error' },
       number: cleanNumber,
+      status: messageId ? 'SUCCESS' : 'FAILED',
+      attempts: attempt,
     };
 
-    console.log('Saving SMS record to main DB:', payload);
-    const saveRes = await axios.post(SAVE_RECORD_API, payload);
+    console.log('[DLT] Saving SMS record to DB:', payload);
 
-    if (saveRes.data.success) {
-      console.log('SMS record saved in main DB:', saveRes.data.data._id);
-    } else {
-      console.error('Failed to save in main DB:', saveRes.data);
-    }
-
-    return {
-      success: true,
-      messageId,
-      recordId: saveRes.data.data?._id,
-    };
-  } catch (error) {
-    console.error('Failed to send/save SMS:', {
-      message: error.message,
-      stack: error.stack,
-      config: error.config?.data,
-    });
-
-    // === 6. Save Failed Attempt ===
     try {
-      const failedPayload = {
-        messageId: null,
-        messageResponse: `Error: ${error.message}`,
-        number: String(number).trim(),
-      };
+      const saveRes = await axios.post(SAVE_RECORD_API, payload);
 
-      console.log('Saving failed SMS attempt:', failedPayload);
-      await axios.post(SAVE_RECORD_API, failedPayload);
-      console.log('Failed attempt recorded in main DB');
+      if (saveRes.data.success) {
+        console.log('[DLT] SMS record saved successfully with ID:', saveRes.data.data?._id);
+      } else {
+        console.error('[DLT] Failed to save SMS record:', saveRes.data);
+      }
     } catch (saveErr) {
-      console.error('Could not save failed attempt:', saveErr.message);
+      console.error('[DLT] Could not save SMS record:', saveErr.message);
     }
+
+    // ================== 5️⃣ Final Return ==================
+    if (messageId) {
+      return { success: true, messageId, attempts: attempt };
+    } else {
+      return { success: false, error: lastError?.message || 'SMS send failed', attempts: attempt };
+    }
+  } catch (error) {
+    console.error('[DLT] Unhandled Error in sendDltMessage:', error);
+
+    await saveFailedRecord(error.message, number);
 
     return {
       success: false,
@@ -102,3 +116,22 @@ exports.sendDltMessage = async (otp, number) => {
     };
   }
 };
+
+// ================== 6️⃣ Helper Function: Save Failed Attempts ==================
+async function saveFailedRecord(errorMessage, number) {
+  try {
+    const failedPayload = {
+      messageId: null,
+      messageResponse: `Error: ${errorMessage}`,
+      number: String(number || '').trim(),
+      status: 'FAILED',
+      attempts: 0,
+    };
+
+    console.log('[DLT] Saving failed SMS record:', failedPayload);
+    await axios.post(SAVE_RECORD_API, failedPayload);
+    console.log('[DLT] Failed attempt saved successfully');
+  } catch (saveErr) {
+    console.error('[DLT] Failed to save failed record:', saveErr.message);
+  }
+}

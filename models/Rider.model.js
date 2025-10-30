@@ -1,587 +1,631 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const Schema = mongoose.Schema;
 
-const UpdateLogSchema = new Schema({
+const UpdateLogSchema = new Schema(
+  {
     field: { type: String, required: true },
     oldValue: { type: Schema.Types.Mixed },
     newValue: { type: Schema.Types.Mixed },
     changedAt: { type: Date, default: Date.now },
-    changedBy: { type: String, default: 'system' }
-}, { _id: false });
+    changedBy: { type: String, default: "system" },
+  },
+  { _id: false }
+);
 
-const PreferenceHistorySchema = new Schema({
+const PreferenceHistorySchema = new Schema(
+  {
     enabled: {
-        type: Boolean,
-        required: true
+      type: Boolean,
+      required: true,
     },
     changedAt: {
-        type: Date,
-        default: Date.now
+      type: Date,
+      default: Date.now,
     },
     changedBy: {
-        type: String, // Could be 'rider', 'admin', 'system'
-        default: 'rider'
+      type: String, // Could be 'rider', 'admin', 'system'
+      default: "rider",
     },
     reason: {
-        type: String // Optional reason for the change
-    }
-}, { _id: false });
+      type: String, // Optional reason for the change
+    },
+  },
+  { _id: false }
+);
 
-const PreferenceSchema = new Schema({
+const PreferenceSchema = new Schema(
+  {
     enabled: {
-        type: Boolean,
-        required: true
+      type: Boolean,
+      required: true,
     },
     lastChanged: {
-        type: Date,
-        default: Date.now
+      type: Date,
+      default: Date.now,
     },
     history: [PreferenceHistorySchema],
     totalEnabledDuration: {
-        type: Number,
-        default: 0
+      type: Number,
+      default: 0,
     },
     enabledCount: {
-        type: Number, // How many times this preference was enabled
-        default: 0
+      type: Number, // How many times this preference was enabled
+      default: 0,
     },
     disabledCount: {
-        type: Number, // How many times this preference was disabled
-        default: 0
-    }
-}, { _id: false });
+      type: Number, // How many times this preference was disabled
+      default: 0,
+    },
+  },
+  { _id: false }
+);
 
 const RiderSchema = new Schema({
-    name: {
-        type: String,
-        required: true
+  name: {
+    type: String,
+    required: true,
+  },
+  rideVehicleInfo: {
+    vehicleName: {
+      type: String,
+      required: true,
     },
-    rideVehicleInfo: {
-        vehicleName: {
-            type: String,
-            required: true
-        },
-        vehicleType: {
-            type: String
-        },
-        PricePerKm: {
-            type: Number
-        },
-        RcExpireDate: {
-            type: String
-        },
-        VehicleNumber: {
-            type: String,
-            required: true,
-        },
-        VehicleImage: [String]
+    vehicleType: {
+      type: String,
     },
-    aadharNumber: {
-        type: String,
+    PricePerKm: {
+      type: Number,
     },
-    isFirstRechargeDone: {
-        type: Boolean,
-        default: false
+    RcExpireDate: {
+      type: String,
     },
-    isProfileComplete: {
-        type: Boolean,
-        default: false
+    VehicleNumber: {
+      type: String,
+      required: true,
     },
-    isDocumentUpload: {
-        type: Boolean,
-        default: false
+    VehicleImage: [String],
+  },
+  aadharNumber: {
+    type: String,
+  },
+  isFirstRechargeDone: {
+    type: Boolean,
+    default: false,
+  },
+  isProfileComplete: {
+    type: Boolean,
+    default: false,
+  },
+  isDocumentUpload: {
+    type: Boolean,
+    default: false,
+  },
+  points: {
+    type: Number,
+    default: 0,
+  },
+  TotalRides: {
+    type: Number,
+    default: 0,
+  },
+  rides: [
+    {
+      type: Schema.Types.ObjectId,
+      ref: "RideRequest",
     },
-    points: {
-        type: Number,
-        default: 0
+  ],
+  Ratings: {
+    type: Number,
+    default: 0,
+  },
+  documents: {
+    license: {
+      type: String,
     },
-    TotalRides: {
-        type: Number,
-        default: 0
+    rc: {
+      type: String,
     },
-    rides: [{
-        type: Schema.Types.ObjectId,
-        ref: 'RideRequest'
-    }],
-    Ratings: {
-        type: Number,
-        default: 0
+    insurance: {
+      type: String,
     },
-    documents: {
-        license: {
-            type: String,
-        },
-        rc: {
-            type: String,
-        },
-        insurance: {
-            type: String,
-        },
-        aadharBack: {
-            type: String
-        },
-        aadharFront: {
-            type: String
-        },
-        pancard: {
-            type: String
-        },
-        profile: {
-            type: String
-        }
+    aadharBack: {
+      type: String,
     },
-    isPaid: {
-        type: Boolean,
-        default: false
+    aadharFront: {
+      type: String,
     },
-    RechargeData: {
-        rechargePlan: String,
-        expireData: Date,
-        onHowManyEarning: {
-            type: String,
-            default: 'Ops'
-        },
-        whichDateRecharge: Date,
-        approveRecharge: Boolean
+    pancard: {
+      type: String,
     },
-    lastNotificationSent: {
-        type: Date,
-        default: null,
+    profile: {
+      type: String,
     },
-    Bh: {
-        type: String
+  },
+  isPaid: {
+    type: Boolean,
+    default: false,
+  },
+  RechargeData: {
+    rechargePlan: String,
+    expireData: Date,
+    onHowManyEarning: {
+      type: String,
+      default: "Ops",
     },
-    DocumentVerify: {
-        type: Boolean,
-        default: false
+    whichDateRecharge: Date,
+    approveRecharge: Boolean,
+  },
+  lastNotificationSent: {
+    type: Date,
+    default: null,
+  },
+  Bh: {
+    type: String,
+  },
+  DocumentVerify: {
+    type: Boolean,
+    default: false,
+  },
+  isActive: {
+    type: Boolean,
+    default: true,
+  },
+  isFreeMember: {
+    type: Boolean,
+    default: false,
+  },
+  freeTierEndData: {
+    type: Date,
+    default: null,
+  },
+  amountPaid: {
+    type: Number,
+    default: 0,
+  },
+  trn_no: {
+    type: String,
+  },
+  payment_status: {
+    type: String,
+  },
+  payment_date: {
+    type: Date,
+  },
+  her_referenced: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ParcelBikeRegister",
     },
-    isActive: {
-        type: Boolean,
-        default: true
+  ],
+  isOtpBlock: {
+    type: Boolean,
+    default: false,
+  },
+  howManyTimesHitResend: {
+    type: Number,
+    default: 0,
+  },
+  otpUnblockAfterThisTime: {
+    type: Date,
+  },
+  isOtpVerify: {
+    type: Boolean,
+    default: false,
+  },
+  otp: {
+    type: String,
+  },
+  phone: {
+    type: String,
+    required: true,
+  },
+  address: {
+    type: String,
+    // required: true
+  },
+  isAvailable: {
+    type: Boolean,
+    default: false,
+  },
+  location: {
+    type: {
+      type: String,
+      enum: ["Point"],
+      // required: true
     },
-    isFreeMember: {
-        type: Boolean,
-        default: false
+    coordinates: {
+      type: [Number],
+      // required: true
     },
-    freeTierEndData: {
-        type: Date,
-        default: null
+  },
+  lastUpdated: {
+    type: Date,
+    default: Date.now,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+  BH: {
+    type: String,
+  },
+  AppVersion: {
+    type: String,
+    default: "1.0.1",
+  },
+  on_ride_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "TempRideDetails",
+  },
+  on_intercity_ride_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "RideRequestNew",
+  },
+  YourQrCodeToMakeOnline: {
+    type: String,
+    default: null,
+  },
+  JsonData: {
+    type: Object,
+  },
+  ridesRejected: {
+    type: Number,
+    default: 0,
+  },
+  recentRejections: [
+    {
+      rideId: { type: mongoose.Schema.Types.ObjectId, ref: "RideRequest" },
+      timestamp: { type: Date, default: Date.now },
     },
-    amountPaid: {
-        type: Number,
-        default: 0
-    },
-    trn_no: {
-        type: String
-    },
-    payment_status: {
-        type: String
-    },
-    payment_date: {
-        type: Date
-    },
-    her_referenced: [{
+  ],
+  category: {
+    type: String,
+    enum: ["parcel", "cab"],
+    default: "cab",
+  },
+  fcmToken: {
+    type: String,
+  },
+  fcmUpdatedAt: {
+    type: Date,
+  },
+  deviceId: {
+    type: String,
+  },
+  isBlockByAdmin: {
+    type: Boolean,
+    default: false,
+  },
+  IntercityRideComplete: {
+    type: Number,
+  },
+  // defaultVehicle: {
+  //     vehicleName: {
+  //         type: String,
+  //         required: true
+  //     },
+  //     vehicleType: {
+  //         type: String
+  //     },
+  //     PricePerKm: {
+  //         type: Number
+  //     },
+  //     RcExpireDate: {
+  //         type: String
+  //     },
+  //     VehicleNumber: {
+  //         type: String,
+  //         required: true,
+  //     },
+  //     VehicleImage: [String]
+  // },
+
+  WalletHistory: [
+    {
+      rideId: { type: mongoose.Schema.Types.ObjectId, ref: "RideBooking" },
+      amount: { type: Number, required: true },
+      date: { type: Date, default: Date.now },
+      from: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'ParcelBikeRegister'
-    }],
-    isOtpBlock: {
-        type: Boolean,
-        default: false
+        ref: "User",
+      },
     },
-    howManyTimesHitResend: {
-        type: Number,
-        default: 0
-    },
-    otpUnblockAfterThisTime: {
-        type: Date,
-    },
-    isOtpVerify: {
-        type: Boolean,
-        default: false
-    },
-    otp: {
-        type: String
-    },
-    phone: {
-        type: String,
-        required: true
-    },
-    address: {
-        type: String,
-        // required: true
-    },
-    isAvailable: {
-        type: Boolean,
-        default: false
-    },
-    location: {
-        type: {
-            type: String,
-            enum: ['Point'],
-            // required: true
-        },
-        coordinates: {
-            type: [Number],
-            // required: true
-        }
-    },
-    lastUpdated: {
-        type: Date,
-        default: Date.now
-    },
-    createdAt: {
-        type: Date,
-        default: Date.now
-    },
-    BH: {
-        type: String
-    },
-    AppVersion: {
-        type: String,
-        default: "1.0.1"
-    },
-    on_ride_id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'TempRideDetails'
-    },
-    on_intercity_ride_id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'RideRequestNew'
-    },
-    YourQrCodeToMakeOnline: {
-        type: String,
-        default: null
-    },
-    JsonData: {
-        type: Object
-    },
-    ridesRejected: {
-        type: Number,
-        default: 0
-    },
-    recentRejections: [{
-        rideId: { type: mongoose.Schema.Types.ObjectId, ref: 'RideRequest' },
-        timestamp: { type: Date, default: Date.now }
-    }],
-    category: {
-        type: String,
-        enum: ["parcel", "cab"],
-        default: "cab"
-    },
-    fcmToken: {
-        type: String,
-    },
-    fcmUpdatedAt: {
-        type: Date,
-    },
-    deviceId: {
-        type: String,
-    },
-    isBlockByAdmin: {
-        type: Boolean,
-        default: false
-    },
-    IntercityRideComplete: {
-        type: Number,
+  ],
 
+  reserve_intercity_rides: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "RideRequestNew",
     },
-    // defaultVehicle: {
-    //     vehicleName: {
-    //         type: String,
-    //         required: true
-    //     },
-    //     vehicleType: {
-    //         type: String
-    //     },
-    //     PricePerKm: {
-    //         type: Number
-    //     },
-    //     RcExpireDate: {
-    //         type: String
-    //     },
-    //     VehicleNumber: {
-    //         type: String,
-    //         required: true,
-    //     },
-    //     VehicleImage: [String]
-    // },
+  ],
+  messageId: {
+    type: String,
+    default: null,
+  },
+  preferences: {
+    OlyoxPriority: {
+      type: PreferenceSchema,
+      default: () => ({
+        enabled: true,
+        lastChanged: new Date(),
+        history: [
+          {
+            enabled: true,
+            changedAt: new Date(),
+            changedBy: "system",
+            reason: "Initial setup",
+          },
+        ],
+        totalEnabledDuration: 0,
+        enabledCount: 1,
+        disabledCount: 0,
+      }),
+    },
 
-    WalletHistory: [
-        {
-            rideId: { type: mongoose.Schema.Types.ObjectId, ref: "RideBooking" },
-            amount: { type: Number, required: true },
-            date: { type: Date, default: Date.now },
-            from: {
-                type: mongoose.Schema.Types.ObjectId, ref: "User"
-            }
-        }
-    ],
-
-    reserve_intercity_rides: [
-        {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'RideRequestNew'
-        }
-    ],
-    
-    preferences: {
-        OlyoxPriority: {
-            type: PreferenceSchema,
-            default: () => ({
-                enabled: true,
-                lastChanged: new Date(),
-                history: [{
-                    enabled: true,
-                    changedAt: new Date(),
-                    changedBy: 'system',
-                    reason: 'Initial setup'
-                }],
-                totalEnabledDuration: 0,
-                enabledCount: 1,
-                disabledCount: 0
-            })
-        },
-
-        OlyoxIntercity: {
-            type: PreferenceSchema,
-            default: () => ({
-                enabled: false,
-                lastChanged: new Date(),
-                history: [{
-                    enabled: false,
-                    changedAt: new Date(),
-                    changedBy: 'system',
-                    reason: 'Initial setup'
-                }],
-                totalEnabledDuration: 0,
-                enabledCount: 0,
-                disabledCount: 1
-            })
-        },
-        OlyoxAcceptMiniRides: {
-            type: PreferenceSchema,
-            default: () => ({
-                enabled: false,
-                lastChanged: new Date(),
-                history: [{
-                    enabled: false,
-                    changedAt: new Date(),
-                    changedBy: 'system',
-                    reason: 'Initial setup'
-                }],
-                totalEnabledDuration: 0,
-                enabledCount: 0,
-                disabledCount: 1
-            })
-        },
-        OlyoxAcceptSedanRides: {
-            type: PreferenceSchema,
-            default: () => ({
-                enabled: false,
-                lastChanged: new Date(),
-                history: [{
-                    enabled: false,
-                    changedAt: new Date(),
-                    changedBy: 'system',
-                    reason: 'Initial setup'
-                }],
-                totalEnabledDuration: 0,
-                enabledCount: 0,
-                disabledCount: 1
-            })
-        },
-        FoodDelivery: {
-        type: PreferenceSchema,
-        default: () => ({
+    OlyoxIntercity: {
+      type: PreferenceSchema,
+      default: () => ({
+        enabled: false,
+        lastChanged: new Date(),
+        history: [
+          {
             enabled: false,
-            lastChanged: new Date(),
-            history: [{
-                enabled: false,
-                changedAt: new Date(),
-                changedBy: 'system',
-                reason: 'Initial setup'
-            }],
-            totalEnabledDuration: 0,
-            enabledCount: 0,
-            disabledCount: 1
-        })
+            changedAt: new Date(),
+            changedBy: "system",
+            reason: "Initial setup",
+          },
+        ],
+        totalEnabledDuration: 0,
+        enabledCount: 0,
+        disabledCount: 1,
+      }),
+    },
+    OlyoxAcceptMiniRides: {
+      type: PreferenceSchema,
+      default: () => ({
+        enabled: false,
+        lastChanged: new Date(),
+        history: [
+          {
+            enabled: false,
+            changedAt: new Date(),
+            changedBy: "system",
+            reason: "Initial setup",
+          },
+        ],
+        totalEnabledDuration: 0,
+        enabledCount: 0,
+        disabledCount: 1,
+      }),
+    },
+    OlyoxAcceptSedanRides: {
+      type: PreferenceSchema,
+      default: () => ({
+        enabled: false,
+        lastChanged: new Date(),
+        history: [
+          {
+            enabled: false,
+            changedAt: new Date(),
+            changedBy: "system",
+            reason: "Initial setup",
+          },
+        ],
+        totalEnabledDuration: 0,
+        enabledCount: 0,
+        disabledCount: 1,
+      }),
+    },
+    FoodDelivery: {
+      type: PreferenceSchema,
+      default: () => ({
+        enabled: false,
+        lastChanged: new Date(),
+        history: [
+          {
+            enabled: false,
+            changedAt: new Date(),
+            changedBy: "system",
+            reason: "Initial setup",
+          },
+        ],
+        totalEnabledDuration: 0,
+        enabledCount: 0,
+        disabledCount: 1,
+      }),
     },
 
     ParcelDelivery: {
-        type: PreferenceSchema,
-        default: () => ({
+      type: PreferenceSchema,
+      default: () => ({
+        enabled: false,
+        lastChanged: new Date(),
+        history: [
+          {
             enabled: false,
-            lastChanged: new Date(),
-            history: [{
-                enabled: false,
-                changedAt: new Date(),
-                changedBy: 'system',
-                reason: 'Initial setup'
-            }],
-            totalEnabledDuration: 0,
-            enabledCount: 0,
-            disabledCount: 1
-        })
+            changedAt: new Date(),
+            changedBy: "system",
+            reason: "Initial setup",
+          },
+        ],
+        totalEnabledDuration: 0,
+        enabledCount: 0,
+        disabledCount: 1,
+      }),
     },
 
-        // Additional preference tracking
-        preferencesSummary: {
-            totalPreferenceChanges: {
-                type: Number,
-                default: 5 // Initial setup counts
-            },
-            lastPreferenceUpdate: {
-                type: Date,
-                default: Date.now
-            },
-            mostActivePreference: {
-                type: String,
-                default: null
-            }
-        }
+    // Additional preference tracking
+    preferencesSummary: {
+      totalPreferenceChanges: {
+        type: Number,
+        default: 5, // Initial setup counts
+      },
+      lastPreferenceUpdate: {
+        type: Date,
+        default: Date.now,
+      },
+      mostActivePreference: {
+        type: String,
+        default: null,
+      },
     },
+  },
 
-    updateLogs: [UpdateLogSchema],
+  updateLogs: [UpdateLogSchema],
 
-    activityLog: [
-        {
-            action: { type: String, required: true },
-            timestamp: { type: Date, default: Date.now },
-            details: { type: Object }
-        }
-    ],
-
-
+  activityLog: [
+    {
+      action: { type: String, required: true },
+      timestamp: { type: Date, default: Date.now },
+      details: { type: Object },
+    },
+  ],
 });
 
-RiderSchema.index({ location: '2dsphere' });
-RiderSchema.index({ 'rideVehicleInfo.VehicleNumber': 1 });
-RiderSchema.index({ 'preferences.OlyoxPriority.enabled': 1 });
+RiderSchema.index({ location: "2dsphere" });
+RiderSchema.index({ "rideVehicleInfo.VehicleNumber": 1 });
+RiderSchema.index({ "preferences.OlyoxPriority.enabled": 1 });
 
 // Middleware to update lastUpdated on save
-RiderSchema.pre('save', function (next) {
-    this.lastUpdated = new Date();
+RiderSchema.pre("save", function (next) {
+  this.lastUpdated = new Date();
 
-    // Track specific field updates
-    const fieldsToTrack = ['location', 'fcmToken'];
-    fieldsToTrack.forEach((field) => {
-        if (this.isModified(field)) {
-            this.updateLogs.push({
-                field,
-                oldValue: this.get(field, null, { getters: false, virtuals: false, defaults: false, alias: false }), // old value
-                newValue: this[field], // new value
-                changedBy: 'system'
-            });
-        }
-    });
-
-    // Keep only last 100 logs
-    if (this.updateLogs.length > 100) {
-        this.updateLogs = this.updateLogs.slice(-100);
+  // Track specific field updates
+  const fieldsToTrack = ["location", "fcmToken"];
+  fieldsToTrack.forEach((field) => {
+    if (this.isModified(field)) {
+      this.updateLogs.push({
+        field,
+        oldValue: this.get(field, null, {
+          getters: false,
+          virtuals: false,
+          defaults: false,
+          alias: false,
+        }), // old value
+        newValue: this[field], // new value
+        changedBy: "system",
+      });
     }
+  });
 
-    next();
+  // Keep only last 100 logs
+  if (this.updateLogs.length > 100) {
+    this.updateLogs = this.updateLogs.slice(-100);
+  }
+
+  next();
 });
 
+RiderSchema.methods.updatePreference = function (
+  preferenceName,
+  enabled,
+  changedBy = "rider",
+  reason = ""
+) {
+  if (!this.preferences[preferenceName]) {
+    throw new Error(`Preference ${preferenceName} does not exist`);
+  }
 
-RiderSchema.methods.updatePreference = function (preferenceName, enabled, changedBy = 'rider', reason = '') {
-    if (!this.preferences[preferenceName]) {
-        throw new Error(`Preference ${preferenceName} does not exist`);
-    }
+  const preference = this.preferences[preferenceName];
+  const previousState = preference.enabled;
+  const now = new Date();
 
-    const preference = this.preferences[preferenceName];
-    const previousState = preference.enabled;
-    const now = new Date();
+  // Calculate duration if preference was enabled
+  if (previousState && preference.lastChanged) {
+    const duration = now.getTime() - preference.lastChanged.getTime();
+    preference.totalEnabledDuration += duration;
+  }
 
-    // Calculate duration if preference was enabled
-    if (previousState && preference.lastChanged) {
-        const duration = now.getTime() - preference.lastChanged.getTime();
-        preference.totalEnabledDuration += duration;
-    }
+  // Update preference
+  preference.enabled = enabled;
+  preference.lastChanged = now;
 
-    // Update preference
-    preference.enabled = enabled;
-    preference.lastChanged = now;
+  // Add to history
+  preference.history.push({
+    enabled: enabled,
+    changedAt: now,
+    changedBy: changedBy,
+    reason: reason,
+  });
 
-    // Add to history
-    preference.history.push({
-        enabled: enabled,
-        changedAt: now,
-        changedBy: changedBy,
-        reason: reason
-    });
+  // Update counters
+  if (enabled) {
+    preference.enabledCount += 1;
+  } else {
+    preference.disabledCount += 1;
+  }
 
-    // Update counters
-    if (enabled) {
-        preference.enabledCount += 1;
-    } else {
-        preference.disabledCount += 1;
-    }
+  // Update summary
+  this.preferences.preferencesSummary.totalPreferenceChanges += 1;
+  this.preferences.preferencesSummary.lastPreferenceUpdate = now;
 
-    // Update summary
-    this.preferences.preferencesSummary.totalPreferenceChanges += 1;
-    this.preferences.preferencesSummary.lastPreferenceUpdate = now;
+  // Keep only last 50 history entries to prevent document bloat
+  if (preference.history.length > 50) {
+    preference.history = preference.history.slice(-50);
+  }
 
-    // Keep only last 50 history entries to prevent document bloat
-    if (preference.history.length > 50) {
-        preference.history = preference.history.slice(-50);
-    }
-
-    return this.save();
+  return this.save();
 };
-
 
 // New method inside RiderSchema
 RiderSchema.methods.getPreferenceAnalytics = function () {
-    const vehicleType = this.rideVehicleInfo?.vehicleType?.toUpperCase() || "";
-    const allPreferences = this.preferences;
+  const vehicleType = this.rideVehicleInfo?.vehicleType?.toUpperCase() || "";
+  const allPreferences = this.preferences;
 
-    let preferenceKeys = [];
+  let preferenceKeys = [];
 
-    switch (vehicleType) {
-        case "MINI":
-            preferenceKeys = ["OlyoxPriority", "OlyoxIntercity"];
-            break;
+  switch (vehicleType) {
+    case "MINI":
+      preferenceKeys = ["OlyoxPriority", "OlyoxIntercity"];
+      break;
 
-        case "SEDAN":
-            preferenceKeys = ["OlyoxPriority", "OlyoxIntercity", "OlyoxAcceptMiniRides"];
-            break;
+    case "SEDAN":
+      preferenceKeys = [
+        "OlyoxPriority",
+        "OlyoxIntercity",
+        "OlyoxAcceptMiniRides",
+      ];
+      break;
 
-        case "SUV":
-        case "XL":
-        case "SUV/XL":
-            preferenceKeys = ["OlyoxPriority", "OlyoxIntercity", "OlyoxAcceptMiniRides", "OlyoxAcceptSedanRides"];
-            break;
+    case "SUV":
+    case "XL":
+    case "SUV/XL":
+      preferenceKeys = [
+        "OlyoxPriority",
+        "OlyoxIntercity",
+        "OlyoxAcceptMiniRides",
+        "OlyoxAcceptSedanRides",
+      ];
+      break;
 
-        case "BIKE":
-            preferenceKeys = ["OlyoxPriority"];
-            break;
+    case "BIKE":
+      preferenceKeys = ["OlyoxPriority"];
+      break;
 
-        default:
-            preferenceKeys = ["OlyoxPriority"]; // fallback
-            break;
-    }
+    default:
+      preferenceKeys = ["OlyoxPriority"]; // fallback
+      break;
+  }
 
-    // Build analytics object with preference details
-    const analytics = preferenceKeys.map((key) => {
-        const pref = allPreferences[key];
-        if (!pref) return null;
-        return {
-            name: key,
-            enabled: pref.enabled,
-            lastChanged: pref.lastChanged,
-            totalEnabledDuration: pref.totalEnabledDuration,
-            enabledCount: pref.enabledCount,
-            disabledCount: pref.disabledCount,
-            last50History: pref.history.slice(-50),
-        };
-    }).filter(Boolean);
+  // Build analytics object with preference details
+  const analytics = preferenceKeys
+    .map((key) => {
+      const pref = allPreferences[key];
+      if (!pref) return null;
+      return {
+        name: key,
+        enabled: pref.enabled,
+        lastChanged: pref.lastChanged,
+        totalEnabledDuration: pref.totalEnabledDuration,
+        enabledCount: pref.enabledCount,
+        disabledCount: pref.disabledCount,
+        last50History: pref.history.slice(-50),
+      };
+    })
+    .filter(Boolean);
 
-    return analytics;
+  return analytics;
 };
 
-
-
-
-module.exports = mongoose.model('Rider', RiderSchema);
+module.exports = mongoose.model("Rider", RiderSchema);
