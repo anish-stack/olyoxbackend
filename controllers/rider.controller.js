@@ -13,7 +13,7 @@ const fs = require("fs");
 const path = require("path");
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
-
+const sharp = require("sharp");
 const Bonus_Model = require("../models/Bonus_Model/Bonus_Model");
 const Parcel_Request = require("../models/Parcel_Models/Parcel_Request");
 const { sendDltMessage } = require("../utils/DltMessageSend");
@@ -911,12 +911,17 @@ exports.changeLocation = async (req, res) => {
 
 exports.uploadDocuments = async (req, res) => {
   const startTime = Date.now();
+
   try {
     const userId = req.user?.userId;
-    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
 
     const rider = await Rider.findById(userId);
-    if (!rider) return res.status(404).json({ success: false, message: "User not found" });
+    if (!rider) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
 
     if (rider.isDocumentUpload && rider.DocumentVerify === true) {
       return res.status(400).json({
@@ -926,27 +931,52 @@ exports.uploadDocuments = async (req, res) => {
     }
 
     const files = req.files || [];
-    console.log(files)
-    if (files.length === 0) return res.status(400).json({ success: false, message: "No files uploaded." });
+    if (files.length === 0) {
+      return res.status(400).json({ success: false, message: "No files uploaded." });
+    }
 
     const uploadedDocs = {};
 
     // Parallel file uploads
     await Promise.all(
       files.map(async (file) => {
-        if (file.size / 1024 > 1024) {
-          await fs.promises.unlink(file.path).catch(() => { });
-          throw new Error(`${file.originalname} is larger than 1MB`);
+        const originalSizeMB = file.size / 1024 / 1024;
+        let uploadPath = file.path;
+        let compressed = false;
+
+        // ✅ Try to compress if file is larger than 1MB
+        if (originalSizeMB > 1) {
+          const compressedPath = file.path.replace(/\.(jpg|jpeg|png)$/, "-compressed.jpg");
+          try {
+            await sharp(file.path)
+              .resize({ width: 1200, withoutEnlargement: true }) // maintain good quality
+              .jpeg({ quality: 70 }) // compress quality
+              .toFile(compressedPath);
+
+            const compressedStats = await fs.promises.stat(compressedPath);
+            const compressedSizeMB = compressedStats.size / 1024 / 1024;
+
+            if (compressedSizeMB < originalSizeMB) {
+              uploadPath = compressedPath;
+              compressed = true;
+            }
+          } catch (err) {
+            console.warn(`⚠️ Compression failed for ${file.originalname}: ${err.message}`);
+          }
         }
 
-        const uploaded = await cloudinary.uploader.upload(file.path, {
+        // ✅ Upload to Cloudinary (either compressed or original)
+        const uploaded = await cloudinary.uploader.upload(uploadPath, {
           folder: "rider_documents",
           quality: "auto:low",
           format: "jpg",
         });
 
-        await fs.promises.unlink(file.path).catch(() => { });
+        // cleanup
+        await fs.promises.unlink(file.path).catch(() => {});
+        if (compressed) await fs.promises.unlink(uploadPath).catch(() => {});
 
+        // map file to correct document field
         if (file.originalname.includes("dl")) uploadedDocs.license = uploaded.secure_url;
         else if (file.originalname.includes("rc")) uploadedDocs.rc = uploaded.secure_url;
         else if (file.originalname.includes("insurance")) uploadedDocs.insurance = uploaded.secure_url;
@@ -957,7 +987,7 @@ exports.uploadDocuments = async (req, res) => {
       })
     );
 
-    // Prepare documents object for VehicleAdds
+    // Prepare VehicleAdds document structure
     const documents = {
       rc: { url: uploadedDocs.rc || "", status: "pending", note: "" },
       pollution: { url: "", status: "pending", note: "", expiryDate: null },
@@ -969,11 +999,17 @@ exports.uploadDocuments = async (req, res) => {
       panCard: { url: uploadedDocs.pancard || "", status: "pending", note: "" },
     };
 
-    // Parallel Rider update + VehicleAdds creation
+    // Parallel DB update
     await Promise.all([
       Rider.updateOne(
         { _id: userId },
-        { $set: { documents: uploadedDocs, isDocumentUpload: true, isProfileComplete: true } }
+        {
+          $set: {
+            documents: uploadedDocs,
+            isDocumentUpload: true,
+            isProfileComplete: true,
+          },
+        }
       ),
       new VehicleAdds({
         riderId: userId,
@@ -982,14 +1018,15 @@ exports.uploadDocuments = async (req, res) => {
           type: rider?.rideVehicleInfo?.vehicleType || "",
           numberPlate: rider?.rideVehicleInfo?.VehicleNumber?.toUpperCase() || "",
         },
-
         isDefault: true,
         isActive: false,
         documents,
       }).save(),
     ]);
+
     const endTime = Date.now();
     console.log(`✅ /uploadDocuments executed in ${endTime - startTime} ms`);
+
     return res.status(201).json({
       success: true,
       message: "Documents uploaded successfully",
