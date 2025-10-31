@@ -2,12 +2,13 @@ const axios = require('axios');
 const RidesSuggestionModel = require('../../models/Admin/RidesSuggestion.model');
 const settings = require('../../models/Admin/Settings');
 
-// In-memory cache for directions (simple cache for current session)
+// In-memory caches
 const directionsCache = new Map();
 const weatherCache = new Map();
+const surgeCache = new Map();
 
-// Cache cleanup - remove entries older than 15 minutes
-const cleanupCache = (cache, maxAge = 900000) => { // 15 minutes in milliseconds
+// Cache cleanup utility
+const cleanupCache = (cache, maxAge = 900000) => {
   const now = Date.now();
   for (const [key, value] of cache.entries()) {
     if (now - value.timestamp > maxAge) {
@@ -16,41 +17,42 @@ const cleanupCache = (cache, maxAge = 900000) => { // 15 minutes in milliseconds
   }
 };
 
+// Time-based utilities
 const isNightTimeNow = (timezone = 'Asia/Kolkata') => {
   try {
     const now = new Date();
     const currentHour = new Date(now.toLocaleString("en-US", { timeZone: timezone })).getHours();
     return currentHour >= 22 || currentHour < 6;
   } catch (error) {
-    console.warn('Error determining time zone, using system time:', error.message);
+    console.warn('⚠️ Error determining timezone, using system time:', error.message);
     const currentHour = new Date().getHours();
     return currentHour >= 22 || currentHour < 6;
   }
 };
 
-const parseNumericValue = (value, defaultValue = 0) => {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') {
-    const match = value.match(/[\d.]+/);
-    return match ? parseFloat(match[0]) : defaultValue;
+const isPeakHour = (timezone = 'Asia/Kolkata') => {
+  try {
+    const now = new Date();
+    const currentHour = new Date(now.toLocaleString("en-US", { timeZone: timezone })).getHours();
+    // Morning peak: 7-10 AM, Evening peak: 5-9 PM
+    return (currentHour >= 7 && currentHour <= 10) || (currentHour >= 17 && currentHour <= 21);
+  } catch (error) {
+    return false;
   }
-  return defaultValue;
 };
 
-// Optimized Google Maps API call with in-memory cache
+// Google Maps Directions API with caching
 async function getDirectionsData(origin, destination, cacheKey) {
   try {
-    // Clean old cache entries
     cleanupCache(directionsCache);
 
-    // Check in-memory cache first
     const cached = directionsCache.get(cacheKey);
-    if (cached && (Date.now() - cached.timestamp < 900000)) { // 15 minutes
-      console.log(`[CACHE HIT] Directions: ${cacheKey}`);
+    if (cached && (Date.now() - cached.timestamp < 900000)) {
+      console.log(`✅ [CACHE HIT] Directions: ${cacheKey}`);
       return cached.data;
     }
 
-    console.log(`[API CALL] Fetching directions from Google Maps...`);
+    console.log(`🌐 [API CALL] Fetching directions from Google Maps...`);
     const originStr = `${origin.latitude},${origin.longitude}`;
     const destinationStr = `${destination.latitude},${destination.longitude}`;
 
@@ -58,7 +60,7 @@ async function getDirectionsData(origin, destination, cacheKey) {
       params: {
         origin: originStr,
         destination: destinationStr,
-        key: "AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8",
+        key: process.env.GOOGLE_MAPS_API_KEY || "AIzaSyBvyzqhO8Tq3SvpKLjW7I5RonYAtfOVIn8",
         traffic_model: "best_guess",
         departure_time: "now",
         units: "metric"
@@ -77,7 +79,6 @@ async function getDirectionsData(origin, destination, cacheKey) {
       throw new Error("Invalid route data");
     }
 
-    // Standardize the data format
     const standardizedData = {
       distance_km: leg.distance.value / 1000,
       duration_minutes: leg.duration.value / 60,
@@ -87,36 +88,38 @@ async function getDirectionsData(origin, destination, cacheKey) {
       polyline: route.overview_polyline?.points || null
     };
 
-    // Cache in memory for 15 minutes
     directionsCache.set(cacheKey, {
       data: standardizedData,
       timestamp: Date.now()
     });
-    console.log(`[CACHE SET] Directions cached: ${cacheKey}`);
+    console.log(`💾 [CACHE SET] Directions cached: ${cacheKey}`);
 
     return standardizedData;
 
   } catch (error) {
-    console.error('[DIRECTIONS ERROR]:', error.message);
+    console.error('❌ [DIRECTIONS ERROR]:', error.message);
     throw new Error(`Failed to fetch directions: ${error.message}`);
   }
 }
 
-// Simple weather check (optional, non-blocking) with in-memory cache
+// Weather condition check with caching
 async function getWeatherCondition(latitude, longitude) {
   const cacheKey = `weather:${latitude},${longitude}`;
 
   try {
-    // Clean old cache entries
-    cleanupCache(weatherCache, 600000); // 10 minutes for weather
+    cleanupCache(weatherCache, 600000);
 
     const cached = weatherCache.get(cacheKey);
-    if (cached && (Date.now() - cached.timestamp < 600000)) { // 10 minutes
-      return cached.data.isRaining || false;
+    if (cached && (Date.now() - cached.timestamp < 600000)) {
+      return cached.data;
     }
-    const apiKey = process.env.OPEN_WEATHER_API_KEY;
 
-    // Quick weather check with timeout
+    const apiKey = process.env.OPEN_WEATHER_API_KEY;
+    if (!apiKey) {
+      console.warn('⚠️ No weather API key configured');
+      return { isRaining: false, condition: 'unknown' };
+    }
+
     const weatherResponse = await axios.get(`https://api.openweathermap.org/data/2.5/weather`, {
       params: {
         lat: latitude,
@@ -127,27 +130,206 @@ async function getWeatherCondition(latitude, longitude) {
       timeout: 5000
     });
 
-    const isRaining = weatherResponse.data?.weather?.[0]?.main === 'Rain';
+    const weatherMain = weatherResponse.data?.weather?.[0]?.main || 'Clear';
+    const weatherData = {
+      isRaining: weatherMain === 'Rain',
+      condition: weatherMain,
+      temperature: weatherResponse.data?.main?.temp || null
+    };
 
-    // Cache in memory for 10 minutes
     weatherCache.set(cacheKey, {
-      data: { isRaining },
+      data: weatherData,
       timestamp: Date.now()
     });
 
-    return isRaining;
+    return weatherData;
   } catch (error) {
-    console.warn('[WEATHER WARNING]:', error.message);
-    return false; // Default to no rain if weather check fails
+    console.warn('⚠️ [WEATHER WARNING]:', error.message);
+    return { isRaining: false, condition: 'unknown' };
   }
 }
 
-/**
- * Calculate rental prices for vehicles (only if distance < 69 km and isLater = false)
- */
-async function calculateRentalPrices(distance_km, traffic_duration_minutes) {
+// Dynamic Surge Pricing Calculator (Uber/Ola style)
+function calculateSurgeMultiplier(options = {}) {
+  const {
+    isPeakHour = false,
+    isNightTime = false,
+    isRaining = false,
+    distance_km = 0,
+    demandLevel = 'normal' // low, normal, high, very_high
+  } = options;
+
+  let surgeMultiplier = 1.0;
+
+  // Peak hour surge (7-10 AM, 5-9 PM)
+  if (isPeakHour) {
+    surgeMultiplier += 0.3; // 30% increase
+  }
+
+  // Night time surge (10 PM - 6 AM)
+  if (isNightTime) {
+    surgeMultiplier += 0.25; // 25% increase
+  }
+
+  // Weather-based surge
+  if (isRaining) {
+    surgeMultiplier += 0.2; // 20% increase for rain
+  }
+
+  // Demand-based surge (simulated - in production, fetch from real-time data)
+  const demandMultipliers = {
+    low: 0,
+    normal: 0,
+    high: 0.4,
+    very_high: 0.8
+  };
+  surgeMultiplier += demandMultipliers[demandLevel] || 0;
+
+  // Long-distance discount (encourage longer rides)
+  if (distance_km > 50) {
+    surgeMultiplier -= 0.1; // 10% discount
+  }
+
+  // Cap surge between 1.0x and 3.0x
+  surgeMultiplier = Math.max(1.0, Math.min(3.0, surgeMultiplier));
+
+  return parseFloat(surgeMultiplier.toFixed(2));
+}
+
+// Calculate fuel surcharge dynamically based on distance and mileage
+function calculateFuelSurcharge(distance_km, vehicle) {
+  const { avgMileage, fuelSurchargePerKM } = vehicle;
+  
+  // Fuel consumption = distance / mileage
+  const fuelConsumed = distance_km / avgMileage;
+  
+  // Fuel surcharge = fuel consumed * surcharge per liter
+  const fuelSurcharge = fuelConsumed * fuelSurchargePerKM;
+  
+  return Math.round(fuelSurcharge * 100) / 100;
+}
+
+// Calculate toll charges (if applicable)
+function calculateTollCharges(distance_km, vehicle, hasTolls = false) {
+  if (!vehicle.tollExtra || !hasTolls) {
+    return 0;
+  }
+
+  // Estimate toll based on distance (customizable)
+  // For intercity rides > 50km, estimate ₹50-200 toll
+  if (distance_km > 50) {
+    return Math.min(200, 50 + (distance_km - 50) * 2);
+  }
+
+  return 0;
+}
+
+// Main pricing calculation for regular vehicles
+function calculateVehiclePrice(vehicle, routeData, conditions) {
+  const {
+    distance_km,
+    traffic_duration_minutes,
+    waitingTimeInMinutes = 0
+  } = routeData;
+
+  const {
+    isNightTime,
+    isRaining,
+    isPeakHour,
+    demandLevel,
+    hasTolls = false
+  } = conditions;
+
+  // Extract vehicle pricing parameters
+  const {
+    baseFare = 0,
+    baseKM = 0,
+    perKM = 0,
+    perMin = 0,
+    waitingChargePerMin = 0,
+    nightPercent = 0,
+    minFare = 0
+  } = vehicle;
+
+  // 1. Distance cost (only beyond base KM)
+  const chargeableDistance = Math.max(0, distance_km - baseKM);
+  const distanceCost = chargeableDistance * perKM;
+
+  // 2. Time cost
+  const timeCost = traffic_duration_minutes * perMin;
+
+  // 3. Waiting time cost
+  const waitingTimeCost = waitingTimeInMinutes * waitingChargePerMin;
+
+  // 4. Night surcharge (percentage on base + distance)
+  const nightSurcharge = isNightTime
+    ? ((baseFare + distanceCost) * nightPercent) / 100
+    : 0;
+
+  // 5. Fuel surcharge (dynamic based on mileage)
+  const fuelSurcharge = calculateFuelSurcharge(distance_km, vehicle);
+
+  // 6. Toll charges (if applicable)
+  const tollCharges = calculateTollCharges(distance_km, vehicle, hasTolls);
+
+  // 7. Calculate surge multiplier
+  const surgeMultiplier = calculateSurgeMultiplier({
+    isPeakHour,
+    isNightTime,
+    isRaining,
+    distance_km,
+    demandLevel
+  });
+
+  // 8. Base price before surge
+  let basePrice = baseFare + distanceCost + timeCost + waitingTimeCost + nightSurcharge + fuelSurcharge;
+
+  // 9. Apply surge multiplier
+  let totalPrice = basePrice * surgeMultiplier;
+
+  // 10. Add non-surgeable charges (tolls are fixed)
+  totalPrice += tollCharges;
+
+  // 11. Apply minimum fare
+  totalPrice = Math.max(totalPrice, minFare);
+
+  return {
+    vehicleId: vehicle._id.toString(),
+    vehicleName: vehicle.name || 'Unknown Vehicle',
+    vehicleType: vehicle.vehicleType || vehicle.type,
+    vehicleImage: vehicle.icons_image?.url || null,
+    totalPrice: Math.round(totalPrice * 100) / 100,
+    distanceInKm: Math.round(distance_km * 100) / 100,
+    durationInMinutes: Math.round(traffic_duration_minutes * 100) / 100,
+    surgeMultiplier,
+    pricing: {
+      baseFare: Math.round(baseFare * 100) / 100,
+      distanceCost: Math.round(distanceCost * 100) / 100,
+      timeCost: Math.round(timeCost * 100) / 100,
+      waitingTimeCost: Math.round(waitingTimeCost * 100) / 100,
+      nightSurcharge: Math.round(nightSurcharge * 100) / 100,
+      fuelSurcharge: Math.round(fuelSurcharge * 100) / 100,
+      tollCharges: Math.round(tollCharges * 100) / 100,
+      surgeAmount: Math.round((totalPrice - tollCharges - basePrice) * 100) / 100,
+      priceBeforeSurge: Math.round(basePrice * 100) / 100
+    },
+    conditions: {
+      isNightTime,
+      isRaining,
+      isPeakHour,
+      demandLevel,
+      baseKmIncluded: baseKM,
+      chargeableDistance: Math.round(chargeableDistance * 100) / 100,
+      avgMileage: vehicle.avgMileage,
+      hasTolls
+    },
+    isRental: false
+  };
+}
+
+// Calculate rental prices
+async function calculateRentalPrices(distance_km, traffic_duration_minutes, conditions) {
   try {
-    // Fetch rental settings
     const rentalSettings = await settings.findOne().select('rental');
 
     if (!rentalSettings || !rentalSettings.rental) {
@@ -173,20 +355,23 @@ async function calculateRentalPrices(distance_km, traffic_duration_minutes) {
         isAvailable
       } = rentalConfig;
 
-      // ✅ Enforce minimum 1-hour (60 min) charge
+      // Minimum 1-hour charge
       const effectiveMinutes = Math.max(traffic_duration_minutes, 60);
 
-      // ✅ Distance breakdown logic
+      // Distance breakdown
       const extraKm = Math.max(0, distance_km - fixedKmforBaseFare);
 
-      // ✅ Cost calculations
+      // Cost calculations
       const extraKmCost = extraKm * pricePerKm;
       const timeCost = effectiveMinutes * pricePerMin;
 
-      // ✅ Total price
-      const totalPrice = baseFare + extraKmCost + timeCost;
+      // Total price
+      let totalPrice = baseFare + extraKmCost + timeCost;
 
-      // ✅ Construct response
+      // Apply minimal surge for rentals (less aggressive than regular rides)
+      const rentalSurge = conditions.isPeakHour ? 1.15 : 1.0;
+      totalPrice *= rentalSurge;
+
       rentalVehicles.push({
         vehicleType: showingName,
         vehicleName: vehicleType.toUpperCase(),
@@ -194,6 +379,7 @@ async function calculateRentalPrices(distance_km, traffic_duration_minutes) {
         totalPrice: Math.round(totalPrice * 100) / 100,
         distanceInKm: Math.round(distance_km * 100) / 100,
         durationInMinutes: Math.round(effectiveMinutes * 100) / 100,
+        surgeMultiplier: rentalSurge,
         pricing: {
           baseFare: Math.round(baseFare * 100) / 100,
           baseKmIncluded: fixedKmforBaseFare,
@@ -208,7 +394,6 @@ async function calculateRentalPrices(distance_km, traffic_duration_minutes) {
       });
     }
 
-    // Sort results by total price
     rentalVehicles.sort((a, b) => a.totalPrice - b.totalPrice);
 
     console.log(`✅ Calculated rental prices for ${rentalVehicles.length} vehicle types`);
@@ -220,9 +405,7 @@ async function calculateRentalPrices(distance_km, traffic_duration_minutes) {
   }
 }
 
-
-
-// Main price calculation function
+// Main API endpoint
 exports.calculateRidePriceForUser = async (req, res) => {
   const startTime = performance.now();
 
@@ -230,20 +413,20 @@ exports.calculateRidePriceForUser = async (req, res) => {
     const {
       origin,
       destination,
-      distance,
       isLater = false,
-      duration,
       waitingTimeInMinutes = 0,
       vehicleIds = [],
       isNightTime,
-      timezone = 'Asia/Kolkata'
+      timezone = 'Asia/Kolkata',
+      demandLevel = 'normal', // low, normal, high, very_high
+      hasTolls = false
     } = req.body;
 
-    console.log("📋 Request Body for price:", req.body);
+    console.log("📋 Request Body:", req.body);
 
     // Input validation
     if (!origin?.latitude || !origin?.longitude ||
-      !destination?.latitude || !destination?.longitude) {
+        !destination?.latitude || !destination?.longitude) {
       return res.status(400).json({
         success: false,
         message: "Invalid origin or destination coordinates",
@@ -253,7 +436,7 @@ exports.calculateRidePriceForUser = async (req, res) => {
 
     // Validate coordinate ranges
     if (Math.abs(origin.latitude) > 90 || Math.abs(origin.longitude) > 180 ||
-      Math.abs(destination.latitude) > 90 || Math.abs(destination.longitude) > 180) {
+        Math.abs(destination.latitude) > 90 || Math.abs(destination.longitude) > 180) {
       return res.status(400).json({
         success: false,
         message: "Invalid coordinate ranges",
@@ -261,21 +444,22 @@ exports.calculateRidePriceForUser = async (req, res) => {
       });
     }
 
-    // Auto-detect night time
+    // Auto-detect conditions
     const actualIsNightTime = isNightTime !== undefined ? isNightTime : isNightTimeNow(timezone);
+    const actualIsPeakHour = isPeakHour(timezone);
 
     // Create cache keys
     const directionsCacheKey = `directions:${origin.latitude},${origin.longitude}:${destination.latitude},${destination.longitude}`;
 
-    // Get directions data (primary requirement)
+    // Get directions data
     const directionsData = await getDirectionsData(origin, destination, directionsCacheKey);
 
-    // Get weather condition (non-blocking, optional)
-    let isRaining = false;
+    // Get weather condition (non-blocking)
+    let weatherData = { isRaining: false, condition: 'unknown' };
     try {
-      isRaining = await Promise.race([
+      weatherData = await Promise.race([
         getWeatherCondition(origin.latitude, origin.longitude),
-        new Promise(resolve => setTimeout(() => resolve(false), 3000)) // 3 second timeout
+        new Promise(resolve => setTimeout(() => resolve({ isRaining: false, condition: 'timeout' }), 3000))
       ]);
     } catch (error) {
       console.warn('⚠️ Weather check failed, proceeding without weather data');
@@ -292,29 +476,23 @@ exports.calculateRidePriceForUser = async (req, res) => {
       });
     }
 
-    // Determine ride type based on distance and isLater flag
+    // Determine ride type
     const isIntercityRide = distance_km > 69;
-    const shouldCalculateRentals = distance_km < 69;
+    const shouldCalculateRentals = distance_km < 69 && !isLater;
 
     console.log(`🚗 Ride Type: ${isIntercityRide ? 'INTERCITY' : 'LOCAL'} | Distance: ${distance_km.toFixed(2)} km | isLater: ${isLater}`);
 
-    // ===== FETCH VEHICLES WITH FILTERING =====
+    // Fetch vehicles with filtering
     let vehicleQuery = { status: true };
 
-    // If specific vehicle IDs are provided, use them
     if (vehicleIds.length > 0) {
       vehicleQuery._id = { $in: vehicleIds };
     }
 
-    // CRITICAL FIX: For intercity rides or later rides, exclude Bike and Auto
-    // The database field is 'name', not 'vehicleName'
-    if (isIntercityRide) {
-      console.log('🚫 Intercity/Later ride detected - Excluding Bike and Auto');
-
-      // Use case-insensitive regex to match all variations of Bike and Auto
-      vehicleQuery.name = {
-        $not: { $regex: /^(bike|auto)$/i }
-      };
+    // Exclude Bike and Auto for intercity/later rides
+    if (isIntercityRide || isLater) {
+      console.log('🚫 Intercity/Later ride - Excluding Bike and Auto');
+      vehicleQuery.name = { $not: { $regex: /^(bike|auto)$/i } };
     }
 
     console.log('🔍 Vehicle Query:', JSON.stringify(vehicleQuery, null, 2));
@@ -326,84 +504,41 @@ exports.calculateRidePriceForUser = async (req, res) => {
         success: false,
         message: vehicleIds.length > 0
           ? "No active vehicles found for the specified vehicle IDs"
-          : isIntercityRide
-            ? "No active vehicles found for intercity rides (Bike and Auto excluded)"
+          : isIntercityRide || isLater
+            ? "No active vehicles found for intercity/later rides (Bike and Auto excluded)"
             : "No active vehicles found",
         executionTime: `${((performance.now() - startTime) / 1000).toFixed(3)}s`
       });
     }
 
-    console.log(`✅ Found ${vehicles.length} eligible vehicles (Bike/Auto excluded: ${isIntercityRide})`);
+    console.log(`✅ Found ${vehicles.length} eligible vehicles`);
+
+    // Prepare conditions object
+    const conditions = {
+      isNightTime: actualIsNightTime,
+      isRaining: weatherData.isRaining,
+      isPeakHour: actualIsPeakHour,
+      demandLevel,
+      hasTolls
+    };
+
+    // Prepare route data object
+    const routeData = {
+      distance_km,
+      traffic_duration_minutes,
+      waitingTimeInMinutes
+    };
 
     // Calculate prices for all vehicles
-    const vehiclePrices = vehicles.map(vehicle => {
-      // Base calculations
-      const baseFare = vehicle.baseFare || 0;
-      const baseKM = vehicle.baseKM || 0;
-      const perKM = vehicle.perKM || 0;
-      const perMin = vehicle.perMin || 0;
-      const waitingChargePerMin = vehicle.waitingChargePerMin || 0;
-      const nightPercent = vehicle.nightPercent || 0;
-      const minFare = vehicle.minFare || baseFare;
+    const vehiclePrices = vehicles.map(vehicle => 
+      calculateVehiclePrice(vehicle, routeData, conditions)
+    );
 
-      // Distance cost (only charge for distance beyond base KM)
-      const chargeableDistance = Math.max(0, distance_km - baseKM);
-      const distanceCost = chargeableDistance * perKM;
-
-      // Time cost
-      const timeCost = traffic_duration_minutes * perMin;
-
-      // Waiting time cost
-      const waitingTimeCost = waitingTimeInMinutes * waitingChargePerMin;
-
-      // Night surcharge (percentage of base components)
-      const nightSurcharge = actualIsNightTime
-        ? ((baseFare + distanceCost) * nightPercent) / 100
-        : 0;
-
-      // Rain surcharge (if applicable)
-      const rainSurcharge = isRaining && vehicle.rainSurcharge
-        ? vehicle.rainSurcharge
-        : 0;
-
-      // Calculate total price
-      let totalPrice = baseFare + distanceCost + timeCost + waitingTimeCost + nightSurcharge + rainSurcharge;
-
-      // Apply minimum fare
-      totalPrice = Math.max(totalPrice, minFare);
-
-      return {
-        vehicleId: vehicle._id.toString(),
-        vehicleName: vehicle.name || 'Unknown Vehicle',
-        vehicleType: vehicle.vehicleType || null,
-        vehicleImage: vehicle.icons_image?.url || null,
-        totalPrice: Math.round(totalPrice * 100) / 100,
-        distanceInKm: Math.round(distance_km * 100) / 100,
-        durationInMinutes: Math.round(traffic_duration_minutes * 100) / 100,
-        pricing: {
-          baseFare: Math.round(baseFare * 100) / 100,
-          distanceCost: Math.round(distanceCost * 100) / 100,
-          timeCost: Math.round(timeCost * 100) / 100,
-          waitingTimeCost: Math.round(waitingTimeCost * 100) / 100,
-          nightSurcharge: Math.round(nightSurcharge * 100) / 100,
-          rainSurcharge: Math.round(rainSurcharge * 100) / 100
-        },
-        conditions: {
-          isNightTime: actualIsNightTime,
-          isRaining,
-          baseKmIncluded: baseKM,
-          chargeableDistance: Math.round(chargeableDistance * 100) / 100
-        },
-        isRental: false
-      };
-    });
-
-    // Calculate rental prices if conditions are met
-    // Rentals are NOT included for intercity rides or later rides
+    // Calculate rental prices if applicable
     let rentalVehiclePrices = [];
     if (shouldCalculateRentals) {
-      console.log('🚕 Calculating rental vehicle prices (distance < 69 km and isLater = false)...');
-      rentalVehiclePrices = await calculateRentalPrices(distance_km, traffic_duration_minutes);
+      console.log('🚕 Calculating rental vehicle prices...');
+      rentalVehiclePrices = await calculateRentalPrices(distance_km, traffic_duration_minutes, conditions);
     } else {
       console.log('🚫 Skipping rental calculations (intercity ride or later ride)');
     }
@@ -413,17 +548,15 @@ exports.calculateRidePriceForUser = async (req, res) => {
     console.log("💰 Price Calculation Summary:", {
       distance: `${distance_km.toFixed(2)} km`,
       duration: `${traffic_duration_minutes.toFixed(2)} mins`,
-      isNightTime: actualIsNightTime,
-      isRaining,
+      conditions,
       isLater,
       isIntercityRide,
       regularVehicleCount: vehicles.length,
       rentalVehicleCount: rentalVehiclePrices.length,
-      bikeAutoExcluded: isIntercityRide,
       executionTime
     });
 
-    // Sort regular vehicles by price (lowest first)
+    // Sort by price
     vehiclePrices.sort((a, b) => a.totalPrice - b.totalPrice);
 
     // Prepare response
@@ -439,8 +572,8 @@ exports.calculateRidePriceForUser = async (req, res) => {
         isIntercityRide,
         isLaterRide: isLater,
         conditions: {
-          isNightTime: actualIsNightTime,
-          isRaining,
+          ...conditions,
+          weatherCondition: weatherData.condition,
           timeDetection: isNightTime !== undefined ? 'manual' : 'auto-detected'
         }
       },
@@ -448,15 +581,16 @@ exports.calculateRidePriceForUser = async (req, res) => {
       executionTime
     };
 
-    // Add rental prices to response if available (only for local non-later rides)
+    // Add rental prices if available
     if (rentalVehiclePrices.length > 0) {
       response.rentalVehiclePrices = rentalVehiclePrices;
       response.message = "Ride prices calculated successfully (including rental options)";
     }
 
-    // Add note about excluded vehicles for intercity/later rides
-    if (isIntercityRide) {
-      response.note = "Bike and Auto excluded for intercity/later rides. Rental vehicles not available.";
+    // Add note for excluded vehicles
+    if (isIntercityRide || isLater) {
+      response.note = "Bike and Auto excluded for intercity/later rides" + 
+                      (isIntercityRide ? ". Rental vehicles not available." : "");
     }
 
     return res.status(200).json(response);
@@ -474,6 +608,7 @@ exports.calculateRidePriceForUser = async (req, res) => {
   }
 };
 
+// Recalculate rental prices with additional hours
 exports.reCalculatePriceForOnlyRentals = async (req, res) => {
   const startTime = performance.now();
 
@@ -503,41 +638,45 @@ exports.reCalculatePriceForOnlyRentals = async (req, res) => {
       return res.status(400).json({ success: false, message: "Rental type unavailable" });
     }
 
-    const { pricePerMin } = config;
+    const { pricePerMin, pricePerKm } = config;
 
     let totalHours = origHrs + addHrs;
     let estimatedDistanceKm = origDist;
     let additionalTimeCost = 0;
+    let additionalDistanceCost = 0;
     let totalFare = currFare;
 
     // Special case: originalHours = 1 AND additionalHours = 1
     if (origHrs === 1 && addHrs === 1) {
-      estimatedDistanceKm += 15; // add 15 km
-      totalHours = origHrs;       // keep hours same
-      totalFare = currFare;       // keep fare same
+      estimatedDistanceKm += 15;
+      totalHours = origHrs;
+      totalFare = currFare;
     } else if (addHrs > 0) {
-      // Normal calculation for other cases
+      // Normal calculation
       const additionalMinutes = addHrs * 60;
       additionalTimeCost = additionalMinutes * pricePerMin;
 
-      // Extra distance only after first hour
+      // Extra distance after first hour
       const extraHoursAfterFirst = Math.max(totalHours - 1, 0);
-      estimatedDistanceKm = origDist + (extraHoursAfterFirst * 15);
+      const additionalDistance = extraHoursAfterFirst * 15;
+      estimatedDistanceKm = origDist + additionalDistance;
+      additionalDistanceCost = additionalDistance * pricePerKm;
 
       // Update total fare
-      totalFare = currFare + additionalTimeCost;
+      totalFare = currFare + additionalTimeCost + additionalDistanceCost;
     }
 
     const response = {
       success: true,
-     additional: {
+      additional: {
         originalHours: parseFloat(origHrs.toFixed(2)),
         additionalHours: parseFloat(addHrs.toFixed(2)),
-        current:originalDistanceKm,
+        currentDistanceKm: parseFloat(origDist.toFixed(2)),
         totalHours: parseFloat(totalHours.toFixed(2)),
         estimatedDistanceKm: parseFloat(estimatedDistanceKm.toFixed(2)),
         currentFare: parseFloat(currFare.toFixed(2)),
         additionalTimeCost: parseFloat(additionalTimeCost.toFixed(2)),
+        additionalDistanceCost: parseFloat(additionalDistanceCost.toFixed(2)),
         totalFare: parseFloat(totalFare.toFixed(2))
       },
       executionTime: `${((performance.now() - startTime) / 1000).toFixed(3)}s`
@@ -549,6 +688,10 @@ exports.reCalculatePriceForOnlyRentals = async (req, res) => {
 
   } catch (error) {
     console.error("❌ Error in reCalculatePriceForOnlyRentals:", error);
-    return res.status(500).json({ success: false, message: error.message || error });
+    return res.status(500).json({ 
+      success: false, 
+      message: error.message || error,
+      executionTime: `${((performance.now() - startTime) / 1000).toFixed(3)}s`
+    });
   }
 };
