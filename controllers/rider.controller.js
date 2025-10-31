@@ -2440,14 +2440,11 @@ exports.getAddOnVehicleAdmin = async (req, res) => {
 
 exports.getAllAddOnVehicleAdmin = async (req, res) => {
   try {
-    // Extract query parameters
     const { page = 1, limit = 10, search = '' } = req.query;
 
-    // Convert page and limit to numbers
     const currentPage = parseInt(page, 10);
     const itemsPerPage = parseInt(limit, 10);
 
-    // Build search query
     let searchQuery = {};
     if (search) {
       searchQuery = {
@@ -2470,17 +2467,13 @@ exports.getAllAddOnVehicleAdmin = async (req, res) => {
       };
     }
 
-    console.log('Search Query:', searchQuery); // Debug log
-
-    // Fetch vehicles with pagination and search
+    // Fetch vehicles with search, sort by createdAt DESC, then paginate
     const findDetails = await VehicleAdds.find(searchQuery)
       .populate('riderId', 'name phone BH')
+      .sort({ createdAt: -1 }) // This ensures newest first
       .skip((currentPage - 1) * itemsPerPage)
       .limit(itemsPerPage);
 
-    console.log('Find Details:', findDetails); // Debug log
-
-    // Get total count for pagination
     const totalItems = await VehicleAdds.countDocuments(searchQuery);
     const totalPages = Math.ceil(totalItems / itemsPerPage);
 
