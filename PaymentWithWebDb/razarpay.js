@@ -340,7 +340,7 @@ exports.verify_recharge = async (req, res) => {
         }
 
         // Step 5: Fetch vendor
-        console.log("Step 5: Fetching vendor");
+        console.log("Step 5: Fetching vendor",plan);
         let user;
         try {
             user = await VendorModel.findById(rechargeData?.vendor_id);
@@ -471,7 +471,7 @@ exports.verify_recharge = async (req, res) => {
             rechargeData.razorpay_payment_id = razorpay_payment_id;
             rechargeData.razorpay_status = 'paid';
             rechargeData.end_date = endDate;
-            rechargeData.trn_no = razorpay_payment_id;
+            rechargeData.trn_no = razorpay_payment_id || "No trn have";
             rechargeData.payment_approved = true;
             console.log("Recharge data updated successfully");
         } catch (updateError) {

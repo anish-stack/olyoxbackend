@@ -24,6 +24,43 @@ const LocationSchema = new Schema({
 }, { _id: false });
 
 
+const ParcelOrders = new Schema({
+    reciver_details: {
+        name: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        contact_number: {
+            type: String,
+            required: true,
+            trim: true,
+            match: /^[0-9]{10,15}$/
+        },
+        alternate_contact: {
+            type: String,
+            trim: true,
+            match: /^[0-9]{10,15}$/
+        },
+        appartment: {
+            type: String,
+            trim: true,
+        },
+        savedAs: {
+            type: String,
+            trim: true,
+        }
+    },
+
+    pickup_photo: {
+        url: String,
+        uploaded_at: { type: Date, default: Date.now }
+    },
+    delivery_photo: {
+        url: String,
+        uploaded_at: { type: Date, default: Date.now }
+    },
+}, { _id: false })
 
 
 const chatSchema = new Schema(
@@ -64,27 +101,27 @@ const AddressSchema = new Schema({
 
 // Pricing breakdown subdocument
 const PricingSchema = new Schema({
-  base_fare: { type: Number, min: 0, default: 0 },
-  distance_fare: { type: Number, min: 0, default: 0 },
-  time_fare: { type: Number, min: 0, default: 0 },
-  original_fare: { type: Number, min: 0, default: 0 },
+    base_fare: { type: Number, min: 0, default: 0 },
+    distance_fare: { type: Number, min: 0, default: 0 },
+    time_fare: { type: Number, min: 0, default: 0 },
+    original_fare: { type: Number, min: 0, default: 0 },
 
-  extra_km: { type: Number, min: 0, default: 0 },
-  extra_km_fare: { type: Number, min: 0, default: 0 },
-  extra_hours: { type: Number, min: 0, default: 0 },
-  extra_time_fare: { type: Number, min: 0, default: 0 },
-  total_extra_charges: { type: Number, min: 0, default: 0 },
+    extra_km: { type: Number, min: 0, default: 0 },
+    extra_km_fare: { type: Number, min: 0, default: 0 },
+    extra_hours: { type: Number, min: 0, default: 0 },
+    extra_time_fare: { type: Number, min: 0, default: 0 },
+    total_extra_charges: { type: Number, min: 0, default: 0 },
 
-  original_total_fare: { type: Number, min: 0, default: 0 },
-  platform_fee: { type: Number, min: 0, default: 0 },
-  night_charge: { type: Number, min: 0, default: 0 },
-  rain_charge: { type: Number, min: 0, default: 0 },
-  collected_amount: { type: Number, min: 0, default: 0 },
-  toll_charge: { type: Number, min: 0, default: 0 },
-  discount: { type: Number, min: 0, default: 0 },
+    original_total_fare: { type: Number, min: 0, default: 0 },
+    platform_fee: { type: Number, min: 0, default: 0 },
+    night_charge: { type: Number, min: 0, default: 0 },
+    rain_charge: { type: Number, min: 0, default: 0 },
+    collected_amount: { type: Number, min: 0, default: 0 },
+    toll_charge: { type: Number, min: 0, default: 0 },
+    discount: { type: Number, min: 0, default: 0 },
 
-  total_fare: { type: Number, min: 0, default: 0 },
-  currency: { type: String, default: 'INR', uppercase: true }
+    total_fare: { type: Number, min: 0, default: 0 },
+    currency: { type: String, default: 'INR', uppercase: true }
 }, { _id: false });
 
 
@@ -380,6 +417,14 @@ const RideRequestSchema = new Schema({
         type: Boolean,
         default: true
     },
+
+
+    isParcelOrder: {
+        type: Boolean,
+        default: false
+    },
+
+    details: ParcelOrders,
     // Add this to your RideBooking schema
 
     notified_riders: [{

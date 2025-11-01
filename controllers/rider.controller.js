@@ -440,9 +440,12 @@ exports.saveFcmTokenToken = async (req, res) => {
         message: "FCM token is required",
       });
     }
-    console.log("Mai fcm aa rha hu", fcmToken)
-    // Set default values if missing
+
+    console.log("📩 Incoming FCM token:", fcmToken);
+
+    // Default values
     deviceId = deviceId || "unknown";
+    platform = platform || "unknown";
     timestamp = timestamp ? new Date(timestamp) : new Date();
 
     const rider = await Rider.findById(riderId);
@@ -455,24 +458,51 @@ exports.saveFcmTokenToken = async (req, res) => {
 
     const now = new Date();
     const lastUpdate = rider.fcmUpdatedAt || new Date(0);
-    const diffMinutes = (now - lastUpdate) / (1000 * 60); // difference in minutes
+    const diffMinutes = (now - lastUpdate) / (1000 * 60);
 
-    // Update if token/device changed OR last update was more than 10 minutes ago
-    if (rider.fcmToken !== fcmToken || rider.deviceId !== deviceId) {
+    const shouldUpdate =
+      rider.fcmToken !== fcmToken ||
+      rider.deviceId !== deviceId ||
+      diffMinutes >= 10;
+
+    if (shouldUpdate) {
       rider.fcmToken = fcmToken;
       rider.deviceId = deviceId;
-      rider.platform = platform || "unknown";
+      rider.platform = platform;
       rider.fcmUpdatedAt = timestamp;
       await rider.save();
-      console.log(`📲 Updated FCM token for rider ${riderId}`);
-    } else {
-      console.log(`ℹ️ FCM token and deviceId unchanged for rider ${riderId}, last updated ${diffMinutes.toFixed(1)} min ago`);
-    }
 
-    res.status(201).json({
-      success: true,
-      message: "FCM token updated successfully",
-    });
+      console.log(
+        `✅ FCM updated for rider ${riderId} | Platform: ${platform} | Device: ${deviceId} | After ${diffMinutes.toFixed(
+          1
+        )} min`
+      );
+
+      return res.status(201).json({
+        success: true,
+        message: "FCM token updated successfully",
+        data: {
+          riderId,
+          fcmToken,
+          platform,
+          deviceId,
+          lastUpdated: timestamp,
+        },
+      });
+    } else {
+      console.log(
+        `ℹ️ FCM token and deviceId unchanged for rider ${riderId}, last updated ${diffMinutes.toFixed(
+          1
+        )} min ago`
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: `FCM token unchanged (last updated ${diffMinutes.toFixed(
+          1
+        )} min ago)`,
+      });
+    }
   } catch (error) {
     console.error("❌ Error saving FCM token:", error);
     res.status(500).json({
@@ -481,6 +511,7 @@ exports.saveFcmTokenToken = async (req, res) => {
     });
   }
 };
+
 
 
 exports.logoutRider = async (req, res) => {

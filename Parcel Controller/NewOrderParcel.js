@@ -8,6 +8,7 @@ const { getAllConnectedClients } = require("../socket/socketManager");
 
 exports.NewBooking = async (req, res) => {
   try {
+    console.log(req.body)
     // 🛑 Validate required fields
     if (!req.body.pickup || !req.body.dropoff || !req.body.vehicle_id) {
       return res.status(400).json({
@@ -87,48 +88,49 @@ exports.NewBooking = async (req, res) => {
     // 🔢 Generate OTP
     transformedData.otp = Math.floor(1000 + Math.random() * 9000);
 
+    console.log("book-parcel",transformedData)
     // 💾 Save booking
     const newBooking = new Parcel_Request(transformedData);
-    await newBooking.save();
+    // await newBooking.save();
 
     // 🔔 Notify via Socket
-    const io = req.app.get("socketio");
-    const clients = getAllConnectedClients();
+    // const io = req.app.get("socketio");
+    // const clients = getAllConnectedClients();
 
-    console.log("📡 All connected clients:", clients);
+    // console.log("📡 All connected clients:", clients);
 
-    const customerId = newBooking.customerId.toString();
-    console.log("🆔 CustomerId:", customerId);
+    // const customerId = newBooking.customerId.toString();
+    // console.log("🆔 CustomerId:", customerId);
 
-    // 🎯 Find customer in connected clients
-    const customerClient = clients.users.find(
-      (u) => u.userId.toString() === customerId
-    );
+    // // 🎯 Find customer in connected clients
+    // const customerClient = clients.users.find(
+    //   (u) => u.userId.toString() === customerId
+    // );
 
-    if (io && customerClient) {
-      console.log("✅ Customer socket mil gaya:", customerClient);
+    // if (io && customerClient) {
+    //   console.log("✅ Customer socket mil gaya:", customerClient);
 
-      io.to(customerClient.socketId).emit("your_parcel_is_confirm", {
-        success: true,
-        message: "New parcel request created",
-        parcel: newBooking._id
-      });
-    } else {
-      console.warn("⚠️ Customer abhi connected nahi hai, socket send skip kar diya.");
-    }
+    //   io.to(customerClient.socketId).emit("your_parcel_is_confirm", {
+    //     success: true,
+    //     message: "New parcel request created",
+    //     parcel: newBooking._id
+    //   });
+    // } else {
+    //   console.warn("⚠️ Customer abhi connected nahi hai, socket send skip kar diya.");
+    // }
 
-    // 🚖 Notify driver service
-    console.log("🚖 Notifying drivers about new parcel request...");
-    try {
-      const data = await notifyDriverService(newBooking._id, req, res);
-      console.log("✅ notifyDriverService success:", data);
+    // // 🚖 Notify driver service
+    // console.log("🚖 Notifying drivers about new parcel request...");
+    // try {
+    //   const data = await notifyDriverService(newBooking._id, req, res);
+    //   console.log("✅ notifyDriverService success:", data);
 
-      if (!data.success) {
-        console.warn("⚠️ notifyDriverService warning:", data.message);
-      }
-    } catch (error) {
-      console.error("❌ Error notifyDriverService:", error.message);
-    }
+    //   if (!data.success) {
+    //     console.warn("⚠️ notifyDriverService warning:", data.message);
+    //   }
+    // } catch (error) {
+    //   console.error("❌ Error notifyDriverService:", error.message);
+    // }
 
     // ✅ Response
     return res.status(201).json({
