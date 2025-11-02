@@ -651,26 +651,26 @@ async function calculateRentalPrices(distance_km, traffic_duration_minutes, cond
 // Enhanced function to determine if Bike/Auto should be excluded
 function shouldExcludeBikeAuto(distance_km, origin, destination, isLater, isIntercityRide) {
   const reasons = [];
-  
+
   // Rule 1: Intercity rides (distance > 69 km)
   if (isIntercityRide) {
     reasons.push('intercity ride (>69 km)');
   }
-  
+
   // Rule 2: Later rides
   if (isLater) {
     reasons.push('scheduled for later');
   }
-  
-  // Rule 3: Distance > 20 km
-  if (distance_km > 20) {
-    reasons.push(`distance exceeds 20 km (${distance_km.toFixed(2)} km)`);
+
+  // Rule 3: Distance > 50 km (updated from 20 km)
+  if (distance_km > 50) {
+    reasons.push(`distance exceeds 75 km (${distance_km.toFixed(2)} km)`);
   }
-  
+
   // Rule 4: Cross-city routes
   const originCity = detectCity(origin.latitude, origin.longitude);
   const destCity = detectCity(destination.latitude, destination.longitude);
-  
+
   if (originCity && destCity && originCity !== destCity) {
     const crossCityRoutes = [
       'gurgaon-delhi', 'delhi-gurgaon',
@@ -680,25 +680,22 @@ function shouldExcludeBikeAuto(distance_km, origin, destination, isLater, isInte
       'noida-up', 'up-noida',
       'delhi-up', 'up-delhi'
     ];
-    
+
     const routeKey = `${originCity}-${destCity}`;
     if (crossCityRoutes.includes(routeKey)) {
       reasons.push(`cross-city route (${originCity} → ${destCity})`);
     }
   }
-  
+
   const shouldExclude = reasons.length > 0;
-  
+
   if (shouldExclude) {
     console.log(`🚫 Excluding Bike & Auto because: ${reasons.join(', ')}`);
   } else {
-    console.log(`✅ Bike & Auto allowed (local ride <20km within same city)`);
+    console.log(`✅ Bike & Auto allowed (local ride ≤50 km within same city)`);
   }
-  
-  return {
-    shouldExclude,
-    reasons
-  };
+
+  return { shouldExclude, reasons };
 }
 
 // Main API endpoint
