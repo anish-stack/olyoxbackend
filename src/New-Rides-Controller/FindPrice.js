@@ -83,46 +83,46 @@ const CITY_BOUNDARIES = {
 // Detect city from coordinates (Priority-based detection)
 function detectCity(lat, lng) {
   console.log(`📍 Checking coordinates: ${lat}, ${lng}`);
-  
+
   // Check in priority order to avoid overlaps
   // Priority: Gurgaon -> Noida -> Delhi -> UP
-  
+
   // Check Gurgaon first (west of Delhi)
-  if (lat >= CITY_BOUNDARIES.gurgaon.bounds.minLat && 
-      lat <= CITY_BOUNDARIES.gurgaon.bounds.maxLat &&
-      lng >= CITY_BOUNDARIES.gurgaon.bounds.minLng && 
-      lng <= CITY_BOUNDARIES.gurgaon.bounds.maxLng) {
+  if (lat >= CITY_BOUNDARIES.gurgaon.bounds.minLat &&
+    lat <= CITY_BOUNDARIES.gurgaon.bounds.maxLat &&
+    lng >= CITY_BOUNDARIES.gurgaon.bounds.minLng &&
+    lng <= CITY_BOUNDARIES.gurgaon.bounds.maxLng) {
     console.log(`   ✅ Detected: Gurgaon`);
     return 'gurgaon';
   }
-  
+
   // Check Noida (east of Delhi)
-  if (lat >= CITY_BOUNDARIES.noida.bounds.minLat && 
-      lat <= CITY_BOUNDARIES.noida.bounds.maxLat &&
-      lng >= CITY_BOUNDARIES.noida.bounds.minLng && 
-      lng <= CITY_BOUNDARIES.noida.bounds.maxLng) {
+  if (lat >= CITY_BOUNDARIES.noida.bounds.minLat &&
+    lat <= CITY_BOUNDARIES.noida.bounds.maxLat &&
+    lng >= CITY_BOUNDARIES.noida.bounds.minLng &&
+    lng <= CITY_BOUNDARIES.noida.bounds.maxLng) {
     console.log(`   ✅ Detected: Noida`);
     return 'noida';
   }
-  
+
   // Check Delhi (central NCR)
-  if (lat >= CITY_BOUNDARIES.delhi.bounds.minLat && 
-      lat <= CITY_BOUNDARIES.delhi.bounds.maxLat &&
-      lng >= CITY_BOUNDARIES.delhi.bounds.minLng && 
-      lng <= CITY_BOUNDARIES.delhi.bounds.maxLng) {
+  if (lat >= CITY_BOUNDARIES.delhi.bounds.minLat &&
+    lat <= CITY_BOUNDARIES.delhi.bounds.maxLat &&
+    lng >= CITY_BOUNDARIES.delhi.bounds.minLng &&
+    lng <= CITY_BOUNDARIES.delhi.bounds.maxLng) {
     console.log(`   ✅ Detected: Delhi`);
     return 'delhi';
   }
-  
+
   // Check broader UP region
-  if (lat >= CITY_BOUNDARIES.up.bounds.minLat && 
-      lat <= CITY_BOUNDARIES.up.bounds.maxLat &&
-      lng >= CITY_BOUNDARIES.up.bounds.minLng && 
-      lng <= CITY_BOUNDARIES.up.bounds.maxLng) {
+  if (lat >= CITY_BOUNDARIES.up.bounds.minLat &&
+    lat <= CITY_BOUNDARIES.up.bounds.maxLat &&
+    lng >= CITY_BOUNDARIES.up.bounds.minLng &&
+    lng <= CITY_BOUNDARIES.up.bounds.maxLng) {
     console.log(`   ✅ Detected: UP (Other)`);
     return 'up';
   }
-  
+
   console.log(`   ❌ Location not in NCR region`);
   return null;
 }
@@ -153,11 +153,11 @@ function detectTollsForRoute(origin, destination) {
 
   // DELHI ENTRY TOLLS (Main Logic)
   // Rule: Toll charged when entering Delhi from any neighboring city
-  
+
   if (destCity === 'delhi') {
     let tollAmount = 0;
     let routeDescription = '';
-    
+
     if (originCity === 'gurgaon') {
       tollAmount = 100;
       routeDescription = 'Gurgaon → Delhi (Border Entry Toll)';
@@ -168,7 +168,7 @@ function detectTollsForRoute(origin, destination) {
       tollAmount = 100;
       routeDescription = 'UP → Delhi (State Border Toll)';
     }
-    
+
     if (tollAmount > 0) {
       console.log(`💰 TOLL DETECTED: ${routeDescription}`);
       console.log(`   Amount: ₹${tollAmount}`);
@@ -185,16 +185,16 @@ function detectTollsForRoute(origin, destination) {
       };
     }
   }
-  
+
   // INTER-CITY TOLLS (Non-Delhi routes)
-  
+
   // Noida ↔ UP (Direct NH tolls)
-  if ((originCity === 'noida' && destCity === 'up') || 
-      (originCity === 'up' && destCity === 'noida')) {
-    const routeDescription = originCity === 'noida' 
-      ? 'Noida → UP (NH Toll)' 
+  if ((originCity === 'noida' && destCity === 'up') ||
+    (originCity === 'up' && destCity === 'noida')) {
+    const routeDescription = originCity === 'noida'
+      ? 'Noida → UP (NH Toll)'
       : 'UP → Noida (NH Toll)';
-    
+
     console.log(`💰 TOLL DETECTED: ${routeDescription}`);
     console.log(`   Amount: ₹100`);
     console.log('========================================\n');
@@ -209,14 +209,14 @@ function detectTollsForRoute(origin, destination) {
       }
     };
   }
-  
+
   // Gurgaon ↔ Noida (via Delhi - entering Delhi triggers toll)
-  if ((originCity === 'gurgaon' && destCity === 'noida') || 
-      (originCity === 'noida' && destCity === 'gurgaon')) {
+  if ((originCity === 'gurgaon' && destCity === 'noida') ||
+    (originCity === 'noida' && destCity === 'gurgaon')) {
     const routeDescription = originCity === 'gurgaon'
       ? 'Gurgaon → Delhi → Noida (Delhi Entry Toll)'
       : 'Noida → Delhi → Gurgaon (Delhi Entry Toll)';
-    
+
     console.log(`💰 TOLL DETECTED: ${routeDescription}`);
     console.log(`   Amount: ₹100 (single Delhi entry toll)`);
     console.log('========================================\n');
@@ -232,14 +232,14 @@ function detectTollsForRoute(origin, destination) {
       }
     };
   }
-  
+
   // Gurgaon ↔ UP (via Delhi - entering Delhi triggers toll)
-  if ((originCity === 'gurgaon' && destCity === 'up') || 
-      (originCity === 'up' && destCity === 'gurgaon')) {
+  if ((originCity === 'gurgaon' && destCity === 'up') ||
+    (originCity === 'up' && destCity === 'gurgaon')) {
     const routeDescription = originCity === 'gurgaon'
       ? 'Gurgaon → Delhi → UP (Delhi Entry Toll)'
       : 'UP → Delhi → Gurgaon (Delhi Entry Toll)';
-    
+
     console.log(`💰 TOLL DETECTED: ${routeDescription}`);
     console.log(`   Amount: ₹100 (single Delhi entry toll)`);
     console.log('========================================\n');
@@ -419,26 +419,31 @@ function calculateSurgeMultiplier(options = {}) {
 // Calculate fuel surcharge dynamically based on distance and mileage
 function calculateFuelSurcharge(distance_km, vehicle) {
   const { avgMileage, fuelSurchargePerKM } = vehicle;
-  
+
   // Fuel consumption = distance / mileage
   const fuelConsumed = distance_km / avgMileage;
-  
+
   // Fuel surcharge = fuel consumed * surcharge per liter
   const fuelSurcharge = fuelConsumed * fuelSurchargePerKM;
-  
+
   return Math.round(fuelSurcharge * 100) / 100;
 }
 
 function calculateTollCharges(distance_km, vehicle, tollInfo) {
+
+  const vehicleName = (vehicle.name || '').toLowerCase().trim();
+  if (vehicleName === 'bike') {
+    console.log(`🚴 Bike detected - No toll charges applied`);
+    return 0;
+  }
+
   // Pehle auto-detected toll check karo
   if (tollInfo.hasTolls && tollInfo.tollAmount > 0) {
     console.log(`✅ Using auto-detected toll: ₹${tollInfo.tollAmount}`);
     return tollInfo.tollAmount;
   }
 
-  // Agar vehicle mein tollExtra enabled hai AUR distance > 50km
-  // Lekin sirf tab jab koi city boundary cross nahi hui
-  // Yeh rare case hai - mostly auto-detection hi kaam karega
+
   if (vehicle.tollExtra && distance_km > 50 && !tollInfo.hasTolls) {
     const fallbackToll = Math.min(200, 50 + (distance_km - 50) * 2);
     console.log(`📏 Using distance-based toll (no city crossing detected): ₹${fallbackToll}`);
@@ -556,7 +561,7 @@ function calculateVehiclePrice(vehicle, routeData, conditions, tollInfo) {
 // Calculate rental prices with TOLL SUPPORT
 async function calculateRentalPrices(distance_km, traffic_duration_minutes, conditions, origin, destination) {
   try {
-    console.log("destination",destination)
+    console.log("destination", destination)
     const rentalSettings = await settings.findOne().select('rental');
 
     if (!rentalSettings || !rentalSettings.rental) {
@@ -649,56 +654,71 @@ async function calculateRentalPrices(distance_km, traffic_duration_minutes, cond
 }
 
 // Enhanced function to determine if Bike/Auto should be excluded
-function shouldExcludeBikeAuto(distance_km, origin, destination, isLater, isIntercityRide) {
+// Enhanced function to determine if Bike/Auto should be excluded
+function shouldExcludeBikeAuto(distance_km, origin, destination, isLater, isIntercityRide, vehicleName = '') {
   const reasons = [];
+  const normalizedName = vehicleName.toLowerCase().trim();
 
-  // Rule 1: Intercity rides (distance > 69 km)
-  if (isIntercityRide) {
-    reasons.push('intercity ride (>69 km)');
+  // 🚴 BIKE SPECIAL RULES
+  if (normalizedName === 'bike') {
+    // Bikes can go up to 50km regardless of city boundaries
+    if (distance_km > 50) {
+      reasons.push(`distance exceeds Bike limit of 50 km (${distance_km.toFixed(2)} km)`);
+    }
+    
+    // Later rides excluded
+    if (isLater) {
+      reasons.push('scheduled for later');
+    }
+
+    const shouldExclude = reasons.length > 0;
+    if (shouldExclude) {
+      console.log(`🚫 Excluding Bike because: ${reasons.join(', ')}`);
+    } else {
+      console.log(`✅ Bike allowed (≤50 km, can cross boundaries)`);
+    }
+    return { shouldExclude, reasons };
   }
 
-  // Rule 2: Later rides
-  if (isLater) {
-    reasons.push('scheduled for later');
-  }
+  // 🛺 AUTO RULES (existing logic)
+  if (normalizedName === 'auto') {
+    // Rule 1: Intercity rides (distance > 69 km)
+    if (isIntercityRide) {
+      reasons.push('intercity ride (>69 km)');
+    }
 
-  // Rule 3: Distance > 50 km (updated from 20 km)
-  if (distance_km > 50) {
-    reasons.push(`distance exceeds 75 km (${distance_km.toFixed(2)} km)`);
-  }
+    // Rule 2: Later rides
+    if (isLater) {
+      reasons.push('scheduled for later');
+    }
 
-  // Rule 4: Cross-city routes
-  const originCity = detectCity(origin.latitude, origin.longitude);
-  const destCity = detectCity(destination.latitude, destination.longitude);
+    // Rule 3: Distance > 50 km
+    if (distance_km > 50) {
+      reasons.push(`distance exceeds 50 km (${distance_km.toFixed(2)} km)`);
+    }
 
-  if (originCity && destCity && originCity !== destCity) {
-    const crossCityRoutes = [
-      'gurgaon-delhi', 'delhi-gurgaon',
-      'noida-delhi', 'delhi-noida',
-      'gurgaon-noida', 'noida-gurgaon',
-      'gurgaon-up', 'up-gurgaon',
-      'noida-up', 'up-noida',
-      'delhi-up', 'up-delhi'
-    ];
+    // Rule 4: Cross-city routes
+    const originCity = detectCity(origin.latitude, origin.longitude);
+    const destCity = detectCity(destination.latitude, destination.longitude);
 
-    const routeKey = `${originCity}-${destCity}`;
-    if (crossCityRoutes.includes(routeKey)) {
+    if (originCity && destCity && originCity !== destCity) {
       reasons.push(`cross-city route (${originCity} → ${destCity})`);
     }
+
+    const shouldExclude = reasons.length > 0;
+    if (shouldExclude) {
+      console.log(`🚫 Excluding Auto because: ${reasons.join(', ')}`);
+    } else {
+      console.log(`✅ Auto allowed (local ride ≤50 km within same city)`);
+    }
+    return { shouldExclude, reasons };
   }
 
-  const shouldExclude = reasons.length > 0;
-
-  if (shouldExclude) {
-    console.log(`🚫 Excluding Bike & Auto because: ${reasons.join(', ')}`);
-  } else {
-    console.log(`✅ Bike & Auto allowed (local ride ≤50 km within same city)`);
-  }
-
-  return { shouldExclude, reasons };
+  // For other vehicles, no exclusion
+  return { shouldExclude: false, reasons: [] };
 }
 
-// Main API endpoint
+// Main API endpoint - Complete Rewrite with Bike & Auto separate handling
 exports.calculateRidePriceForUser = async (req, res) => {
   const startTime = performance.now();
 
@@ -717,7 +737,9 @@ exports.calculateRidePriceForUser = async (req, res) => {
 
     console.log("📋 Request Body:", req.body);
 
-    // Input validation
+    // ============================================
+    // STEP 1: Input Validation
+    // ============================================
     if (!origin?.latitude || !origin?.longitude ||
         !destination?.latitude || !destination?.longitude) {
       return res.status(400).json({
@@ -737,6 +759,11 @@ exports.calculateRidePriceForUser = async (req, res) => {
       });
     }
 
+    // ============================================
+    // STEP 2: Route & Toll Detection
+    // ============================================
+    console.log('\n========== ROUTE ANALYSIS ==========');
+    
     // Auto-detect tolls based on route
     const tollInfo = detectTollsForRoute(origin, destination);
 
@@ -772,97 +799,172 @@ exports.calculateRidePriceForUser = async (req, res) => {
       });
     }
 
-    // Determine ride type
+    // ============================================
+    // STEP 3: Ride Type Classification
+    // ============================================
     const isIntercityRide = distance_km > 69;
     const shouldCalculateRentals = distance_km < 69 && !isLater;
 
-    console.log(`🚗 Ride Type: ${isIntercityRide ? 'INTERCITY' : 'LOCAL'} | Distance: ${distance_km.toFixed(2)} km | isLater: ${isLater}`);
+    console.log(`\n🚗 RIDE CLASSIFICATION:`);
+    console.log(`   Type: ${isIntercityRide ? 'INTERCITY' : 'LOCAL'}`);
+    console.log(`   Distance: ${distance_km.toFixed(2)} km`);
+    console.log(`   Duration: ${traffic_duration_minutes.toFixed(2)} mins`);
+    console.log(`   Is Later: ${isLater}`);
+    console.log(`   Toll: ${tollInfo.hasTolls ? `₹${tollInfo.tollAmount}` : 'No'}`);
 
-    // ✅ ENHANCED LOGIC: Check if Bike/Auto should be excluded
-    const exclusionCheck = shouldExcludeBikeAuto(distance_km, origin, destination, isLater, isIntercityRide);
-    const excludeBikeAuto = exclusionCheck.shouldExclude;
-
-    // Fetch vehicles with filtering
+    // ============================================
+    // STEP 4: Fetch All Vehicles
+    // ============================================
     let vehicleQuery = { status: true };
 
     if (vehicleIds.length > 0) {
       vehicleQuery._id = { $in: vehicleIds };
     }
 
-    // ✅ Apply exclusion filter if needed
-    if (excludeBikeAuto) {
-      console.log('🚫 Applying Bike & Auto exclusion filter to database query');
-      vehicleQuery.name = { 
-        $nin: [
-          /^bike$/i,      // Matches "bike" case-insensitively
-          /^auto$/i       // Matches "auto" case-insensitively
-        ]
-      };
+    console.log('\n🔍 Database Query:', JSON.stringify(vehicleQuery, null, 2));
+
+    const allVehicles = await RidesSuggestionModel.find(vehicleQuery);
+
+    console.log(`\n📊 Fetched ${allVehicles.length} vehicles from database`);
+    if (allVehicles.length > 0) {
+      console.log('   Vehicle Names:', allVehicles.map(v => `"${v.name}"`).join(', '));
     }
 
-    console.log('🔍 Vehicle Query:', JSON.stringify(vehicleQuery, null, 2));
-
-    const vehicles = await RidesSuggestionModel.find(vehicleQuery);
-
-    console.log(`📊 Vehicles fetched from DB: ${vehicles.length}`);
-    if (vehicles.length > 0) {
-      console.log('   Vehicle names:', vehicles.map(v => `"${v.name}"`).join(', '));
-    }
-
-    // ✅ SAFETY CHECK: Additional JavaScript-level filter
-    let filteredVehicles = vehicles;
-    if (excludeBikeAuto) {
-      const beforeCount = vehicles.length;
-      
-      filteredVehicles = vehicles.filter(v => {
-        const vehicleName = (v.name || '').toLowerCase().trim();
-        const isExcluded = vehicleName === 'bike' || vehicleName === 'auto';
-        
-        if (isExcluded) {
-          console.log(`   🚫 Filtered out: "${v.name}" (ID: ${v._id})`);
-        }
-        
-        return !isExcluded;
-      });
-      
-      const afterCount = filteredVehicles.length;
-      const removedCount = beforeCount - afterCount;
-      
-      if (removedCount > 0) {
-        console.log(`✅ After filtering: ${afterCount} vehicles (removed ${removedCount})`);
-      } else {
-        console.log(`✅ After filtering: ${afterCount} vehicles (none removed - good!)`);
-      }
-    } else {
-      console.log('✅ Local ride within same city (<20km, not later) - All vehicles included');
-    }
-
-    // Check if any vehicles remain
-    if (!filteredVehicles.length) {
-      let noVehiclesMessage = "No active vehicles found";
-      
-      if (vehicleIds.length > 0) {
-        noVehiclesMessage = "No active vehicles found for the specified vehicle IDs";
-      } else if (excludeBikeAuto) {
-        const reasonsText = exclusionCheck.reasons.join(', ');
-        noVehiclesMessage = `No active vehicles available. Bike and Auto are excluded for: ${reasonsText}`;
-      }
-
+    if (allVehicles.length === 0) {
       return res.status(404).json({
         success: false,
-        message: noVehiclesMessage,
-        rideType: isIntercityRide ? 'intercity' : 'local',
-        isLaterRide: isLater,
-        distanceKm: Math.round(distance_km * 100) / 100,
-        exclusionReasons: exclusionCheck.reasons,
+        message: vehicleIds.length > 0 
+          ? "No active vehicles found for the specified vehicle IDs"
+          : "No active vehicles found",
         executionTime: `${((performance.now() - startTime) / 1000).toFixed(3)}s`
       });
     }
 
-    console.log(`✅ Final eligible vehicles: ${filteredVehicles.length}`);
-    console.log('   Names:', filteredVehicles.map(v => `"${v.name}"`).join(', '));
+    // ============================================
+    // STEP 5: Filter Vehicles (Bike & Auto Logic)
+    // ============================================
+    console.log('\n========== VEHICLE FILTERING ==========');
 
-    // Prepare conditions object
+    const filteredVehicles = [];
+    const excludedVehicles = [];
+
+    for (const vehicle of allVehicles) {
+      const vehicleName = (vehicle.name || '').toLowerCase().trim();
+      let shouldExclude = false;
+      let exclusionReasons = [];
+
+      // 🚴 BIKE SPECIAL RULES
+      if (vehicleName === 'bike') {
+        console.log(`\n🚴 Checking BIKE (ID: ${vehicle._id}):`);
+        
+        // Rule 1: Distance limit 50km (can cross boundaries)
+        if (distance_km > 50) {
+          shouldExclude = true;
+          exclusionReasons.push(`distance exceeds 50 km (${distance_km.toFixed(2)} km)`);
+        }
+        
+        // Rule 2: No later rides
+        if (isLater) {
+          shouldExclude = true;
+          exclusionReasons.push('scheduled for later');
+        }
+
+        if (shouldExclude) {
+          console.log(`   ❌ EXCLUDED: ${exclusionReasons.join(', ')}`);
+          excludedVehicles.push({
+            name: vehicle.name,
+            id: vehicle._id,
+            reasons: exclusionReasons
+          });
+        } else {
+          console.log(`   ✅ INCLUDED: Distance ≤50km, immediate ride, can cross boundaries`);
+          filteredVehicles.push(vehicle);
+        }
+        continue;
+      }
+
+      // 🛺 AUTO SPECIAL RULES
+      if (vehicleName === 'auto') {
+        console.log(`\n🛺 Checking AUTO (ID: ${vehicle._id}):`);
+        
+        // Rule 1: Intercity rides excluded
+        if (isIntercityRide) {
+          shouldExclude = true;
+          exclusionReasons.push('intercity ride (>69 km)');
+        }
+
+        // Rule 2: No later rides
+        if (isLater) {
+          shouldExclude = true;
+          exclusionReasons.push('scheduled for later');
+        }
+
+        // Rule 3: Distance limit 50km
+        if (distance_km > 50) {
+          shouldExclude = true;
+          exclusionReasons.push(`distance exceeds 50 km (${distance_km.toFixed(2)} km)`);
+        }
+
+        // Rule 4: No cross-city routes (same city only)
+        const originCity = detectCity(origin.latitude, origin.longitude);
+        const destCity = detectCity(destination.latitude, destination.longitude);
+
+        if (originCity && destCity && originCity !== destCity) {
+          shouldExclude = true;
+          exclusionReasons.push(`cross-city route (${originCity} → ${destCity})`);
+        }
+
+        if (shouldExclude) {
+          console.log(`   ❌ EXCLUDED: ${exclusionReasons.join(', ')}`);
+          excludedVehicles.push({
+            name: vehicle.name,
+            id: vehicle._id,
+            reasons: exclusionReasons
+          });
+        } else {
+          console.log(`   ✅ INCLUDED: Local ride ≤50km within same city`);
+          filteredVehicles.push(vehicle);
+        }
+        continue;
+      }
+
+      // 🚗 OTHER VEHICLES (Cars, SUVs, etc.) - Always included
+      console.log(`\n🚗 Checking ${vehicle.name} (ID: ${vehicle._id}): ✅ INCLUDED (no restrictions)`);
+      filteredVehicles.push(vehicle);
+    }
+
+    console.log(`\n========== FILTERING SUMMARY ==========`);
+    console.log(`✅ Included: ${filteredVehicles.length} vehicles`);
+    if (filteredVehicles.length > 0) {
+      console.log(`   Names: ${filteredVehicles.map(v => v.name).join(', ')}`);
+    }
+    console.log(`❌ Excluded: ${excludedVehicles.length} vehicles`);
+    if (excludedVehicles.length > 0) {
+      excludedVehicles.forEach(ev => {
+        console.log(`   - ${ev.name}: ${ev.reasons.join(', ')}`);
+      });
+    }
+    console.log('=======================================\n');
+
+    // Check if any vehicles remain
+    if (filteredVehicles.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No vehicles available for this route",
+        rideType: isIntercityRide ? 'intercity' : 'local',
+        isLaterRide: isLater,
+        distanceKm: Math.round(distance_km * 100) / 100,
+        excludedVehicles: excludedVehicles.map(ev => ({
+          name: ev.name,
+          reasons: ev.reasons
+        })),
+        executionTime: `${((performance.now() - startTime) / 1000).toFixed(3)}s`
+      });
+    }
+
+    // ============================================
+    // STEP 6: Prepare Conditions
+    // ============================================
     const conditions = {
       isNightTime: actualIsNightTime,
       isRaining: weatherData.isRaining,
@@ -870,47 +972,71 @@ exports.calculateRidePriceForUser = async (req, res) => {
       demandLevel
     };
 
-    // Prepare route data object
     const routeData = {
       distance_km,
       traffic_duration_minutes,
       waitingTimeInMinutes
     };
 
-    // Calculate prices for all vehicles with toll info
-    const vehiclePrices = filteredVehicles.map(vehicle => 
-      calculateVehiclePrice(vehicle, routeData, conditions, tollInfo)
-    );
-
-    // Calculate rental prices if applicable
-    let rentalVehiclePrices = [];
-    if (shouldCalculateRentals) {
-      console.log('🚕 Calculating rental vehicle prices...');
-      rentalVehiclePrices = await calculateRentalPrices(distance_km, traffic_duration_minutes, conditions,origin,destination);
-    } else {
-      console.log('🚫 Skipping rental calculations (intercity or later ride)');
-    }
-
-    const executionTime = `${((performance.now() - startTime) / 1000).toFixed(3)}s`;
-
-    console.log("💰 Price Calculation Summary:", {
-      distance: `${distance_km.toFixed(2)} km`,
-      duration: `${traffic_duration_minutes.toFixed(2)} mins`,
-      conditions,
-      tollInfo,
-      isLater,
-      isIntercityRide,
-      excludeBikeAuto,
-      exclusionReasons: exclusionCheck.reasons,
-      regularVehicleCount: filteredVehicles.length,
-      rentalVehicleCount: rentalVehiclePrices.length,
-      executionTime
+    // ============================================
+    // STEP 7: Calculate Prices for Regular Vehicles
+    // ============================================
+    console.log('\n========== PRICE CALCULATION ==========');
+    
+    const vehiclePrices = filteredVehicles.map(vehicle => {
+      const vehicleName = (vehicle.name || '').toLowerCase().trim();
+      
+      // 🚴 BIKES NEVER PAY TOLLS - Override tollInfo
+      const vehicleTollInfo = vehicleName === 'bike' 
+        ? { hasTolls: false, tollAmount: 0, tollDetails: null }
+        : tollInfo;
+      
+      if (vehicleName === 'bike' && tollInfo.hasTolls) {
+        console.log(`🚴 Bike toll override: Original toll ₹${tollInfo.tollAmount} → ₹0 (Bikes don't pay tolls)`);
+      }
+      
+      return calculateVehiclePrice(vehicle, routeData, conditions, vehicleTollInfo);
     });
 
     // Sort by price (lowest first)
     vehiclePrices.sort((a, b) => a.totalPrice - b.totalPrice);
 
-    // Prepare response
+    console.log(`✅ Calculated prices for ${vehiclePrices.length} vehicles`);
+
+    // ============================================
+    // STEP 8: Calculate Rental Prices (if applicable)
+    // ============================================
+    let rentalVehiclePrices = [];
+    if (shouldCalculateRentals) {
+      console.log('🚕 Calculating rental vehicle prices...');
+      rentalVehiclePrices = await calculateRentalPrices(
+        distance_km, 
+        traffic_duration_minutes, 
+        conditions,
+        origin,
+        destination
+      );
+      console.log(`✅ Calculated ${rentalVehiclePrices.length} rental options`);
+    } else {
+      console.log('🚫 Skipping rental calculations (intercity or later ride)');
+    }
+
+    // ============================================
+    // STEP 9: Prepare Response
+    // ============================================
+    const executionTime = `${((performance.now() - startTime) / 1000).toFixed(3)}s`;
+
+    console.log("\n========== FINAL SUMMARY ==========");
+    console.log(`Distance: ${distance_km.toFixed(2)} km`);
+    console.log(`Duration: ${traffic_duration_minutes.toFixed(2)} mins`);
+    console.log(`Conditions:`, conditions);
+    console.log(`Toll: ${tollInfo.hasTolls ? `₹${tollInfo.tollAmount} (${tollInfo.tollDetails?.route})` : 'No'}`);
+    console.log(`Regular vehicles: ${filteredVehicles.length}`);
+    console.log(`Rental options: ${rentalVehiclePrices.length}`);
+    console.log(`Excluded vehicles: ${excludedVehicles.length}`);
+    console.log(`Execution time: ${executionTime}`);
+    console.log('===================================\n');
+
     const response = {
       success: true,
       message: "Ride prices calculated successfully",
@@ -925,7 +1051,8 @@ exports.calculateRidePriceForUser = async (req, res) => {
         tollInfo: tollInfo.hasTolls ? {
           hasTolls: true,
           tollAmount: tollInfo.tollAmount,
-          route: tollInfo.tollDetails?.route || 'Auto-detected toll route'
+          route: tollInfo.tollDetails?.route || 'Auto-detected toll route',
+          note: 'Bikes are exempt from all toll charges'
         } : { hasTolls: false },
         conditions: {
           ...conditions,
@@ -943,22 +1070,54 @@ exports.calculateRidePriceForUser = async (req, res) => {
       response.message = "Ride prices calculated successfully (including rental options)";
     }
 
-    // Add informational note for excluded vehicles
-    if (excludeBikeAuto && exclusionCheck.reasons.length > 0) {
-      response.note = `Bike and Auto are excluded for: ${exclusionCheck.reasons.join(', ')}` +
-                      (isIntercityRide ? ". Rental options are not available for intercity rides." : "");
+    // Add vehicle exclusion info if any vehicles were excluded
+    if (excludedVehicles.length > 0) {
       response.vehicleExclusion = {
-        excluded: ['Bike', 'Auto'],
-        reasons: exclusionCheck.reasons
+        totalExcluded: excludedVehicles.length,
+        excluded: excludedVehicles.map(ev => ({
+          vehicleName: ev.name,
+          reasons: ev.reasons
+        }))
       };
+
+      // Add informational notes
+      const bikeExcluded = excludedVehicles.some(ev => ev.name.toLowerCase() === 'bike');
+      const autoExcluded = excludedVehicles.some(ev => ev.name.toLowerCase() === 'auto');
+
+      if (bikeExcluded || autoExcluded) {
+        let notes = [];
+        
+        if (bikeExcluded) {
+          const bikeReasons = excludedVehicles.find(ev => ev.name.toLowerCase() === 'bike')?.reasons || [];
+          notes.push(`Bike: ${bikeReasons.join(', ')} (Limit: 50km, can cross boundaries, no tolls)`);
+        }
+        
+        if (autoExcluded) {
+          const autoReasons = excludedVehicles.find(ev => ev.name.toLowerCase() === 'auto')?.reasons || [];
+          notes.push(`Auto: ${autoReasons.join(', ')} (Limit: 50km, same city only)`);
+        }
+        
+        response.note = notes.join(' | ');
+      }
+    }
+
+    // Add special note about Bike toll exemption if toll exists
+    if (tollInfo.hasTolls) {
+      const bikeIncluded = filteredVehicles.some(v => v.name.toLowerCase().trim() === 'bike');
+      if (bikeIncluded) {
+        response.specialNotes = response.specialNotes || [];
+        response.specialNotes.push('🚴 Bikes are exempt from all toll charges on this route');
+      }
     }
 
     return res.status(200).json(response);
 
   } catch (error) {
     const executionTime = `${((performance.now() - startTime) / 1000).toFixed(3)}s`;
-    console.error("❌ Error calculating ride price:", error);
-    console.error("   Stack:", error.stack);
+    console.error("\n❌ ========== ERROR ==========");
+    console.error("Error calculating ride price:", error.message);
+    console.error("Stack:", error.stack);
+    console.error("==============================\n");
 
     return res.status(500).json({
       success: false,
@@ -967,8 +1126,7 @@ exports.calculateRidePriceForUser = async (req, res) => {
       executionTime
     });
   }
-}; 
-
+};
 
 // Recalculate rental prices with additional hours
 exports.reCalculatePriceForOnlyRentals = async (req, res) => {
@@ -1050,8 +1208,8 @@ exports.reCalculatePriceForOnlyRentals = async (req, res) => {
 
   } catch (error) {
     console.error("❌ Error in reCalculatePriceForOnlyRentals:", error);
-    return res.status(500).json({ 
-      success: false, 
+    return res.status(500).json({
+      success: false,
       message: error.message || error,
       executionTime: `${((performance.now() - startTime) / 1000).toFixed(3)}s`
     });
