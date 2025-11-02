@@ -887,31 +887,16 @@ exports.calculateRidePriceForUser = async (req, res) => {
       if (vehicleName === 'auto') {
         console.log(`\n🛺 Checking AUTO (ID: ${vehicle._id}):`);
         
-        // Rule 1: Intercity rides excluded
-        if (isIntercityRide) {
-          shouldExclude = true;
-          exclusionReasons.push('intercity ride (>69 km)');
-        }
-
-        // Rule 2: No later rides
-        if (isLater) {
-          shouldExclude = true;
-          exclusionReasons.push('scheduled for later');
-        }
-
-        // Rule 3: Distance limit 50km
+        // Rule 1: Distance limit 50km (can cross boundaries)
         if (distance_km > 50) {
           shouldExclude = true;
           exclusionReasons.push(`distance exceeds 50 km (${distance_km.toFixed(2)} km)`);
         }
-
-        // Rule 4: No cross-city routes (same city only)
-        const originCity = detectCity(origin.latitude, origin.longitude);
-        const destCity = detectCity(destination.latitude, destination.longitude);
-
-        if (originCity && destCity && originCity !== destCity) {
+        
+        // Rule 2: No later rides
+        if (isLater) {
           shouldExclude = true;
-          exclusionReasons.push(`cross-city route (${originCity} → ${destCity})`);
+          exclusionReasons.push('scheduled for later');
         }
 
         if (shouldExclude) {
@@ -922,7 +907,7 @@ exports.calculateRidePriceForUser = async (req, res) => {
             reasons: exclusionReasons
           });
         } else {
-          console.log(`   ✅ INCLUDED: Local ride ≤50km within same city`);
+          console.log(`   ✅ INCLUDED: Distance ≤50km, immediate ride, can cross boundaries`);
           filteredVehicles.push(vehicle);
         }
         continue;
@@ -1094,7 +1079,7 @@ exports.calculateRidePriceForUser = async (req, res) => {
         
         if (autoExcluded) {
           const autoReasons = excludedVehicles.find(ev => ev.name.toLowerCase() === 'auto')?.reasons || [];
-          notes.push(`Auto: ${autoReasons.join(', ')} (Limit: 50km, same city only)`);
+          notes.push(`Auto: ${autoReasons.join(', ')} (Limit: 50km, can cross boundaries)`);
         }
         
         response.note = notes.join(' | ');
