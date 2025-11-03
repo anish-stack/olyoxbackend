@@ -788,14 +788,19 @@ exports.getAllRiders = async (req, res) => {
       }
     }
 
-    // === RECHARGE FILTER (FIXED) ===
+    // === RECHARGE FILTER (CORRECTED) ===
     if (recharge && recharge !== 'all') {
       if (recharge === 'yes') {
+        // Only riders with an ACTIVE recharge
         filter['RechargeData.approveRecharge'] = true;
       } else if (recharge === 'no') {
-        // Riders with expired/inactive recharge OR no recharge at all
+        // Riders who:
+        // 1. Have RechargeData but approveRecharge is false
+        // 2. Have RechargeData but approveRecharge field is missing
+        // 3. Have no RechargeData at all
         filter.$or = [
           { 'RechargeData.approveRecharge': false },
+          { 'RechargeData.approveRecharge': { $exists: false }, RechargeData: { $exists: true } },
           { RechargeData: { $exists: false } }
         ];
       }
