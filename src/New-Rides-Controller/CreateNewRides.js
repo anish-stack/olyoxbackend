@@ -2525,6 +2525,7 @@ exports.FetchAllBookedRides = async (req, res) => {
         { "driver.phone": regex },
         { "pickup_address.formatted_address": regex },
         { "drop_address.formatted_address": regex },
+        { "drop_address.formatted_address": regex },
         { vehicle_type: regex },
         { payment_method: regex },
       ];
@@ -2533,7 +2534,7 @@ exports.FetchAllBookedRides = async (req, res) => {
     const [Bookings, total] = await Promise.all([
       RideBooking.find(query)
         .select(
-          "pickup_location pickup_address drop_location drop_address vehicle_type ride_status requested_at pricing payment_method payment_status cancellation_reason cancelled_by created_at updated_at route_info"
+          "pickup_location isFake pickup_address drop_location drop_address vehicle_type ride_status is_rental isLater details  rentalHours rental_km_limit isParcelOrder isIntercity  requested_at pricing payment_method payment_status cancellation_reason cancelled_by created_at updated_at route_info"
         )
         .populate("user", "name number") // ✅ Only basic user details
         .populate(
