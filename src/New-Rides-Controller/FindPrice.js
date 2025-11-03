@@ -654,7 +654,6 @@ async function calculateRentalPrices(distance_km, traffic_duration_minutes, cond
 }
 
 // Enhanced function to determine if Bike/Auto should be excluded
-// Enhanced function to determine if Bike/Auto should be excluded
 function shouldExcludeBikeAuto(distance_km, origin, destination, isLater, isIntercityRide, vehicleName = '') {
   const reasons = [];
   const normalizedName = vehicleName.toLowerCase().trim();
