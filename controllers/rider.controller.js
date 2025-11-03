@@ -744,6 +744,7 @@ exports.getAllRiders = async (req, res) => {
     const category = req.query.category; // 'parcel', 'non-parcel', 'all'
     const document = req.query.document; // 'verified', 'under-review', 'not-verified', 'all'
     const duty = req.query.duty; // 'on-duty', 'off-duty', 'all'
+    const recharge = req.query.recharge // 'yes', 'no', 'all'
 
     let filter = {};
 
@@ -785,6 +786,15 @@ exports.getAllRiders = async (req, res) => {
         filter.DocumentVerify = false;
       } else if (document === 'not-verified') {
         filter.DocumentVerify = false;
+      }
+    }
+
+    // Recharge active filter
+    if (recharge && recharge !== 'all') {
+      if (recharge === 'yes') {
+        filter['RechargeData.approveRecharge'] = true;
+      } else if (recharge === 'no') {
+        filter['RechargeData.approveRecharge'] = false;
       }
     }
 
@@ -1004,8 +1014,8 @@ exports.uploadDocuments = async (req, res) => {
         });
 
         // cleanup
-        await fs.promises.unlink(file.path).catch(() => {});
-        if (compressed) await fs.promises.unlink(uploadPath).catch(() => {});
+        await fs.promises.unlink(file.path).catch(() => { });
+        if (compressed) await fs.promises.unlink(uploadPath).catch(() => { });
 
         // map file to correct document field
         if (file.originalname.includes("dl")) uploadedDocs.license = uploaded.secure_url;
