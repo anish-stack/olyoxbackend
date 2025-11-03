@@ -475,8 +475,8 @@ exports.NewcreateRequest = async (req, res) => {
       message: isParcel
         ? "Parcel order created! Finding a delivery partner..."
         : isFake
-        ? "Test ride created! Finding a driver..."
-        : "Your ride request is created! Searching for drivers...",
+          ? "Test ride created! Finding a driver..."
+          : "Your ride request is created! Searching for drivers...",
       data: responseData,
     });
   } catch (error) {
@@ -796,9 +796,9 @@ const calculateStraightLineDistance = (lat1, lng1, lat2, lng2) => {
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLng / 2) *
+    Math.sin(dLng / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return Math.round(R * c * 100) / 100;
 };
@@ -1074,10 +1074,8 @@ const fetchEligibleDrivers = async (rideId, rideData, searchAreaLimit) => {
           60000
         ).toFixed(1);
         console.log(
-          `Driver ${i + 1}: ${d.name} | ${
-            d.rideVehicleInfo?.vehicleType
-          } | ${minsAgo} mins ago | Available: ${d.isAvailable} | on_ride: ${
-            d.on_ride_id
+          `Driver ${i + 1}: ${d.name} | ${d.rideVehicleInfo?.vehicleType
+          } | ${minsAgo} mins ago | Available: ${d.isAvailable} | on_ride: ${d.on_ride_id
           }`
         );
       });
@@ -1798,9 +1796,8 @@ exports.ride_status_after_booking = async (req, res) => {
         responsePayload.rideDetails = ride;
         break;
       case "cancelled":
-        responsePayload.message = `This ride has been cancelled${
-          ride.cancelled_by ? ` by ${ride.cancelled_by}` : ""
-        }.`;
+        responsePayload.message = `This ride has been cancelled${ride.cancelled_by ? ` by ${ride.cancelled_by}` : ""
+          }.`;
         responsePayload.rideDetails = ride;
         break;
       default:
@@ -2303,8 +2300,8 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
       const a =
         Math.sin(dLat / 2) ** 2 +
         Math.cos((lat1 * Math.PI) / 180) *
-          Math.cos((lat2 * Math.PI) / 180) *
-          Math.sin(dLng / 2) ** 2;
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLng / 2) ** 2;
       return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     };
 
@@ -2476,11 +2473,11 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
         rental_km_limit: latestRide.rental_km_limit || 0,
         notified_rider: notifiedRider
           ? {
-              distance_from_pickup: notifiedRider.distance_from_pickup,
-              distance_from_pickup_km:
-                notifiedRider.distance_from_pickup_km ||
-                formatDistanceInKm(notifiedRider.distance_from_pickup),
-            }
+            distance_from_pickup: notifiedRider.distance_from_pickup,
+            distance_from_pickup_km:
+              notifiedRider.distance_from_pickup_km ||
+              formatDistanceInKm(notifiedRider.distance_from_pickup),
+          }
           : null,
       });
     }
@@ -2782,7 +2779,7 @@ exports.riderActionAcceptOrRejectRideVia = async (req, res) => {
       decoded = jwt.verify(
         token,
         process.env.JWT_SECRET ||
-          "dfhdhfuehfuierrheuirheuiryueiryuiewyrshddjidshfuidhduih"
+        "dfhdhfuehfuierrheuirheuiryueiryuiewyrshddjidshfuidhduih"
       );
     } catch (err) {
       return res.status(401).json({
@@ -3160,15 +3157,11 @@ const handleIntercityRide = async (ride, driver, io, res) => {
         },
       });
 
-      const message = `🚗 *Driver Assigned!*\n\nHi ${
-        ride.user.name
-      },\n\nYour intercity ride is confirmed.\n\n📋 *Booking ID:* ${bookingId}\n👨‍💼 *Driver:* ${
-        driver.name
-      }\n📞 *Driver Contact:* ${driver.phone}\n🚗 *Vehicle:* ${
-        ride.vehicle_type || "Not specified"
-      }\n📅 *Departure:* ${formatDateTime(pickupTime)}\n\n🔐 *Your OTP:* ${
-        ride.ride_otp || "N/A"
-      }\n\n📞 Driver will contact you shortly.\n🙏 Thank you for choosing *Olyox*!`;
+      const message = `🚗 *Driver Assigned!*\n\nHi ${ride.user.name
+        },\n\nYour intercity ride is confirmed.\n\n📋 *Booking ID:* ${bookingId}\n👨‍💼 *Driver:* ${driver.name
+        }\n📞 *Driver Contact:* ${driver.phone}\n🚗 *Vehicle:* ${ride.vehicle_type || "Not specified"
+        }\n📅 *Departure:* ${formatDateTime(pickupTime)}\n\n🔐 *Your OTP:* ${ride.ride_otp || "N/A"
+        }\n\n📞 Driver will contact you shortly.\n🙏 Thank you for choosing *Olyox*!`;
 
       try {
         await SendWhatsAppMessageNormal(message, ride.user.number);
@@ -3199,15 +3192,11 @@ const handleIntercityRide = async (ride, driver, io, res) => {
         },
       });
 
-      const message = `🚗 *Driver On The Way!*\n\nHi ${
-        ride.user.name
-      },\n\nYour intercity ride is starting soon.\n\n📋 *Booking ID:* ${bookingId}\n👨‍💼 *Driver:* ${
-        driver.name
-      }\n📞 *Driver Contact:* ${driver.phone}\n🚗 *Vehicle:* ${
-        ride.vehicle_type || "Not specified"
-      }\n📅 *Departure:* ${formatDateTime(pickupTime)}\n\n🔐 *Your OTP:* ${
-        ride.ride_otp || "N/A"
-      }\n\n📞 Driver will contact you shortly.\n🙏 Thank you for choosing *Olyox*!`;
+      const message = `🚗 *Driver On The Way!*\n\nHi ${ride.user.name
+        },\n\nYour intercity ride is starting soon.\n\n📋 *Booking ID:* ${bookingId}\n👨‍💼 *Driver:* ${driver.name
+        }\n📞 *Driver Contact:* ${driver.phone}\n🚗 *Vehicle:* ${ride.vehicle_type || "Not specified"
+        }\n📅 *Departure:* ${formatDateTime(pickupTime)}\n\n🔐 *Your OTP:* ${ride.ride_otp || "N/A"
+        }\n\n📞 Driver will contact you shortly.\n🙏 Thank you for choosing *Olyox*!`;
 
       try {
         await SendWhatsAppMessageNormal(message, ride.user.number);
@@ -3343,16 +3332,16 @@ exports.ride_status_after_booking_for_drivers = async (req, res) => {
         responsePayload.message = "Driver assigned! Your ride is on the way.";
         responsePayload.rideDetails = ride.driver
           ? {
-              rideId: ride._id,
-              driverId: ride.driver._id,
-              driverName: ride.driver.name,
-              vehicleType: ride.vehicle_type,
-              vehicleDetails: ride.driver.rideVehicleInfo,
-              eta: ride.eta || 5,
-              pickup: ride.pickup_address,
-              drop: ride.drop_address,
-              pricing: ride.pricing,
-            }
+            rideId: ride._id,
+            driverId: ride.driver._id,
+            driverName: ride.driver.name,
+            vehicleType: ride.vehicle_type,
+            vehicleDetails: ride.driver.rideVehicleInfo,
+            eta: ride.eta || 5,
+            pickup: ride.pickup_address,
+            drop: ride.drop_address,
+            pricing: ride.pricing,
+          }
           : null;
         break;
       case "driver_arrived":
@@ -3360,30 +3349,30 @@ exports.ride_status_after_booking_for_drivers = async (req, res) => {
           "Your driver has arrived at the pickup location!";
         responsePayload.rideDetails = ride.driver
           ? {
-              rideId: ride._id,
-              driverId: ride.driver._id,
-              driverName: ride.driver.name,
-              vehicleType: ride.vehicle_type,
-              vehicleDetails: ride.driver.rideVehicleInfo,
-              pickup: ride.pickup_address,
-              drop: ride.drop_address,
-              pricing: ride.pricing,
-            }
+            rideId: ride._id,
+            driverId: ride.driver._id,
+            driverName: ride.driver.name,
+            vehicleType: ride.vehicle_type,
+            vehicleDetails: ride.driver.rideVehicleInfo,
+            pickup: ride.pickup_address,
+            drop: ride.drop_address,
+            pricing: ride.pricing,
+          }
           : null;
         break;
       case "in_progress":
         responsePayload.message = "Your ride is currently in progress.";
         responsePayload.rideDetails = ride.driver
           ? {
-              rideId: ride._id,
-              driverId: ride.driver._id,
-              driverName: ride.driver.name,
-              vehicleType: ride.vehicle_type,
-              vehicleDetails: ride.driver.rideVehicleInfo,
-              pickup: ride.pickup_address,
-              drop: ride.drop_address,
-              pricing: ride.pricing,
-            }
+            rideId: ride._id,
+            driverId: ride.driver._id,
+            driverName: ride.driver.name,
+            vehicleType: ride.vehicle_type,
+            vehicleDetails: ride.driver.rideVehicleInfo,
+            pickup: ride.pickup_address,
+            drop: ride.drop_address,
+            pricing: ride.pricing,
+          }
           : null;
         break;
       case "completed":
@@ -3398,9 +3387,8 @@ exports.ride_status_after_booking_for_drivers = async (req, res) => {
         };
         break;
       case "cancelled":
-        responsePayload.message = `This ride has been cancelled${
-          ride.cancelledBy ? ` by ${ride.cancelledBy}` : ""
-        }.`;
+        responsePayload.message = `This ride has been cancelled${ride.cancelledBy ? ` by ${ride.cancelledBy}` : ""
+          }.`;
         responsePayload.rideDetails = {
           rideId: ride._id,
           pickup: ride.pickup_address,
@@ -3630,8 +3618,7 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
             .sendNotification(
               userFcmToken,
               "Your Driver Has Arrived! 🚗",
-              `${
-                driver?.name || "Your driver"
+              `${driver?.name || "Your driver"
               } has arrived at your pickup location.`,
               {
                 event: "DRIVER_ARRIVED",
@@ -3785,19 +3772,19 @@ exports.changeCurrentRiderRideStatus = async (req, res) => {
             pricing: updatedPricing,
             ...(ride.is_rental &&
               rentalCharges && {
-                rental_details: {
-                  planned_km: ride.rental_km_limit,
-                  actual_km: distanceKm.toFixed(2),
-                  extra_km: rentalCharges.extraKm,
-                  extra_km_fare: rentalCharges.extraKmFare,
-                  planned_hours: ride.rentalHours,
-                  extra_hours: rentalCharges.extraHours,
-                  extra_time_fare: rentalCharges.extraTimeFare,
-                  total_extra_charges: rentalCharges.totalExtraCharges,
-                  original_fare: updatedPricing.original_total_fare,
-                  final_fare: updatedPricing.total_fare,
-                },
-              }),
+              rental_details: {
+                planned_km: ride.rental_km_limit,
+                actual_km: distanceKm.toFixed(2),
+                extra_km: rentalCharges.extraKm,
+                extra_km_fare: rentalCharges.extraKmFare,
+                planned_hours: ride.rentalHours,
+                extra_hours: rentalCharges.extraHours,
+                extra_time_fare: rentalCharges.extraTimeFare,
+                total_extra_charges: rentalCharges.totalExtraCharges,
+                original_fare: updatedPricing.original_total_fare,
+                final_fare: updatedPricing.total_fare,
+              },
+            }),
           },
         });
       } else {
@@ -4518,8 +4505,7 @@ exports.collectPayment = async (req, res) => {
 
       if (isRetriable && attempt < MAX_RETRIES) {
         console.log(
-          `🔁 Retrying transaction (${attempt + 1}/${MAX_RETRIES}) in ${
-            RETRY_DELAY * attempt
+          `🔁 Retrying transaction (${attempt + 1}/${MAX_RETRIES}) in ${RETRY_DELAY * attempt
           }ms`
         );
         await delay(RETRY_DELAY * attempt);
@@ -4964,10 +4950,7 @@ exports.findMyRideNewMode = async (req, res) => {
       .select("-rejected_by_drivers -notified_riders -user -route_info")
       .sort({ created: -1 });
 
-    // Fetch Intercity Rides
-    const intercityRides = await IntercityRide.find({ passengerId: userId })
-      .select("-rejectedByDrivers -reviews -messageSendToDriver")
-      .sort({ createdAt: -1 });
+
 
     // Prioritize active rides within each category
     const priorityStatuses = [
@@ -4985,10 +4968,11 @@ exports.findMyRideNewMode = async (req, res) => {
         return (
           bPriority - aPriority ||
           new Date(b.createdAt || b.created) -
-            new Date(a.createdAt || a.created)
+          new Date(a.createdAt || a.created)
         );
       });
 
+    const intercityRides = normalRides.filter((i) => i.isIntercityRides || i.isIntercity)
     const sortedNormalRides = sortByStatusAndDate(normalRides);
     const sortedIntercityRides = sortByStatusAndDate(intercityRides);
 
