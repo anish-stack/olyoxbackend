@@ -740,11 +740,10 @@ exports.getAllRiders = async (req, res) => {
     const skip = (page - 1) * limit;
     const search = req.query.search?.trim();
 
-    // New filter params
-    const category = req.query.category; // 'parcel', 'non-parcel', 'all'
-    const document = req.query.document; // 'verified', 'under-review', 'not-verified', 'all'
-    const duty = req.query.duty; // 'on-duty', 'off-duty', 'all'
-    const recharge = req.query.recharge // 'yes', 'no', 'all'
+    const category = req.query.category;
+    const document = req.query.document;
+    const duty = req.query.duty;
+    const recharge = req.query.recharge; // 'yes', 'no', 'all'
 
     let filter = {};
 
@@ -789,12 +788,16 @@ exports.getAllRiders = async (req, res) => {
       }
     }
 
-    // Recharge active filter
+    // === RECHARGE FILTER (FIXED) ===
     if (recharge && recharge !== 'all') {
       if (recharge === 'yes') {
         filter['RechargeData.approveRecharge'] = true;
       } else if (recharge === 'no') {
-        filter['RechargeData.approveRecharge'] = false;
+        // Riders with expired/inactive recharge OR no recharge at all
+        filter.$or = [
+          { 'RechargeData.approveRecharge': false },
+          { RechargeData: { $exists: false } }
+        ];
       }
     }
 
