@@ -2498,53 +2498,125 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
 
 exports.FetchAllBookedRides = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1; // default page = 1
-    const limit = parseInt(req.query.limit) || 20; // default 20 per page
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
     const { status, search } = req.query;
 
-    // ✅ Build query object
-    const query = {};
+    // Build match conditions
+    const match = {};
 
-    // Filter by ride status if provided
     if (status) {
-      query.ride_status = status;
+      match.ride_status = status;
     }
 
-    // Search across multiple fields if search term provided
+    // Search pipeline
+    const searchPipeline = [];
+
     if (search && search.trim()) {
       const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(safeSearch, "i");
+      const regex = { $regex: safeSearch, $options: 'i' };
 
-      query.$or = [
-        { "user.name": regex },
-        { "user.number": regex },
-        { "driver.name": regex },
-        { "driver.phone": regex },
-        { "driver.rideVehicleInfo.VehicleNumber": regex }, // Fixed!
-        { "pickup_address.formatted_address": regex },
-        { "drop_address.formatted_address": regex },
-        { vehicle_type: regex },
-        { payment_method: regex },
-      ];
+      searchPipeline.push({
+        $match: {
+          $or: [
+            { "user.name": regex },
+            { "user.number": regex },
+            { "driver.name": regex },
+            { "driver.phone": regex },
+            { "driver.rideVehicleInfo.VehicleNumber": regex },
+            { "pickup_address.formatted_address": regex },
+            { "drop_address.formatted_address": regex },
+            { vehicle_type: regex },
+            { payment_method: regex },
+          ],
+        },
+      });
     }
 
+    // Aggregation pipeline
+    const pipeline = [
+      { $match: match },
+
+      // Lookup user
+      {
+        $lookup: {
+          from: 'users', // Change if your collection name is different
+          localField: 'user',
+          foreignField: '_id',
+          as: 'user',
+        },
+      },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+
+      // Lookup driver
+      {
+        $lookup: {
+          from: 'drivers', // Change if your collection name is different
+          localField: 'driver',
+          foreignField: '_id',
+          as: 'driver',
+        },
+      },
+      { $unwind: { path: '$driver', preserveNullAndEmptyArrays: true } },
+
+      // Apply search after lookup
+      ...searchPipeline,
+
+      // Select fields (project)
+      {
+        $project: {
+          pickup_location: 1,
+          isFake: 1,
+          pickup_address: 1,
+          drop_location: 1,
+          drop_address: 1,
+          vehicle_type: 1,
+          ride_status: 1,
+          is_rental: 1,
+          isLater: 1,
+          details: 1,
+          rentalHours: 1,
+          rental_km_limit: 1,
+          isParcelOrder: 1,
+          isIntercity: 1,
+          requested_at: 1,
+          pricing: 1,
+          payment_method: 1,
+          payment_status: 1,
+          cancellation_reason: 1,
+          cancelled_by: 1,
+          created_at: 1,
+          updated_at: 1,
+          route_info: 1,
+
+          // Populated fields
+          'user.name': 1,
+          'user.number': 1,
+          'driver.name': 1,
+          'driver.phone': 1,
+          'driver.rideVehicleInfo.VehicleNumber': 1,
+          'driver.rideVehicleInfo.vehicleType': 1,
+        },
+      },
+
+      { $sort: { requested_at: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+    ];
+
     const [Bookings, total] = await Promise.all([
-      RideBooking.find(query)
-        .select(
-          "pickup_location isFake pickup_address drop_location drop_address vehicle_type ride_status is_rental isLater details  rentalHours rental_km_limit isParcelOrder isIntercity  requested_at pricing payment_method payment_status cancellation_reason cancelled_by created_at updated_at route_info"
-        )
-        .populate("user", "name number") // ✅ Only basic user details
-        .populate(
-          "driver",
-          "name phone rideVehicleInfo.VehicleNumber rideVehicleInfo.vehicleType"
-        ) // ✅ Only driver basics
-        .sort({ requested_at: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      RideBooking.countDocuments(query), // ✅ Only count matching docs
+      RideBooking.aggregate(pipeline),
+      RideBooking.aggregate([
+        { $match: match },
+        { $lookup: { from: 'users', localField: 'user', foreignField: '_id', as: 'user' } },
+        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+        { $lookup: { from: 'drivers', localField: 'driver', foreignField: '_id', as: 'driver' } },
+        { $unwind: { path: '$driver', preserveNullAndEmptyArrays: true } },
+        ...searchPipeline,
+        { $count: 'total' },
+      ]).then(result => result[0]?.total || 0),
     ]);
 
     res.status(200).json({
