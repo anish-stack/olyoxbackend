@@ -2518,7 +2518,7 @@ exports.getAllAddOnVehicleAdmin = async (req, res) => {
 
     // Fetch vehicles with search, sort by createdAt DESC, then paginate
     const findDetails = await VehicleAdds.find(searchQuery)
-      .populate('riderId', 'name phone BH')
+      .populate('riderId', 'name phone BH DocumentVerify')
       .sort({ createdAt: -1 }) // This ensures newest first
       .skip((currentPage - 1) * itemsPerPage)
       .limit(itemsPerPage);
