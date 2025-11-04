@@ -2514,14 +2514,16 @@ exports.FetchAllBookedRides = async (req, res) => {
 
     // Search across multiple fields if search term provided
     if (search && search.trim()) {
-      const regex = new RegExp(search.trim(), "i"); // case-insensitive regex
+      const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(safeSearch, "i");
+
       query.$or = [
         { "user.name": regex },
         { "user.number": regex },
         { "driver.name": regex },
         { "driver.phone": regex },
+        { "driver.rideVehicleInfo.VehicleNumber": regex }, // Fixed!
         { "pickup_address.formatted_address": regex },
-        { "drop_address.formatted_address": regex },
         { "drop_address.formatted_address": regex },
         { vehicle_type: regex },
         { payment_method: regex },
