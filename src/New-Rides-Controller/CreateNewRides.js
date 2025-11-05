@@ -2502,18 +2502,21 @@ exports.FetchAllBookedRides = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const { status, search } = req.query;
+    const { status, search, isFake } = req.query;   // <-- NEW
 
-    // Build match conditions
+    // ---------- 1. Base match ----------
     const match = {};
 
-    if (status) {
-      match.ride_status = status;
+    if (status) match.ride_status = status;
+
+    // NEW: isFake filter
+    if (isFake !== undefined) {
+      const bool = isFake === 'true';          // accept true / false strings
+      match.isFake = bool;
     }
 
-    // Search pipeline
+    // ---------- 2. Search pipeline ----------
     const searchPipeline = [];
-
     if (search && search.trim()) {
       const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = { $regex: safeSearch, $options: 'i' };
@@ -2535,14 +2538,14 @@ exports.FetchAllBookedRides = async (req, res) => {
       });
     }
 
-    // Aggregation pipeline
+    // ---------- 3. Main aggregation ----------
     const pipeline = [
       { $match: match },
 
-      // Lookup user
+      // Lookups (user + driver)
       {
         $lookup: {
-          from: 'users', // Change if your collection name is different
+          from: 'users',
           localField: 'user',
           foreignField: '_id',
           as: 'user',
@@ -2550,10 +2553,9 @@ exports.FetchAllBookedRides = async (req, res) => {
       },
       { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
 
-      // Lookup driver
       {
         $lookup: {
-          from: 'drivers', // Change if your collection name is different
+          from: 'drivers',
           localField: 'driver',
           foreignField: '_id',
           as: 'driver',
@@ -2561,10 +2563,10 @@ exports.FetchAllBookedRides = async (req, res) => {
       },
       { $unwind: { path: '$driver', preserveNullAndEmptyArrays: true } },
 
-      // Apply search after lookup
+      // Search after population
       ...searchPipeline,
 
-      // Select fields (project)
+      // Project only needed fields
       {
         $project: {
           pickup_location: 1,
@@ -2606,18 +2608,27 @@ exports.FetchAllBookedRides = async (req, res) => {
       { $limit: limit },
     ];
 
-    const [Bookings, total] = await Promise.all([
+    // ---------- 4. Count aggregation (same match + search) ----------
+    const countPipeline = [
+      { $match: match },
+      {
+        $lookup: { from: 'users', localField: 'user', foreignField: '_id', as: 'user' },
+      },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: { from: 'drivers', localField: 'driver', foreignField: '_id', as: 'driver' },
+      },
+      { $unwind: { path: '$driver', preserveNullAndEmptyArrays: true } },
+      ...searchPipeline,
+      { $count: 'total' },
+    ];
+
+    const [Bookings, totalResult] = await Promise.all([
       RideBooking.aggregate(pipeline),
-      RideBooking.aggregate([
-        { $match: match },
-        { $lookup: { from: 'users', localField: 'user', foreignField: '_id', as: 'user' } },
-        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-        { $lookup: { from: 'drivers', localField: 'driver', foreignField: '_id', as: 'driver' } },
-        { $unwind: { path: '$driver', preserveNullAndEmptyArrays: true } },
-        ...searchPipeline,
-        { $count: 'total' },
-      ]).then(result => result[0]?.total || 0),
+      RideBooking.aggregate(countPipeline),
     ]);
+
+    const total = totalResult[0]?.total || 0;
 
     res.status(200).json({
       success: true,
@@ -2628,8 +2639,8 @@ exports.FetchAllBookedRides = async (req, res) => {
       Bookings,
     });
   } catch (error) {
-    console.error("Error fetching booked rides:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    console.error('Error fetching booked rides:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
 
