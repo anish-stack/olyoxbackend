@@ -14,7 +14,7 @@ const getAvailablePreferences = (vehicleType, category) => {
   // 🚚 Parcel Driver Logic
   if (cat === "parcel") {
     if (type === "bike") {
-      return ["FoodDelivery", "ParcelDelivery"];
+      return ["OlyoxPriority", "FoodDelivery", "ParcelDelivery"];
     } else {
       return []; // ❌ No preferences allowed for non-bike parcel drivers
     }
@@ -24,7 +24,7 @@ const getAvailablePreferences = (vehicleType, category) => {
   if (cat === "cab") {
     switch (type) {
       case "bike":
-        return ["FoodDelivery", "ParcelDelivery"];
+        return ["OlyoxPriority", "FoodDelivery", "ParcelDelivery"];
       case "auto":
         return [...basePreferences];
       case "mini":
@@ -33,8 +33,8 @@ const getAvailablePreferences = (vehicleType, category) => {
         return [...basePreferences, "OlyoxIntercity", "OlyoxAcceptMiniRides"];
       case "suv":
       case "xl":
-           case "suv/xl":
-    
+      case "suv/xl":
+
         return [
           ...basePreferences,
           "OlyoxIntercity",
@@ -186,11 +186,10 @@ exports.updateRiderPreferences = async (req, res) => {
         const notificationMessage = `Your ride preferences have been updated successfully.`;
 
         if (rider.notificationSettings?.smsNotifications) {
-          const whatsappMessage = `Hi ${
-            rider.name
-          }, your Olyox ride preferences have been updated. Changes: ${changesLog
-            .map((c) => `${c.preference}: ${c.newState ? "Enabled" : "Disabled"}`)
-            .join(", ")}`;
+          const whatsappMessage = `Hi ${rider.name
+            }, your Olyox ride preferences have been updated. Changes: ${changesLog
+              .map((c) => `${c.preference}: ${c.newState ? "Enabled" : "Disabled"}`)
+              .join(", ")}`;
           await SendWhatsAppMessageNormal(rider.phone, whatsappMessage);
         }
       } catch (notificationError) {
@@ -263,7 +262,7 @@ exports.getRiderPreferences = async (req, res) => {
     if (!rider)
       return res.status(404).json({ success: false, message: "Rider not found" });
 
-    const vehicleType = rider.category === "parcel" ?rider.rideVehicleInfo?.vehicleName :rider.rideVehicleInfo?.vehicleType;
+    const vehicleType = rider.category === "parcel" ? rider.rideVehicleInfo?.vehicleName : rider.rideVehicleInfo?.vehicleType;
     const category = rider.category;
 
     if (!vehicleType) {
