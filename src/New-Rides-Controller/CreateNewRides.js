@@ -1088,24 +1088,42 @@ const fetchEligibleDrivers = async (rideId, rideData, searchAreaLimit) => {
           driver.preferences
         );
 
-        if (!match) {
-          console.log(
-            `REJECTED ${driver._id} (${driver.name}) — Vehicle Mismatch`
-          );
-        } else if (new Date(driver.lastUpdated) < tenMinutesAgo) {
-          console.log(
-            `REJECTED ${driver._id} (${driver.name}) — Last updated >10 mins ago`
-          );
-        } else if (driver.on_ride_id) {
-          console.log(`REJECTED ${driver._id} — On another ride`);
-        } else if (!driver.isAvailable) {
-          console.log(`REJECTED ${driver._id} — Not available`);
-        } else {
-          console.log(`ELIGIBLE ${driver._id} (${driver.name})`);
+        const isRecent = new Date(driver.lastUpdated) >= tenMinutesAgo;
+        const isFree = !driver.on_ride_id && driver.isAvailable;
+
+        // 🧩 PARCEL DRIVER LOGIC
+        let parcelAllowed = true;
+        const driverCategory = driver.category?.toString().toLowerCase?.();
+
+        if (driverCategory === "parcel") {
+          const vehicleName = driver.rideVehicleInfo?.vehicleName?.toUpperCase?.() || "";
+          const hasPriority = driver.preferences?.OlyoxPriority?.enabled === true;
+
+          if (vehicleName === "BIKE") {
+            parcelAllowed = hasPriority;
+            console.log(
+              parcelAllowed
+                ? `✅ ${driver._id} (${driver.name}) [PARCEL-BIKE] → Priority enabled`
+                : `❌ ${driver._id} (${driver.name}) [PARCEL-BIKE] → Priority disabled, excluded`
+            );
+          }
         }
 
-        return match && new Date(driver.lastUpdated) >= tenMinutesAgo;
+        // 🧮 FINAL DECISION
+        const isEligible = match && isRecent && isFree && parcelAllowed;
+
+        if (!isEligible) {
+          if (!match) console.log(`REJECTED ${driver._id} (${driver.name}) — Vehicle mismatch`);
+          else if (!isRecent) console.log(`REJECTED ${driver._id} (${driver.name}) — Last updated >10 mins`);
+          else if (!isFree) console.log(`REJECTED ${driver._id} (${driver.name}) — Busy or unavailable`);
+          else if (!parcelAllowed) console.log(`REJECTED ${driver._id} (${driver.name}) — Parcel rule`);
+        } else {
+          console.log(`✅ ELIGIBLE ${driver._id} (${driver.name})`);
+        }
+
+        return isEligible;
       });
+
 
       console.log(`Eligible after filtering: ${eligibleDrivers.length}`);
 
