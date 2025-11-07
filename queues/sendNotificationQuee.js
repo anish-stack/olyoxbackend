@@ -80,7 +80,7 @@ const processNotificationBatch = async (riders, title, body, data) => {
     for (const chunk of chunks) {
         const promises = chunk.map(async (token) => {
             try {
-                const response = await sendNotification.sendNotification(token, title, body, data || {});
+                const response = await sendNotification.sendNotification(token, title, body, data || {},"app_notification_channel");
                 successes++;
                 return { token, status: 'success', response };
             } catch (err) {
