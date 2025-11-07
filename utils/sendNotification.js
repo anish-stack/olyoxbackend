@@ -126,9 +126,8 @@ const sendNotification = async (token, title, body, eventData = null, channel) =
         body: body || "You have a new notification",
       },
       android: {
-         priority:"high",
-          autoDismiss: false,
-          sticky: false,
+        priority: "high",
+      
         notification: {
         
           channelId: channel || "ride_channel",
