@@ -1834,437 +1834,6 @@ exports.ride_status_after_booking = async (req, res) => {
   }
 };
 
-// exports.riderFetchPoolingForNewRides = async (req, res) => {
-//     try {
-//         const { id: riderId } = req.params;
-//         // console.log("=== STARTING RIDE FETCH FOR RIDER ===");
-//         // console.log("Rider ID:", riderId);
-
-//         if (!riderId) {
-//             // console.log("ERROR: No rider ID provided");
-//             return res.status(400).json({ message: "Rider ID is required." });
-//         }
-
-//         const foundRiderDetails = await RiderModel.findOne({ _id: riderId });
-//         console.log("Found rider details:", foundRiderDetails ? "YES" : "NO");
-//         if (!foundRiderDetails) {
-//             // console.log("ERROR: Rider not found in database");
-//             return res.status(404).json({ message: "Rider not found." });
-//         }
-
-//         console.log("Rider availability:", foundRiderDetails.isAvailable);
-//         if (!foundRiderDetails.isAvailable) {
-//             // console.log("ERROR: Rider is not available");
-//             return res
-//                 .status(400)
-//                 .json({ message: "Rider is not available for new rides." });
-//         }
-
-//         // console.log(
-//         //     "Rider vehicle type:",
-//         //     foundRiderDetails.rideVehicleInfo.vehicleType
-//         // );
-//         // console.log(
-//         //     "Rider location:",
-//         //     JSON.stringify(foundRiderDetails.location, null, 2)
-//         // );
-
-//         // Check if rider has location data
-//         if (
-//             !foundRiderDetails.location ||
-//             !foundRiderDetails.location.coordinates ||
-//             foundRiderDetails.location.coordinates.length !== 2
-//         ) {
-//             // console.log("ERROR: Rider location data is missing or invalid");
-//             return res
-//                 .status(400)
-//                 .json({ message: "Rider location data is required." });
-//         }
-
-//         const riderLat = foundRiderDetails.location.coordinates[1]; // Latitude
-//         const riderLng = foundRiderDetails.location.coordinates[0]; // Longitude
-//         // console.log("Rider coordinates - Lat:", riderLat, "Lng:", riderLng);
-
-//         const redisClient = getRedisClient(req);
-//         let availableRides = [];
-
-//         // Time cutoff: 4 minutes ago (240 seconds)
-//         const now = new Date();
-//         const cutoffTime = new Date(now.getTime() - 240 * 1000);
-//         // console.log("Current time:", now);
-//         // console.log("Cutoff time:", cutoffTime);
-
-//         // Helper function to calculate distance between two points (Haversine formula)
-//         const calculateDistance = (lat1, lng1, lat2, lng2) => {
-//             // console.log(`--- CALCULATING DISTANCE ---`);
-//             // console.log(`Point 1 (Rider): Lat ${lat1}, Lng ${lng1}`);
-//             // console.log(`Point 2 (Pickup): Lat ${lat2}, Lng ${lng2}`);
-
-//             const R = 6371; // Radius of the Earth in kilometers
-//             const dLat = ((lat2 - lat1) * Math.PI) / 180;
-//             const dLng = ((lng2 - lng1) * Math.PI) / 180;
-//             const a =
-//                 Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-//                 Math.cos((lat1 * Math.PI) / 180) *
-//                 Math.cos((lat2 * Math.PI) / 180) *
-//                 Math.sin(dLng / 2) *
-//                 Math.sin(dLng / 2);
-//             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-//             const distance = R * c; // Distance in kilometers
-
-//             // console.log(`Calculated distance: ${distance.toFixed(2)} km`);
-//             return distance;
-//         };
-
-//         // Helper function to check if ride is within acceptable distance (e.g., 5km)
-//         const isRideNearby = (
-//             ridePickupLocation,
-//             riderLat,
-//             riderLng,
-//             maxDistanceKm = 5
-//         ) => {
-//             // console.log(`--- CHECKING RIDE PROXIMITY ---`);
-//             // console.log(
-//             //     "Ride pickup location:",
-//             //     JSON.stringify(ridePickupLocation, null, 2)
-//             // );
-
-//             if (
-//                 !ridePickupLocation ||
-//                 !ridePickupLocation.coordinates ||
-//                 ridePickupLocation.coordinates.length !== 2
-//             ) {
-//                 // console.log("Ride pickup location is invalid - SKIPPING RIDE");
-//                 return false;
-//             }
-
-//             const pickupLat = ridePickupLocation.coordinates[1]; // Latitude
-//             const pickupLng = ridePickupLocation.coordinates[0]; // Longitude
-//             // console.log("Pickup coordinates - Lat:", pickupLat, "Lng:", pickupLng);
-
-//             const distance = calculateDistance(
-//                 riderLat,
-//                 riderLng,
-//                 pickupLat,
-//                 pickupLng
-//             );
-//             const isNearby = distance <= maxDistanceKm;
-
-//             // console.log(
-//             //     `Distance: ${distance.toFixed(
-//             //         2
-//             //     )}km, Max allowed: ${maxDistanceKm}km, Is nearby: ${isNearby}`
-//             // );
-//             return isNearby;
-//         };
-
-//         // Helper function to check if rider is rejected
-//         const isRiderRejected = (rejectedDrivers, riderId) => {
-//             // console.log("--- CHECKING REJECTION ---");
-//             // console.log(
-//             //     "Rejected drivers array:",
-//             //     JSON.stringify(rejectedDrivers, null, 2)
-//             // );
-//             // console.log("Checking rider ID:", riderId);
-
-//             if (!rejectedDrivers || !Array.isArray(rejectedDrivers)) {
-//                 // console.log(
-//                 //     "No rejected drivers array or not array - RIDER NOT REJECTED"
-//                 // );
-//                 return false;
-//             }
-
-//             if (rejectedDrivers.length === 0) {
-//                 // console.log("Empty rejected drivers array - RIDER NOT REJECTED");
-//                 return false;
-//             }
-
-//             for (let i = 0; i < rejectedDrivers.length; i++) {
-//                 const rejection = rejectedDrivers[i];
-//                 // console.log(
-//                 //     `Checking rejection ${i}:`,
-//                 //     JSON.stringify(rejection, null, 2)
-//                 // );
-
-//                 if (!rejection) {
-//                     // console.log(`Rejection ${i} is null/undefined - SKIP`);
-//                     continue;
-//                 }
-
-//                 // Based on schema, the field is 'driver' not '_id'
-//                 const rejectedDriverId = rejection.driver;
-//                 // console.log(`Rejected driver ID from schema: ${rejectedDriverId}`);
-//                 // console.log(`Rejected at: ${rejection.rejected_at}`);
-//                 // console.log(`Comparing: ${rejectedDriverId} === ${riderId}`);
-//                 // console.log(
-//                 //     `String comparison: ${rejectedDriverId?.toString()} === ${riderId.toString()}`
-//                 // );
-
-//                 if (
-//                     rejectedDriverId &&
-//                     rejectedDriverId.toString() === riderId.toString()
-//                 ) {
-//                     // console.log("MATCH FOUND - RIDER IS REJECTED");
-//                     return true;
-//                 }
-//             }
-
-//             // console.log("NO MATCH FOUND - RIDER NOT REJECTED");
-//             return false;
-//         };
-
-//         // 🆕 Integrated preference checking function
-//         const isRideAllowedByPreferences = (rideVehicleType, rider) => {
-//             const driverType = rider?.rideVehicleInfo?.vehicleType?.trim();
-//             const prefs = rider?.preferences || {};
-//             let decision = false;
-//             // console.info("--------------------------------------------------");
-//             // console.info(`👤 Rider: ${rider.name || "Unnamed"} (${rider._id})`);
-//             // console.info(`📌 Driver Vehicle Type: ${driverType}`);
-//             // console.info(`📌 Ride Requires Vehicle Type: ${rideVehicleType}`);
-//             // console.info(`⚙️ Preferences:`, {
-//             //     OlyoxAcceptMiniRides: prefs?.OlyoxAcceptMiniRides?.enabled,
-//             //     OlyoxAcceptSedanRides: prefs?.OlyoxAcceptSedanRides?.enabled,
-//             // });
-
-//             switch (rideVehicleType?.toUpperCase()) {
-//                 case "BIKE":
-//                 case "Bike":
-//                 case "BiKe":
-//                     // ✅ Special case: Bike → always accept, ignore preferences
-//                     decision = driverType === "Bike";
-//                     break;
-
-//                 case "AUTO":
-//                 case "auto":
-//                 case "Auto":
-//                     // ✅ Special case:Auto → always accept, ignore preferences
-//                     decision = driverType === "auto";
-//                     break;
-
-//                 case "MINI":
-//                     decision =
-//                         driverType === "MINI" ||
-//                         (driverType === "SEDAN" && prefs.OlyoxAcceptMiniRides?.enabled) ||
-//                         ((driverType === "SUV" ||
-//                             driverType === "XL" ||
-//                             driverType === "SUV/XL") &&
-//                             prefs.OlyoxAcceptMiniRides?.enabled);
-//                     break;
-
-//                 case "SEDAN":
-//                     decision =
-//                         driverType === "SEDAN" ||
-//                         ((driverType === "SUV" ||
-//                             driverType === "XL" ||
-//                             driverType === "SUV/XL") &&
-//                             prefs.OlyoxAcceptSedanRides?.enabled);
-//                     break;
-
-//                 case "SUV":
-//                 case "SUV/XL":
-//                 case "XL":
-//                     decision =
-//                         driverType === "SUV/XL" ||
-//                         driverType === "XL" ||
-//                         driverType === "SUV";
-//                     break;
-
-//                 default:
-//                     decision = false;
-//             }
-
-//             // console.info(
-//             //     `✅ Preference Decision: ${decision ? "ACCEPTED ✅" : "REJECTED ❌"}`
-//             // );
-//             // console.info("--------------------------------------------------");
-//             return decision;
-//         };
-
-//         // 🔄 Modified database query - get ALL searching rides (remove vehicle_type filter)
-//         // console.log("\n=== QUERYING DATABASE FOR RIDES ===");
-//         // console.log("Query criteria:");
-//         // console.log("- ride_status: 'searching'");
-//         // console.log("- requested_at >= ", cutoffTime);
-//         // console.log(
-//         //     "- 🆕 Removed vehicle_type filter - will check preferences instead"
-//         // );
-
-//         const dbRides = await RideBooking.find({
-//             ride_status: "searching",
-//             requested_at: { $gte: cutoffTime },
-//         }).sort({ requested_at: -1 });
-
-//         // console.log(
-//         //     `Found ${dbRides.length} rides in database with basic criteria`
-//         // );
-
-//         // Filter out rejected rides, check proximity, and check preferences
-//         const filteredRides = [];
-//         for (let i = 0; i < dbRides.length; i++) {
-//             const ride = dbRides[i];
-//             // console.log(`\n--- PROCESSING RIDE ${i + 1}/${dbRides.length} ---`);
-//             // console.log("Ride ID:", ride._id);
-//             // console.log("Ride status:", ride.ride_status);
-//             // console.log("Ride vehicle type:", ride.vehicle_type);
-//             // console.log("Requested at:", ride.requested_at);
-//             // console.log(
-//             //     "Pickup location:",
-//             //     JSON.stringify(ride.pickup_location, null, 2)
-//             // );
-
-//             // Check if rider is rejected for this ride
-//             const isRejected = isRiderRejected(ride.rejected_by_drivers, riderId);
-//             // console.log("Is rider rejected for this ride:", isRejected);
-
-//             if (isRejected) {
-//                 // console.log("SKIPPING RIDE - RIDER IS REJECTED");
-//                 continue;
-//             }
-
-//             // Check if ride is nearby (within 5km)
-//             const isNearby = isRideNearby(
-//                 ride.pickup_location,
-//                 riderLat,
-//                 riderLng,
-//                 5
-//             );
-//             // console.log("Is ride nearby:", isNearby);
-
-//             if (!isNearby) {
-//                 // console.log("SKIPPING RIDE - TOO FAR FROM RIDER");
-//                 continue;
-//             }
-
-//             // 🆕 Check if ride is allowed by preferences
-//             const isAllowedByPreferences = isRideAllowedByPreferences(
-//                 ride.vehicle_type,
-//                 foundRiderDetails
-//             );
-//             // console.log("Is ride allowed by preferences:", isAllowedByPreferences);
-
-//             if (!isAllowedByPreferences) {
-//                 console.log("SKIPPING RIDE - NOT ALLOWED BY PREFERENCES");
-//                 continue;
-//             }
-
-//             // console.log("ADDING RIDE TO FILTERED LIST - PASSED ALL CHECKS ✅");
-//             filteredRides.push(ride);
-//         }
-
-//         // console.log(`\n=== FILTERING RESULTS ===`);
-//         // console.log(
-//         //     `After rejection, proximity, and preference filtering: ${filteredRides.length} rides`
-//         // );
-
-//         // Take only first 2 rides
-//         const finalRides = filteredRides.slice(0, 2);
-//         // console.log(`Taking first 2 rides: ${finalRides.length} rides`);
-
-//         // Final validation - check each ride one more time
-//         const validatedRides = [];
-//         for (let i = 0; i < finalRides.length; i++) {
-//             const ride = finalRides[i];
-//             // console.log(`\n--- FINAL VALIDATION FOR RIDE ${i + 1} ---`);
-//             // console.log("Ride ID:", ride._id);
-
-//             // Get latest ride data from database
-//             const latestRideData = await RideBooking.findById(ride._id);
-//             // console.log("Latest ride data found:", latestRideData ? "YES" : "NO");
-
-//             if (!latestRideData) {
-//                 console.log("RIDE NOT FOUND IN DB - SKIPPING");
-//                 continue;
-//             }
-
-//             console.log("Latest ride status:", latestRideData.ride_status);
-
-//             if (latestRideData.ride_status !== "searching") {
-//                 console.log("RIDE STATUS NOT SEARCHING - SKIPPING");
-//                 continue;
-//             }
-
-//             // Final rejection check
-//             const finalRejectionCheck = isRiderRejected(
-//                 latestRideData.rejected_by_drivers,
-//                 riderId
-//             );
-//             console.log("Final rejection check result:", finalRejectionCheck);
-
-//             if (finalRejectionCheck) {
-//                 console.log("RIDER IS REJECTED IN FINAL CHECK - SKIPPING");
-//                 continue;
-//             }
-
-//             // Final proximity check
-//             const finalProximityCheck = isRideNearby(
-//                 latestRideData.pickup_location,
-//                 riderLat,
-//                 riderLng,
-//                 5
-//             );
-//             console.log("Final proximity check result:", finalProximityCheck);
-
-//             if (!finalProximityCheck) {
-//                 // console.log("RIDE TOO FAR IN FINAL CHECK - SKIPPING");
-//                 continue;
-//             }
-
-//             // 🆕 Final preference check
-//             const finalPreferenceCheck = isRideAllowedByPreferences(
-//                 latestRideData.vehicle_type,
-//                 foundRiderDetails
-//             );
-//             // console.log("Final preference check result:", finalPreferenceCheck);
-
-//             if (!finalPreferenceCheck) {
-//                 // console.log(
-//                 //     "RIDE NOT ALLOWED BY PREFERENCES IN FINAL CHECK - SKIPPING"
-//                 // );
-//                 continue;
-//             }
-
-//             console.log("RIDE PASSED ALL VALIDATIONS - ADDING TO FINAL LIST ✅");
-//             validatedRides.push(latestRideData);
-//         }
-
-//         // console.log(`\n=== FINAL RESULTS ===`);
-//         // console.log(`Total validated rides: ${validatedRides.length}`);
-
-//         if (validatedRides.length > 0) {
-//             // console.log(
-//             //     "Final ride IDs:",
-//             //     validatedRides.map((r) => r._id.toString())
-//             // );
-//             // console.log(
-//             //     "Final ride vehicle types:",
-//             //     validatedRides.map((r) => r.vehicle_type)
-//             // );
-
-//             validatedRides.forEach((ride, index) => {
-//                 console.log(
-//                     `Ride ${index + 1} rejected_by_drivers:`,
-//                     JSON.stringify(ride.rejected_by_drivers, null, 2)
-//                 );
-//             });
-//         }
-
-//         return res.status(200).json({
-//             success: true,
-//             message: `Found ${validatedRides.length} available rides`,
-//             data: validatedRides,
-//         });
-//     } catch (error) {
-//         console.error("ERROR in riderFetchPoolingForNewRides:", error.message);
-//         console.error("Full error:", error);
-//         return res.status(500).json({
-//             success: false,
-//             message: "Server error while fetching rides.",
-//             error: error.message,
-//         });
-//     }
-// };
-
 exports.riderFetchPoolingForNewRides = async (req, res) => {
   const io = req.app.get("io");
   const startTime = Date.now();
@@ -2287,10 +1856,7 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
         .json({ message: "Rider is not available for new rides." });
     }
 
-    if (
-      !rider.location?.coordinates ||
-      rider.location.coordinates.length !== 2
-    ) {
+    if (!rider.location?.coordinates || rider.location.coordinates.length !== 2) {
       return res
         .status(400)
         .json({ message: "Rider location data is required." });
@@ -2309,6 +1875,7 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
       OlyoxAcceptMiniRides: rawPrefs.OlyoxAcceptMiniRides?.enabled === true,
       OlyoxAcceptSedanRides: rawPrefs.OlyoxAcceptSedanRides?.enabled === true,
       OlyoxIntercity: rawPrefs.OlyoxIntercity?.enabled === true,
+      OlyoxPriority: rawPrefs.OlyoxPriority?.enabled === true,
     };
 
     const calculateDistance = (lat1, lng1, lat2, lng2) => {
@@ -2318,8 +1885,8 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
       const a =
         Math.sin(dLat / 2) ** 2 +
         Math.cos((lat1 * Math.PI) / 180) *
-        Math.cos((lat2 * Math.PI) / 180) *
-        Math.sin(dLng / 2) ** 2;
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLng / 2) ** 2;
       return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     };
 
@@ -2339,61 +1906,57 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
       );
     };
 
+    // 🔍 ENHANCED PREF LOGIC WITH PARCEL+BIKE+PRIORITY RULE
     const isRideAllowedByPreferences = (ride) => {
       const rideVehicleType = ride.vehicle_type?.trim().toUpperCase();
       const isLaterOrIntercity = ride.isLater || ride.isIntercity;
 
+      // 🧩 Special case: PARCEL category + BIKE vehicleName
+      if (rider.category === "parcel") {
+        const vehicleName = rider.rideVehicleInfo?.vehicleName?.toUpperCase?.() || "";
+        if (vehicleName === "BIKE") {
+          if (prefs.OlyoxPriority) {
+            console.log(`✅ Rider ${rider._id} [PARCEL-BIKE] has OlyoxPriority → allowed`);
+          } else {
+            console.log(`❌ Rider ${rider._id} [PARCEL-BIKE] missing OlyoxPriority → not allowed`);
+            return false;
+          }
+        }
+      }
+
+      // 🧠 Existing cab ride preference logic
       if (
         rider.category === "cab" &&
         driverVehicle === "BIKE" &&
         ride.isParcelOrder === true
       ) {
         const canDeliver = !!rawPrefs?.ParcelDelivery?.enabled;
-        if (canDeliver) {
-          return true;
-        } else {
-          return false;
-        }
+        return canDeliver;
       }
 
-      if (driverVehicle === rideVehicleType) {
-        return true;
-      }
+      if (driverVehicle === rideVehicleType) return true;
 
       if (rideVehicleType === "SEDAN") {
         const canTakeSedan = prefs.OlyoxAcceptSedanRides;
-        const isUpgrade = ["SUV", "XL", "SUV/XL", "MINI"].includes(
-          driverVehicle
-        );
-        const allowed = isUpgrade && canTakeSedan;
-        if (allowed) return true;
+        const isUpgrade = ["SUV", "XL", "SUV/XL", "MINI"].includes(driverVehicle);
+        return isUpgrade && canTakeSedan;
       }
 
       if (rideVehicleType === "MINI") {
         const canTakeMini = prefs.OlyoxAcceptMiniRides;
-        const isDowngrade = ["SEDAN", "SUV", "XL", "SUV/XL"].includes(
-          driverVehicle
-        );
-        const allowed = isDowngrade && canTakeMini;
-        if (allowed) return true;
+        const isDowngrade = ["SEDAN", "SUV", "XL", "SUV/XL"].includes(driverVehicle);
+        return isDowngrade && canTakeMini;
       }
 
       if (
-        rideVehicleType === "SUV" ||
-        rideVehicleType === "SUV/XL" ||
-        rideVehicleType === "SUV_RENTAL"
+        ["SUV", "SUV/XL", "SUV_RENTAL"].includes(rideVehicleType)
       ) {
         const canTakeSUV = prefs.OlyoxIntercity;
-        const isDowngrade = ["SEDAN", "MINI", "XL", "SUV/XL", "SUV"].includes(
-          driverVehicle
-        );
-        const allowed = isDowngrade && canTakeSUV;
-        if (allowed) return true;
+        const isDowngrade = ["SEDAN", "MINI", "XL", "SUV/XL", "SUV"].includes(driverVehicle);
+        return isDowngrade && canTakeSUV;
       }
 
-      if (isLaterOrIntercity && prefs.OlyoxIntercity) {
-        return true;
-      }
+      if (isLaterOrIntercity && prefs.OlyoxIntercity) return true;
 
       return false;
     };
@@ -2465,7 +2028,6 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
             rentalHours: latestRide.rentalHours || 0,
             rental_km_limit: latestRide.rental_km_limit || 0,
             pricing: latestRide.pricing?.total_fare,
-
             isInitial: true,
             urgency: "high",
           };
@@ -2491,11 +2053,11 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
         rental_km_limit: latestRide.rental_km_limit || 0,
         notified_rider: notifiedRider
           ? {
-            distance_from_pickup: notifiedRider.distance_from_pickup,
-            distance_from_pickup_km:
-              notifiedRider.distance_from_pickup_km ||
-              formatDistanceInKm(notifiedRider.distance_from_pickup),
-          }
+              distance_from_pickup: notifiedRider.distance_from_pickup,
+              distance_from_pickup_km:
+                notifiedRider.distance_from_pickup_km ||
+                formatDistanceInKm(notifiedRider.distance_from_pickup),
+            }
           : null,
       });
     }
@@ -2513,6 +2075,7 @@ exports.riderFetchPoolingForNewRides = async (req, res) => {
     });
   }
 };
+
 
 exports.FetchAllBookedRides = async (req, res) => {
   try {
