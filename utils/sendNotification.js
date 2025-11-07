@@ -126,8 +126,11 @@ const sendNotification = async (token, title, body, eventData = null, channel) =
         body: body || "You have a new notification",
       },
       android: {
-        priority: "high",
+         priority:"high",
+          autoDismiss: false,
+          sticky: false,
         notification: {
+        
           channelId: channel || "ride_channel",
           clickAction: "ACCEPT_RIDE_ACTION",
           imageUrl:
