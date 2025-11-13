@@ -527,16 +527,20 @@ RiderSchema.pre("save", async function (next) {
     // Only assign position for new documents
     if (this.isNew) {
         try {
-            // Find the rider with the highest position
-            const lastRider = await mongoose.model("Rider").findOne().sort({ position: -1 }).exec();
-            // Assign position: if no riders exist, start with 1; otherwise, increment the last position
-            this.position = lastRider ? lastRider.position + 1 : 1;
+            // Find the rider with the highest valid position
+            const lastRider = await mongoose.model("Rider").findOne({
+                position: { $exists: true, $ne: null, $type: "number" },
+            })
+                .sort({ position: -1 })
+                .exec();
+            // Assign position: if no valid position exists, start with 1
+            this.position = lastRider && Number.isFinite(lastRider.position) ? lastRider.position + 1 : 1;
         } catch (error) {
             return next(error);
         }
     }
 
-    // Update lastUpdated and track field updates (existing middleware)
+    // Update lastUpdated and track field updates
     this.lastUpdated = new Date();
 
     const fieldsToTrack = ["location", "fcmToken"];

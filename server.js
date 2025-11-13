@@ -569,41 +569,51 @@ app.get("/updates/:userId/:userType", async (req, res) => {
 
 
 app.get("/run-migration", async (req, res) => {
-  try {
-    // Step 1: Clean up invalid position values (optional but recommended)
-    await RiderModel.updateMany(
-      { position: { $in: [null, NaN, undefined] } },
-      { $unset: { position: "" } }
-    );
-    console.log("Cleared invalid position values");
+    try {
+        // Step 1: Clean up invalid position values
+        await RiderModel.updateMany(
+            {
+                $or: [
+                    { position: { $exists: false } },
+                    { position: null },
+                    { position: { $type: ["null", "undefined"] } },
+                ],
+            },
+            { $unset: { position: "" } }
+        );
+        console.log("Cleared invalid position values");
 
-    // Step 2: Find riders without a position
-    const riders = await RiderModel.find({ position: { $exists: false } }).exec();
-    console.log(`Found ${riders.length} riders without a position`);
+        // Step 2: Find riders without a position
+        const riders = await RiderModel.find({ position: { $exists: false } }).exec();
+        console.log(`Found ${riders.length} riders without a position`);
 
-    // Step 3: Find the rider with the highest valid position
-    const lastRider = await RiderModel.findOne({
-      position: { $exists: true, $ne: null, $type: "number" },
-    })
-      .sort({ position: -1 })
-      .exec();
+        // Step 3: Find the rider with the highest valid position
+        const lastRider = await RiderModel.findOne({
+            position: { $exists: true, $ne: null, $type: "number" },
+        })
+            .sort({ position: -1 })
+            .exec();
 
-    let currentPosition = lastRider && Number.isFinite(lastRider.position) ? lastRider.position : 0;
-    console.log(`Starting position: ${currentPosition}`);
+        let currentPosition = lastRider && Number.isFinite(lastRider.position) ? lastRider.position : 0;
+        console.log(`Starting position: ${currentPosition}`);
 
-    // Step 4: Assign positions to riders
-    for (const rider of riders) {
-      currentPosition += 1;
-      rider.position = currentPosition;
-      await rider.save();
-      console.log(`Assigned position ${currentPosition} to rider ${rider._id}`);
+        // Step 4: Assign positions to riders
+        for (const rider of riders) {
+            currentPosition += 1;
+            rider.position = currentPosition;
+            try {
+                await rider.save();
+                console.log(`Assigned position ${currentPosition} to rider ${rider._id}`);
+            } catch (err) {
+                console.error(`Failed to save rider ${rider._id}:`, err);
+            }
+        }
+
+        res.send("Migration completed successfully.");
+    } catch (error) {
+        console.error("Migration failed:", error);
+        res.status(500).send(`Migration failed: ${error.message}`);
     }
-
-    res.send("Migration completed successfully.");
-  } catch (error) {
-    console.error("Migration failed:", error);
-    res.status(500).send(`Migration failed: ${error.message}`);
-  }
 });
 
 app.post("/track", Protect, async (req, res) => {
