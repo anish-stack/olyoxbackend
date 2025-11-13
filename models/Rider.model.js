@@ -490,6 +490,14 @@ const RiderSchema = new Schema({
             details: { type: Object },
         },
     ],
+    isPanRejected: {
+        type: Boolean,
+        default:false
+    },
+    isInsuranceRejected: {
+        type: Boolean,
+        default:false
+    }
 });
 
 RiderSchema.index({ location: "2dsphere" });

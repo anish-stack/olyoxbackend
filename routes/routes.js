@@ -34,6 +34,7 @@ const {
   updateRiderProfileCompleted,
   getAllRidersFcmToken,
   updateVehicle,
+  updateRejectionStatus,
 } = require("../controllers/rider.controller");
 const {
   calculateRidePriceForUser,
@@ -124,6 +125,7 @@ router.get("/getMySessionsByUserId", getMySessionsByUserId);
 router.put("/rider_document_verify/:id", riderDocumentsVerify);
 
 router.get("/", getAllRiders);
+router.put("/update-rejection-status/:id", updateRejectionStatus);
 router.get("/driver-fcm", getAllRidersFcmToken);
 
 router.put("/:riderId/location", changeLocation);

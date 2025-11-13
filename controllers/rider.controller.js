@@ -2587,6 +2587,72 @@ exports.getAllAddOnVehicleAdmin = async (req, res) => {
   }
 };
 
+exports.updateRejectionStatus = async (req, res) => {
+  try {
+    const { id } = req.params; // Assuming ID is passed in URL
+    const { isPanRejected, isInsuranceRejected } = req.body;
+
+    // Check if at least one field is provided
+    if (isPanRejected === undefined && isInsuranceRejected === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one field (isPanRejected or isInsuranceRejected) must be provided'
+      });
+    }
+
+    // Prepare update object
+    const updateFields = {};
+    if (isPanRejected !== undefined) {
+      if (typeof isPanRejected !== 'boolean') {
+        return res.status(400).json({
+          success: false,
+          message: 'isPanRejected must be a boolean'
+        });
+      }
+      updateFields.isPanRejected = isPanRejected;
+    }
+    if (isInsuranceRejected !== undefined) {
+      if (typeof isInsuranceRejected !== 'boolean') {
+        return res.status(400).json({
+          success: false,
+          message: 'isInsuranceRejected must be a boolean'
+        });
+      }
+      updateFields.isInsuranceRejected = isInsuranceRejected;
+    }
+
+    // Update document
+    const updatedDocument = await Rider.findByIdAndUpdate(
+      id,
+      { $set: updateFields },
+      { 
+        new: true, // Return updated document
+        runValidators: true // Validate update
+      }
+    );
+
+    if (!updatedDocument) {
+      return res.status(404).json({
+        success: false,
+        message: 'Document not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Status updated successfully',
+      data: updatedDocument
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error updating status',
+      error: error.message
+    });
+  }
+};
+
 exports.updateVehicleDetailsForDriver = async (req, res) => {
   try {
     const userId = req.user?.userId;
