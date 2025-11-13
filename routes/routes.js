@@ -130,6 +130,7 @@ router.get("/driver-fcm", getAllRidersFcmToken);
 
 router.put("/:riderId/location", changeLocation);
 
+
 router.post("/get-fare-info", calculateRidePriceForUser);
 router.get("/do-verify", verifyDocument);
 
