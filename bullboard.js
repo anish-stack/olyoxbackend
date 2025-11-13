@@ -20,7 +20,7 @@ const setupBullBoard = (app) => {
       new BullAdapter(notificationQueue),
       new BullAdapter(locationQueue),
       new BullAdapter(queue),
-      new BullAdapter(scheduleNotificationQueue),
+      // new BullAdapter(scheduleNotificationQueue),
       new BullAdapter(DriverSearchQueue),
       new BullAdapter(notificationQueueUser),
       new BullAdapter(intercityQueue),
