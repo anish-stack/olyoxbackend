@@ -16,7 +16,7 @@ const Protect = async (req, res, next) => {
     req.user = decoded;
     next();
   } catch (error) {
-    console.log("JWT Verification Error:", error.message);
+    // console.log("JWT Verification Error:", error.message);
     return res.status(401).json({ message: error.name === 'TokenExpiredError' ? 'Token expired' : 'Unauthorized' });
   }
 };
