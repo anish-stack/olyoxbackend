@@ -2516,26 +2516,63 @@ exports.getAllAddOnVehicleAdmin = async (req, res) => {
       };
     }
 
-    // Fetch vehicles with search, sort by createdAt DESC, then paginate
-    const findDetails = await VehicleAdds.find(searchQuery)
+    // Aggregation pipeline to find riderIds with 2 or more vehicles
+    const riderIdsWithMultipleVehicles = await VehicleAdds.aggregate([
+      { $match: searchQuery }, // Apply search query if any
+      {
+        $group: {
+          _id: '$riderId',
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $match: {
+          count: { $gte: 2 }, // Only include riderIds with 2 or more vehicles
+        },
+      },
+      {
+        $project: {
+          _id: 1, // Only return the riderId
+        },
+      },
+    ]);
+
+    // Extract riderIds from aggregation result
+    const riderIds = riderIdsWithMultipleVehicles.map((item) => item._id);
+
+    if (!riderIds || riderIds.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No riders found with 2 or more add-on vehicles',
+      });
+    }
+
+    // Fetch vehicles for the filtered riderIds with pagination
+    const findDetails = await VehicleAdds.find({
+      ...searchQuery,
+      riderId: { $in: riderIds }, // Only include vehicles with riderIds having 2+ vehicles
+    })
       .populate('riderId', 'name phone BH DocumentVerify')
-      .sort({ createdAt: -1 }) // This ensures newest first
+      .sort({ createdAt: -1 }) // Newest first
       .skip((currentPage - 1) * itemsPerPage)
       .limit(itemsPerPage);
 
-    const totalItems = await VehicleAdds.countDocuments(searchQuery);
+    const totalItems = await VehicleAdds.countDocuments({
+      ...searchQuery,
+      riderId: { $in: riderIds },
+    });
     const totalPages = Math.ceil(totalItems / itemsPerPage);
 
     if (!findDetails || findDetails.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'No add-on vehicles found',
+        message: 'No add-on vehicles found for riders with multiple vehicles',
       });
     }
 
     return res.status(200).json({
       success: true,
-      message: 'Vehicles found',
+      message: 'Vehicles found for riders with 2 or more add-on vehicles',
       data: findDetails,
       totalPages,
       currentPage,
