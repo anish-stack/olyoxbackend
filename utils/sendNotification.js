@@ -1,6 +1,7 @@
 require("dotenv").config(); // ✅ Ensure .env variables are loaded early
 const admin = require("firebase-admin");
-
+const User = require("../models/normal_user/User.model");
+const Rider = require("../models/Rider.model");
 // ──────────────────────────────
 // Custom Error Classes
 // ──────────────────────────────
@@ -127,9 +128,7 @@ const sendNotification = async (token, title, body, eventData = null, channel) =
       },
       android: {
         priority: "high",
-      
         notification: {
-        
           channelId: channel || "ride_channel",
           clickAction: "ACCEPT_RIDE_ACTION",
           imageUrl:
@@ -161,15 +160,39 @@ const sendNotification = async (token, title, body, eventData = null, channel) =
     }
 
     const response = await admin.messaging().send(message);
-    logger.info("✅ Notification sent successfully");
+    logger.info(`✅ Notification sent successfully to token: ${token}`);
     return response;
+
   } catch (error) {
     logger.error(`❌ Notification Error: ${error.message}`);
+
+    // ✅ Handle invalid or unregistered tokens
+    if (error.errorInfo && error.errorInfo.code === "messaging/registration-token-not-registered") {
+      logger.warn(`⚠️ Token invalid or app uninstalled — cleaning up: ${token}`);
+
+      // Check if it belongs to a user
+      const user = await User.findOne({ fcmToken: token });
+      if (user) {
+        user.appDeleted = true;
+        user.fcmToken = null;
+        await user.save();
+        logger.info(`🧹 Cleaned invalid token for user: ${user._id}`);
+      }
+
+      // Check if it belongs to a rider
+      const rider = await Rider.findOne({ fcmToken: token });
+      if (rider) {
+        rider.appDeleted = true;
+        rider.fcmToken = null;
+        await rider.save();
+        logger.info(`🧹 Cleaned invalid token for rider: ${rider._id}`);
+      }
+    }
+
     if (error instanceof NotificationError) return null;
     return null;
   }
 };
-
 // ──────────────────────────────
 // Test Hook (optional)
 // ──────────────────────────────

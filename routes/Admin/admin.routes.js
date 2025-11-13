@@ -68,6 +68,7 @@ const { createAppVersion, deleteAppVersion, getLatestAppVersionByType, getAllApp
 const { webhookExotelApi } = require('../../controllers/ExotelApi');
 const { DriverSendNotification } = require('../../Admin Controllers/notification/notificationController');
 const { getUserDashboardStatics, getRiders, getRidersAvaiable } = require('../../Admin Controllers/dashboard');
+const { addNotifications, getAllNotifications, updateNotification, changeSendStatus } = require('../../Admin Controllers/notification/ScheduleNotificationController');
 
 const admin = express.Router();
 
@@ -200,18 +201,27 @@ admin.get('/personal-coupon/:id', getCouponpAById);
 admin.put('/personal-coupons/:id', updatePCoupon);
 admin.delete('/personal-coupons/:id', deletePCoupon);
 
-admin.post('/send-notification-driver',DriverSendNotification)
+admin.post('/send-notification-driver', DriverSendNotification)
 
 admin.post('/app-version/create', createAppVersion);
 admin.delete('/app-version/delete/:id', deleteAppVersion);
 admin.get('/app-version/by-type/:app_type', getLatestAppVersionByType);
 admin.get('/app-version/all', getAllAppVersions);
 
-admin.get('/webhook-exotel-api',webhookExotelApi)
+admin.get('/webhook-exotel-api', webhookExotelApi)
 
 
 //stats
-admin.get('/user-dashboard-stats',getUserDashboardStatics);
-admin.get('/rider-dashboard-stats',getRiders);
-admin.get('/get-riders-available',getRidersAvaiable);
+admin.get('/user-dashboard-stats', getUserDashboardStatics);
+admin.get('/rider-dashboard-stats', getRiders);
+admin.get('/get-riders-available', getRidersAvaiable);
+
+
+
+admin.post('/add-notifications', addNotifications);
+admin.get('/all', getAllNotifications);
+admin.put('/update/:scheduleId/:notificationId', updateNotification);
+admin.delete('/delete/:scheduleId/:notificationId', deleteNotification);
+admin.patch('/status/:scheduleId/:notificationId', changeSendStatus);
+
 module.exports = admin;

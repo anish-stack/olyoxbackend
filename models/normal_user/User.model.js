@@ -11,6 +11,10 @@ const userSchema = new mongoose.Schema({
     firstRideCompleted: { type: Boolean, default: false },
     isFirstRideBonusRecived: { type: Boolean, default: false },
     cashback: { type: Number, default: 0 },
+    appDeleted: {
+  type: Boolean,
+  default: false,
+},
     cashbackHistory: [
         {
             rideId: { type: mongoose.Schema.Types.ObjectId, ref: "RideBooking" },

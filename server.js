@@ -10,6 +10,7 @@ const axios = require("axios");
 require("dotenv").config();
 const compression = require("compression");
 // Database and Models
+const cron = require('node-cron')
 const connectDb = require("./database/db");
 const { connectwebDb } = require("./PaymentWithWebDb/db");
 const TrackEvent = require("./models/Admin/Tracking");
@@ -35,6 +36,7 @@ const numCPUs = os.cpus().length;
 
 const Protect = require("./middleware/Auth");
 const NewRideModelModel = require("./src/New-Rides-Controller/NewRideModel.model");
+const { startNotificationScheduler } = require("./queues/ScheduleNotification.quee");
 
 // Initialize Express and Server
 const app = express();
@@ -1439,6 +1441,13 @@ app.use((err, req, res, next) => {
     ...(process.env.NODE_ENV !== "production" && { stack: err.stack }),
   });
 });
+
+cron.schedule('*/4 * * * * *', async () => {
+  await startNotificationScheduler();
+});
+
+
+
 // Graceful Shutdown with Force Disconnect
 process.on("SIGTERM", async () => {
   console.log(
@@ -1562,6 +1571,7 @@ async function startServer() {
       `[${new Date().toISOString()}] Worker ${process.pid} starting...`
     );
 
+    await startNotificationScheduler()
     // Connect to Redis first
     await connectRedis();
 
@@ -1599,24 +1609,5 @@ async function startServer() {
   }
 }
 
-// Cluster logic
-// if (cluster.isMaster) {
-//     console.log(`[${new Date().toISOString()}] 🛠 Master ${process.pid} is running`);
-//     console.log(`[${new Date().toISOString()}] Spawning ${numCPUs} workers...`);
-
-//     // Fork workers
-//     for (let i = 0; i < numCPUs; i++) {
-//         cluster.fork();
-//     }
-
-//     // Restart worker if it dies
-//     cluster.on("exit", (worker, code, signal) => {
-//         console.log(`[${new Date().toISOString()}] ⚠️ Worker ${worker.process.pid} died. Restarting...`);
-//         cluster.fork();
-//     });
-// } else {
-//     // Workers run the server
-//     startServer();
-// }
 
 startServer();

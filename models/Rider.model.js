@@ -297,6 +297,10 @@ const RiderSchema = new Schema({
         type: Boolean,
         default: false,
     },
+    appDeleted: {
+  type: Boolean,
+  default: false,
+},
     IntercityRideComplete: {
         type: Number,
     },
