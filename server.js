@@ -1442,9 +1442,9 @@ app.use((err, req, res, next) => {
   });
 });
 
-cron.schedule('*/4 * * * * *', async () => {
-  await startNotificationScheduler();
-});
+// cron.schedule('*/4 * * * * *', async () => {
+//   await startNotificationScheduler();
+// });
 
 
 
