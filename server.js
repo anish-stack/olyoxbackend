@@ -1058,9 +1058,9 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
       }
 
       // Only log when movement >= 50 meters
-      console.log(
-        `📍 Rider ${riderId} moved ${distance.toFixed(2)}m → update karenge`
-      );
+      // console.log(
+      //   `📍 Rider ${riderId} moved ${distance.toFixed(2)}m → update karenge`
+      // );
     }
 
     // 🔹 Update Redis cache
