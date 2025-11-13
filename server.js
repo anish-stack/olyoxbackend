@@ -567,6 +567,26 @@ app.get("/updates/:userId/:userType", async (req, res) => {
   }
 });
 
+
+app.get("/run-migration", async (req, res) => {
+    try {
+        const riders = await RiderModel.find({ position: { $exists: false } }).exec();
+        let currentPosition = await RiderModel.findOne().sort({ position: -1 }).exec();
+        currentPosition = currentPosition ? currentPosition.position : 0;
+
+        for (const rider of riders) {
+            currentPosition += 1;
+            rider.position = currentPosition;
+            await rider.save();
+            console.log(`Assigned position ${currentPosition} to rider ${rider._id}`);
+        }
+        res.send("Migration completed successfully.");
+    } catch (error) {
+        console.error("Migration failed:", error);
+        res.status(500).send("Migration failed");
+    }
+});
+
 app.post("/track", Protect, async (req, res) => {
   try {
     const userId = req.user?.user._id || req.user._id; // from Protect middleware

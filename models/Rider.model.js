@@ -473,6 +473,11 @@ const RiderSchema = new Schema({
     },
 
     updateLogs: [UpdateLogSchema],
+    position: {
+        type: Number,
+        required: true,
+        unique: true, // Ensure position is unique
+    },
 
     activityLog: [
         {
@@ -488,10 +493,52 @@ RiderSchema.index({ "rideVehicleInfo.VehicleNumber": 1 });
 RiderSchema.index({ "preferences.OlyoxPriority.enabled": 1 });
 
 // Middleware to update lastUpdated on save
-RiderSchema.pre("save", function (next) {
+// RiderSchema.pre("save", function (next) {
+//     this.lastUpdated = new Date();
+
+//     // Track specific field updates
+//     const fieldsToTrack = ["location", "fcmToken"];
+//     fieldsToTrack.forEach((field) => {
+//         if (this.isModified(field)) {
+//             this.updateLogs.push({
+//                 field,
+//                 oldValue: this.get(field, null, {
+//                     getters: false,
+//                     virtuals: false,
+//                     defaults: false,
+//                     alias: false,
+//                 }), // old value
+//                 newValue: this[field], // new value
+//                 changedBy: "system",
+//             });
+//         }
+//     });
+
+//     // Keep only last 100 logs
+//     if (this.updateLogs.length > 100) {
+//         this.updateLogs = this.updateLogs.slice(-100);
+//     }
+
+//     next();
+// });
+
+// Middleware to assign position for new riders
+RiderSchema.pre("save", async function (next) {
+    // Only assign position for new documents
+    if (this.isNew) {
+        try {
+            // Find the rider with the highest position
+            const lastRider = await mongoose.model("Rider").findOne().sort({ position: -1 }).exec();
+            // Assign position: if no riders exist, start with 1; otherwise, increment the last position
+            this.position = lastRider ? lastRider.position + 1 : 1;
+        } catch (error) {
+            return next(error);
+        }
+    }
+
+    // Update lastUpdated and track field updates (existing middleware)
     this.lastUpdated = new Date();
 
-    // Track specific field updates
     const fieldsToTrack = ["location", "fcmToken"];
     fieldsToTrack.forEach((field) => {
         if (this.isModified(field)) {
@@ -502,14 +549,13 @@ RiderSchema.pre("save", function (next) {
                     virtuals: false,
                     defaults: false,
                     alias: false,
-                }), // old value
-                newValue: this[field], // new value
+                }),
+                newValue: this[field],
                 changedBy: "system",
             });
         }
     });
 
-    // Keep only last 100 logs
     if (this.updateLogs.length > 100) {
         this.updateLogs = this.updateLogs.slice(-100);
     }
@@ -627,5 +673,7 @@ RiderSchema.methods.getPreferenceAnalytics = function () {
 
     return analytics;
 };
+
+RiderSchema.index({ position: 1 }, { unique: true });
 
 module.exports = mongoose.model("Rider", RiderSchema);
