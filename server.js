@@ -1137,47 +1137,51 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
 // GET /admin/active-drivers-20min
 app.get("/admin/active-drivers-20min", async (req, res) => {
   try {
-    // Read vehicleType from query
+    const apiStart = Date.now(); // ⏳ start time
+
     const { vehicleType } = req.query;
 
     // Time window: last 20 minutes
     const TWENTY_MIN = 20 * 60 * 1000;
     const twentyMinAgo = Date.now() - TWENTY_MIN;
 
-    console.log("🔍 Checking active drivers since:", new Date(twentyMinAgo));
-    console.log("🚗 Vehicle Type Filter:", vehicleType || "ALL");
-
-    // Base filter
+    // 🔍 Base filter — only CAB category riders
     const filter = {
+      category: "cab",  // ⛔ Only CAB included
       lastUpdated: { $gte: twentyMinAgo },
     };
 
-    // Add vehicleType filter only if provided
+    // 🎯 If vehicleType provided, apply filter
     if (vehicleType) {
-      filter["rideVehicleInfo.vehicleType"] = vehicleType;
+      filter["rideVehicleInfo.vehicleType"] = vehicleType.trim().toUpperCase();
     }
 
-    // Count
+    // 📊 Count active CAB drivers
     const count = await RiderModel.countDocuments(filter);
 
-    console.log("📊 Active drivers found:", count);
+    const apiEnd = Date.now();
+    const apiExecutionTime = apiEnd - apiStart;
 
     return res.status(200).json({
       success: true,
-      message: "Active driver count fetched successfully.",
+      message: "Active CAB drivers fetched successfully.",
       activeDrivers: count,
       vehicleType: vehicleType || "ALL",
+      category: "CAB",
       checkedFrom: new Date(twentyMinAgo),
+      apiExecutionTime: apiExecutionTime + " ms",
     });
 
   } catch (err) {
     console.error("❌ Error checking active drivers:", err);
+
     return res.status(500).json({
       success: false,
       message: "Internal server error while checking active drivers.",
     });
   }
 });
+
 
 
 app.post("/webhook/receive-location", Protect, async (req, res) => {

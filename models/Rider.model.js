@@ -503,7 +503,12 @@ const RiderSchema = new Schema({
 RiderSchema.index({ location: "2dsphere" });
 RiderSchema.index({ "rideVehicleInfo.VehicleNumber": 1 });
 RiderSchema.index({ "preferences.OlyoxPriority.enabled": 1 });
-
+RiderSchema.index({ category: 1, isAvailable: 1 });
+RiderSchema.index({ category: 1, on_ride_id: 1 });
+RiderSchema.index({ phone: 1 });
+RiderSchema.index({ name: 1 });
+RiderSchema.index({ "RechargeData.expireData": 1 });
+RiderSchema.index({ "RechargeData.approveRecharge": 1 });
 // Middleware to update lastUpdated on save
 // RiderSchema.pre("save", function (next) {
 //     this.lastUpdated = new Date();

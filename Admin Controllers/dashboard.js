@@ -184,94 +184,115 @@ const getCoordinatesFromAddress = async (address) => {
 };
 
 exports.getRiders = async (req, res) => {
-    try {
-        const { searchTerm, locationSearch, rechargeFilter, page = 1, limit = 10 } = req.query;
-
-        let filter = {
-            $or: [
-                { isAvailable: true },
-                { on_ride_id: { $exists: true, $ne: null } },
-            ],
-        };
-
-        if (searchTerm) {
-            filter.$and = [
-                {
-                    $or: [
-                        { name: { $regex: searchTerm, $options: 'i' } },
-                        { phone: { $regex: searchTerm, $options: 'i' } },
-                    ]
-                }
-            ];
-        }
-
-        // Recharge filter
-        if (rechargeFilter === 'valid') {
-            filter['RechargeData.expireData'] = { $gt: new Date() };
-            filter['RechargeData.approveRecharge'] = true;
-        } else if (rechargeFilter === 'expired') {
-            filter.$or.push(
-                { 'RechargeData.expireData': { $lte: new Date() } },
-                { 'RechargeData.approveRecharge': false },
-                { 'RechargeData': { $exists: false } }
-            );
-        }
-
+  const timings = {};
+  const startTime = Date.now();
   
-        let riders = await Rider.find(filter)
-            .select('_id name phone location RechargeData createdAt rideVehicleInfo lastUpdated isAvailable on_ride_id')
-            .sort({ createdAt: -1 })
-            .lean();
+  try {
+    const { searchTerm, locationSearch, rechargeFilter } = req.query;
 
-        // Location filter
-        if (locationSearch) {
-            const searchCoords = await getCoordinatesFromAddress(locationSearch);
-            if (searchCoords) {
-                riders = riders.filter(r => {
-                    if (r.location?.coordinates?.length === 2) {
-                        const [lng, lat] = r.location.coordinates;
-                        const distance = calculateDistance(searchCoords.lat, searchCoords.lng, lat, lng);
-                        return distance <= 5;
-                    }
-                    return false;
-                });
-            }
-        }
-
-        const totalRiders = riders.length;
-        const startIndex = (parseInt(page) - 1) * parseInt(limit);
-        const paginatedRiders = riders.slice(startIndex, startIndex + parseInt(limit));
-
-        // Map minimal fields + recharge status
-        const minimalRiders = paginatedRiders.map(r => ({
-            _id: r._id,
-            name: r.name,
-            phone: r.phone,
-            location: r.location || null,
-            rechargeData: r.RechargeData || null,
-           rideVehicleInfo: r.rideVehicleInfo || null,
-           lastUpdated: r.lastUpdated || null,
-
-
-            createdAt: r.createdAt,
-            isAvailable: r.isAvailable,
-            on_ride_id: r.on_ride_id || null,
-            rechargeValid: isRechargeValid(r),
-        }));
-
-        res.json({
-            success: true,
-            totalRiders,
-            page: parseInt(page),
-            limit: parseInt(limit),
-            data: minimalRiders,
-        });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, message: 'Server Error' });
+    const queryBuildStart = Date.now();
+    
+    // ✅ BASE QUERY - Simplified to use indexes
+    let baseQuery = { category: "cab" };
+    
+    // 🔍 SEARCH - Use text index if available
+    if (searchTerm) {
+      // Option 1: If you created text index
+      // baseQuery.$text = { $search: searchTerm };
+      
+      // Option 2: Use regex on indexed field only
+      baseQuery.$or = [
+        { phone: { $regex: searchTerm, $options: "i" } },
+        { name: { $regex: searchTerm, $options: "i" } }
+      ];
     }
-};
 
+    // 💳 RECHARGE FILTER - Simplified
+    if (rechargeFilter === "valid") {
+      baseQuery["RechargeData.expireData"] = { $gt: new Date() };
+      baseQuery["RechargeData.approveRecharge"] = true;
+    } else if (rechargeFilter === "expired") {
+      // Instead of complex $or, use simple conditions
+      baseQuery.$and = [
+        {
+          $or: [
+            { "RechargeData.expireData": { $lte: new Date() } },
+            { "RechargeData.expireData": { $exists: false } },
+            { "RechargeData.approveRecharge": { $ne: true } }
+          ]
+        }
+      ];
+    }
+
+    timings.queryBuild = Date.now() - queryBuildStart;
+
+    // ⏱️ DATABASE QUERY - Two separate fast queries instead of one slow
+    const dbQueryStart = Date.now();
+    
+    // Strategy: Fetch separately and merge (much faster!)
+    const [availableRiders, onRideRiders] = await Promise.all([
+      // Query 1: Available riders (uses index efficiently)
+      Rider.find(
+        { ...baseQuery, isAvailable: true },
+        {
+          name: 1, phone: 1, location: 1, RechargeData: 1,
+          rideVehicleInfo: 1, lastUpdated: 1, isAvailable: 1, on_ride_id: 1
+        }
+      ).lean().limit(5000),
+      
+      // Query 2: Riders on ride (uses index efficiently)
+      Rider.find(
+        { ...baseQuery, on_ride_id: { $exists: true, $ne: null } },
+        {
+          name: 1, phone: 1, location: 1, RechargeData: 1,
+          rideVehicleInfo: 1, lastUpdated: 1, isAvailable: 1, on_ride_id: 1
+        }
+      ).lean().limit(5000)
+    ]);
+
+    // Merge results and deduplicate by _id
+    const riderMap = new Map();
+    [...availableRiders, ...onRideRiders].forEach(rider => {
+      riderMap.set(rider._id.toString(), rider);
+    });
+    const cabRiders = Array.from(riderMap.values());
+
+    timings.dbQuery = Date.now() - dbQueryStart;
+    timings.resultCount = cabRiders.length;
+
+    // ⏱️ PROCESSING
+    const processingStart = Date.now();
+    const cabVehicleCounts = cabRiders.reduce((counts, rider) => {
+      let type = rider.rideVehicleInfo?.vehicleType?.trim().toUpperCase() || "UNKNOWN";
+      if (type.includes("SUV")) type = "SUV/XL";
+      if (type.includes("TUK")) type = "TUKTUK";
+      counts[type] = (counts[type] || 0) + 1;
+      return counts;
+    }, {});
+    timings.processing = Date.now() - processingStart;
+
+    timings.total = Date.now() - startTime;
+
+    console.log("⏱️ API TIMINGS:", JSON.stringify(timings, null, 2));
+
+    return res.json({
+      success: true,
+      totalCabRiders: cabRiders.length,
+      cabVehicleCounts,
+      apiExecutionTime: timings.total + " ms",
+      timings,
+      data: cabRiders,
+    });
+
+  } catch (err) {
+    console.error("getRiders error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+      apiExecutionTime: Date.now() - startTime + " ms",
+    });
+  }
+};
 
 exports.getRidersAvaiable = async (req, res) => {
     try {
