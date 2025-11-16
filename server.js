@@ -1056,64 +1056,85 @@ setInterval(flushLocationsToDB, DB_FLUSH_INTERVAL);
 
 app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
   try {
+    console.log("📩 Incoming Location Webhook");
+
     const riderId = req.user?.userId;
-    if (!riderId) return Protect(req, res);
-
-    const { latitude, longitude, accuracy, speed, timestamp, platform } =
-      req.body;
-    const now = timestamp || Date.now();
-    const newLoc = {
-      latitude,
-      longitude,
-      timestamp: now,
-      accuracy,
-      speed,
-      platform: platform || "unknown",
-    };
-
-    const lastLocStr = await pubClient.get(`rider:location:${riderId}`);
-    if (lastLocStr) {
-      const lastLoc = JSON.parse(lastLocStr);
-      const distance = haversineDistance(
-        lastLoc.latitude,
-        lastLoc.longitude,
-        latitude,
-        longitude
-      );
-
-      if (distance <= MAX_DISTANCE_THRESHOLD) {
-        // Ignore movements less than 50 meters
-        return res
-          .status(200)
-          .json({ message: "Location change negligible. Ignored." });
-      }
-
-      // Only log when movement >= 50 meters
-      // console.log(
-      //   `📍 Rider ${riderId} moved ${distance.toFixed(2)}m → update karenge`
-      // );
+    if (!riderId) {
+      console.log("⛔ No Rider ID in token → Protect triggered");
+      return Protect(req, res);
     }
 
-    // 🔹 Update Redis cache
-    await pubClient.setEx(
-      `rider:location:${riderId}`,
-      GEO_UPDATE_TTL,
-      JSON.stringify(newLoc)
-    );
-    await pubClient.zAdd(GEO_BATCH_KEY, { score: now, value: riderId });
+    const { latitude, longitude, accuracy, speed, timestamp, platform } = req.body;
 
-    return res
-      .status(200)
-      .json({ message: "Location cached successfully", data: newLoc });
+    console.log("🌍 Received Data:", {
+      riderId,
+      latitude,
+      longitude,
+      accuracy,
+      speed,
+      timestamp,
+      platform,
+    });
+
+    const now = timestamp || Date.now();
+
+    const activeRide = await RiderModel.findById(riderId);
+
+    if (!activeRide) {
+      console.log("❌ No active ride found for rider:", riderId);
+      return res.status(400).json({
+        success: false,
+        message: "No active ride found for this rider.",
+      });
+    }
+
+    const newLocation = {
+      type: "Point",
+      coordinates: [longitude, latitude],
+    };
+
+    console.log("📌 Updating Location For Rider:", riderId);
+
+    const updatedRider = await RiderModel.findByIdAndUpdate(
+      riderId,
+      {
+        location: newLocation,
+        lastUpdated: now,
+      },
+      { new: true }
+    );
+
+    if (!updatedRider) {
+      console.log("⚠️ Rider not found while updating:", riderId);
+      return res.status(404).json({
+        success: false,
+        message: "Rider not found.",
+      });
+    }
+
+    console.log("✅ Location Updated Successfully:", {
+      riderId,
+      updatedLocation: updatedRider.location,
+      lastUpdated: updatedRider.lastUpdated,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Rider location updated successfully.",
+      data: updatedRider,
+    });
+
   } catch (err) {
-    console.error("❌ Error handling rider location:", err.message);
-    return res.status(500).json({ error: "Internal server error" });
+    console.error("❌ Error updating rider location:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error while updating rider location",
+    });
   }
 });
 
 app.post("/webhook/receive-location", Protect, async (req, res) => {
   try {
-    console.log("user hits", req.user);
     const { latitude, longitude } = req.body;
     const userId = req.user.userId;
 
