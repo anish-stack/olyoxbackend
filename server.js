@@ -1211,6 +1211,7 @@ app.post("/webhook/receive-location", Protect, async (req, res) => {
 
 // Root Endpoint
 app.get("/", (req, res) => {
+  console.log("https://pzl22gdb-3200.inc1.devtunnels.ms/")
   res.status(200).json({
     message: "Welcome to the API",
     timestamp: new Date().toISOString(),

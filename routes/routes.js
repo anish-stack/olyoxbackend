@@ -62,6 +62,7 @@ const userModel = require("../models/normal_user/User.model");
 const DriverModel = require("../models/Rider.model");
 
 const  sendNotification  = require("../utils/sendNotification");
+const { PassthruRoute } = require("../controllers/ExotelApi");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -289,6 +290,8 @@ router.post("/:rideId/messages", async (req, res) => {
   }
 });
 
+
+router.get('/pass-through',PassthruRoute)
 
 
 module.exports = router;

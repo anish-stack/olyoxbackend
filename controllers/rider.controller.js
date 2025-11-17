@@ -1828,13 +1828,13 @@ exports.updateRiderDocumentVerify = async (req, res) => {
 
     if (rider.category === "parcel") {
       console.log("📦 Rider category is parcel → Grant Free Tier");
-      await grantFreeTier(rider);
+      // await grantFreeTier(rider);
     } else if (
       rider.category === "cab" &&
       (vehicleName === "bike" || vehicleType === "bike")
     ) {
       console.log("🏍️ Rider category is cab with bike → Grant Free Tier");
-      await grantFreeTier(rider);
+      // await grantFreeTier(rider);
     } else {
       console.log("🚖 Rider category is other → Normal approval message");
       await SendWhatsAppMessage(

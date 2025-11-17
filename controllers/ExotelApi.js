@@ -233,3 +233,58 @@ exports.webhookExotelApi = async (req, res) => {
         return res.status(500).type('text/plain').send('Internal Server Error');
     }
 };
+
+
+exports.PassthruRoute  =async(req,res)=>{
+    try {
+    console.log("🔔 Passthru Hit:", req.query);
+
+    // Extract raw GET query parameters
+    const data = req.query;
+
+    // legs[] comes as Legs[0][CauseCode] etc. → convert to array
+    const legs = [];
+    Object.keys(data).forEach((key) => {
+      if (key.startsWith("Legs[")) {
+        const index = key.match(/Legs\[(\d+)\]\[(.+)\]/);
+        if (index) {
+          const i = index[1];
+          const paramName = index[2];
+
+          if (!legs[i]) legs[i] = {};
+          legs[i][paramName] = data[key];
+        }
+      }
+    });
+
+    // Clean digits (Exotel sends with double quotes)
+    let cleanDigits = null;
+    if (data.digits) {
+      cleanDigits = data.digits.replace(/"/g, "");
+    }
+
+    
+
+    console.log("📥 Passthru Saved!");
+
+    // Decide response for Sync mode
+    // You can add your own condition here
+    if (data.CallStatus === "in-progress") {
+      return res.status(200).send("OK"); // Continue call flow
+    }
+
+    // Another example: route calls based on user input
+    if (cleanDigits === "1") {
+      return res.redirect(302, "https://your-next-step-url-A.com");
+    } else if (cleanDigits === "2") {
+      return res.redirect(302, "https://your-next-step-url-B.com");
+    }
+
+    // Default Exotel response
+    return res.status(200).send("PASSTHRU RECEIVED");
+
+  } catch (error) {
+    console.log("❌ Passthru Error:", error);
+    return res.status(500).send("SERVER ERROR");
+  }
+}
