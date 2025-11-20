@@ -23,7 +23,7 @@ const cleanupCache = (cache, maxAge = 900000) => {
 const DWARKA_EXPRESSWAY_TOLL = {
   name: 'Bijwasan Toll Plaza (Dwarka Expressway)',
   location: { lat: 28.53, lng: 77.04 },
-  tollAmount: 230,
+  tollAmount: 320,
   // Detection radius (in degrees, roughly ~5km)
   radius: 0.05
 };
