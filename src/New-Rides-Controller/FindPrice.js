@@ -17,6 +17,49 @@ const cleanupCache = (cache, maxAge = 900000) => {
   }
 };
 
+
+
+// Dwarka Expressway (Bijwasan Toll Plaza) detection
+const DWARKA_EXPRESSWAY_TOLL = {
+  name: 'Bijwasan Toll Plaza (Dwarka Expressway)',
+  location: { lat: 28.53, lng: 77.04 },
+  tollAmount: 230,
+  // Detection radius (in degrees, roughly ~5km)
+  radius: 0.05
+};
+
+function checkDwarkaExpressway(origin, destination) {
+  const { lat: tollLat, lng: tollLng } = DWARKA_EXPRESSWAY_TOLL.location;
+  const { radius } = DWARKA_EXPRESSWAY_TOLL;
+
+  // Check if either origin or destination is near Bijwasan Toll Plaza
+  const originNearToll = 
+    Math.abs(origin.latitude - tollLat) <= radius && 
+    Math.abs(origin.longitude - tollLng) <= radius;
+  
+  const destNearToll = 
+    Math.abs(destination.latitude - tollLat) <= radius && 
+    Math.abs(destination.longitude - tollLng) <= radius;
+
+  // Check if route crosses the toll area (basic bounding box check)
+  const minLat = Math.min(origin.latitude, destination.latitude);
+  const maxLat = Math.max(origin.latitude, destination.latitude);
+  const minLng = Math.min(origin.longitude, destination.longitude);
+  const maxLng = Math.max(origin.longitude, destination.longitude);
+
+  const routeCrossesToll = 
+    (minLat <= tollLat && maxLat >= tollLat && minLng <= tollLng && maxLng >= tollLng);
+
+  if (originNearToll || destNearToll || routeCrossesToll) {
+    console.log(`🛣️  Dwarka Expressway (Bijwasan Toll) detected!`);
+    console.log(`   Toll Plaza Location: ${tollLat}°N, ${tollLng}°E`);
+    return true;
+  }
+
+  return false;
+}
+
+
 // Time-based utilities
 const isNightTimeNow = (timezone = 'Asia/Kolkata') => {
   try {
@@ -127,12 +170,31 @@ function detectCity(lat, lng) {
   return null;
 }
 
-// Smart toll detection - SIRF DELHI MEIN ENTER KARNE PAR TOLL
 function detectTollsForRoute(origin, destination) {
   console.log('\n========== TOLL DETECTION STARTED ==========');
   console.log("📌 Origin:", origin);
   console.log("📌 Destination:", destination);
   console.log('');
+
+  // Check for Dwarka Expressway first (priority check)
+  const isDwarkaExpressway = checkDwarkaExpressway(origin, destination);
+  
+  if (isDwarkaExpressway) {
+    console.log(`💰 SPECIAL TOLL DETECTED: ${DWARKA_EXPRESSWAY_TOLL.name}`);
+    console.log(`   Amount: ₹${DWARKA_EXPRESSWAY_TOLL.tollAmount}`);
+    console.log('========================================\n');
+    return {
+      hasTolls: true,
+      tollAmount: DWARKA_EXPRESSWAY_TOLL.tollAmount,
+      tollDetails: {
+        route: DWARKA_EXPRESSWAY_TOLL.name,
+        origin: 'Dwarka Expressway Route',
+        destination: 'Dwarka Expressway Route',
+        tollType: 'Expressway Toll',
+        note: 'Bijwasan Toll Plaza on Dwarka Expressway'
+      }
+    };
+  }
 
   const originCity = detectCity(origin.latitude, origin.longitude);
   const destCity = detectCity(destination.latitude, destination.longitude);
@@ -185,81 +247,6 @@ function detectTollsForRoute(origin, destination) {
       };
     }
   }
-
-  // INTER-CITY TOLLS (Non-Delhi routes)
-
-  // Noida ↔ UP (Direct NH tolls)
-  if ((originCity === 'noida' && destCity === 'up') ||
-    (originCity === 'up' && destCity === 'noida')) {
-    const routeDescription = originCity === 'noida'
-      ? 'Noida → UP (NH Toll)'
-      : 'UP → Noida (NH Toll)';
-
-    console.log(`💰 TOLL DETECTED: ${routeDescription}`);
-    console.log(`   Amount: ₹100`);
-    console.log('========================================\n');
-    return {
-      hasTolls: true,
-      tollAmount: 100,
-      tollDetails: {
-        route: routeDescription,
-        origin: CITY_BOUNDARIES[originCity].name,
-        destination: CITY_BOUNDARIES[destCity].name,
-        tollType: 'National Highway Toll'
-      }
-    };
-  }
-
-  // Gurgaon ↔ Noida (via Delhi - entering Delhi triggers toll)
-  if ((originCity === 'gurgaon' && destCity === 'noida') ||
-    (originCity === 'noida' && destCity === 'gurgaon')) {
-    const routeDescription = originCity === 'gurgaon'
-      ? 'Gurgaon → Delhi → Noida (Delhi Entry Toll)'
-      : 'Noida → Delhi → Gurgaon (Delhi Entry Toll)';
-
-    console.log(`💰 TOLL DETECTED: ${routeDescription}`);
-    console.log(`   Amount: ₹100 (single Delhi entry toll)`);
-    console.log('========================================\n');
-    return {
-      hasTolls: true,
-      tollAmount: 100,
-      tollDetails: {
-        route: routeDescription,
-        origin: CITY_BOUNDARIES[originCity].name,
-        destination: CITY_BOUNDARIES[destCity].name,
-        tollType: 'Via Delhi (Entry Toll)',
-        note: 'Single toll charged for Delhi entry'
-      }
-    };
-  }
-
-  // Gurgaon ↔ UP (via Delhi - entering Delhi triggers toll)
-  if ((originCity === 'gurgaon' && destCity === 'up') ||
-    (originCity === 'up' && destCity === 'gurgaon')) {
-    const routeDescription = originCity === 'gurgaon'
-      ? 'Gurgaon → Delhi → UP (Delhi Entry Toll)'
-      : 'UP → Delhi → Gurgaon (Delhi Entry Toll)';
-
-    console.log(`💰 TOLL DETECTED: ${routeDescription}`);
-    console.log(`   Amount: ₹100 (single Delhi entry toll)`);
-    console.log('========================================\n');
-    return {
-      hasTolls: true,
-      tollAmount: 100,
-      tollDetails: {
-        route: routeDescription,
-        origin: CITY_BOUNDARIES[originCity].name,
-        destination: CITY_BOUNDARIES[destCity].name,
-        tollType: 'Via Delhi (Entry Toll)',
-        note: 'Single toll charged for Delhi entry'
-      }
-    };
-  }
-
-  // No toll for other combinations
-  console.log(`✅ No toll applicable for ${originCity} → ${destCity}`);
-  console.log('========================================\n');
-  return { hasTolls: false, tollAmount: 0, tollDetails: null };
 }
 // Google Maps Directions API with caching
 async function getDirectionsData(origin, destination, cacheKey) {
@@ -557,8 +544,7 @@ function calculateVehiclePrice(vehicle, routeData, conditions, tollInfo) {
   };
 }
 
-// Calculate rental prices
-// Calculate rental prices with TOLL SUPPORT
+
 async function calculateRentalPrices(distance_km, traffic_duration_minutes, conditions, origin, destination) {
   try {
     console.log("destination", destination)
@@ -653,69 +639,6 @@ async function calculateRentalPrices(distance_km, traffic_duration_minutes, cond
   }
 }
 
-// Enhanced function to determine if Bike/Auto should be excluded
-function shouldExcludeBikeAuto(distance_km, origin, destination, isLater, isIntercityRide, vehicleName = '') {
-  const reasons = [];
-  const normalizedName = vehicleName.toLowerCase().trim();
-
-  // 🚴 BIKE SPECIAL RULES
-  if (normalizedName === 'bike') {
-    // Bikes can go up to 50km regardless of city boundaries
-    if (distance_km > 50) {
-      reasons.push(`distance exceeds Bike limit of 50 km (${distance_km.toFixed(2)} km)`);
-    }
-    
-    // Later rides excluded
-    if (isLater) {
-      reasons.push('scheduled for later');
-    }
-
-    const shouldExclude = reasons.length > 0;
-    if (shouldExclude) {
-      console.log(`🚫 Excluding Bike because: ${reasons.join(', ')}`);
-    } else {
-      console.log(`✅ Bike allowed (≤50 km, can cross boundaries)`);
-    }
-    return { shouldExclude, reasons };
-  }
-
-  // 🛺 AUTO RULES (existing logic)
-  if (normalizedName === 'auto') {
-    // Rule 1: Intercity rides (distance > 69 km)
-    if (isIntercityRide) {
-      reasons.push('intercity ride (>69 km)');
-    }
-
-    // Rule 2: Later rides
-    if (isLater) {
-      reasons.push('scheduled for later');
-    }
-
-    // Rule 3: Distance > 50 km
-    if (distance_km > 50) {
-      reasons.push(`distance exceeds 50 km (${distance_km.toFixed(2)} km)`);
-    }
-
-    // Rule 4: Cross-city routes
-    const originCity = detectCity(origin.latitude, origin.longitude);
-    const destCity = detectCity(destination.latitude, destination.longitude);
-
-    if (originCity && destCity && originCity !== destCity) {
-      reasons.push(`cross-city route (${originCity} → ${destCity})`);
-    }
-
-    const shouldExclude = reasons.length > 0;
-    if (shouldExclude) {
-      console.log(`🚫 Excluding Auto because: ${reasons.join(', ')}`);
-    } else {
-      console.log(`✅ Auto allowed (local ride ≤50 km within same city)`);
-    }
-    return { shouldExclude, reasons };
-  }
-
-  // For other vehicles, no exclusion
-  return { shouldExclude: false, reasons: [] };
-}
 
 // Main API endpoint - Complete Rewrite with Bike & Auto separate handling
 exports.calculateRidePriceForUser = async (req, res) => {
