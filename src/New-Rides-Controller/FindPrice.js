@@ -18,14 +18,76 @@ const cleanupCache = (cache, maxAge = 900000) => {
 };
 
 
+const SPECIAL_TOLLS = [
+  {
+    id: 'dwarka_expressway',
+    name: 'Bijwasan Toll Plaza (Dwarka Expressway)',
+    location: { lat: 28.53, lng: 77.04 },
+    tollAmount: 320,
+    radius: 0.02, // ~2km radius
+    description: 'Dwarka Expressway connecting Gurgaon to Delhi',
+    vehicleExemptions: ['bike'], // Bikes don't pay this toll
+    priority: 1 // Higher priority = checked first
+  },
+  {
+    id: 'kundli_manesar_palwal',
+    name: 'KMP Expressway Toll',
+    location: { lat: 28.88, lng: 77.12 },
+    tollAmount: 250,
+    radius: 0.015,
+    description: 'Kundli-Manesar-Palwal Expressway',
+    vehicleExemptions: ['bike'],
+    priority: 2
+  },
+  {
+    id: 'yamuna_expressway',
+    name: 'Yamuna Expressway Toll Plaza',
+    location: { lat: 28.45, lng: 77.52 },
+    tollAmount: 400,
+    radius: 0.02,
+    description: 'Greater Noida to Agra Expressway',
+    vehicleExemptions: ['bike'],
+    priority: 3
+  },
+  {
+    id: 'eastern_peripheral',
+    name: 'Eastern Peripheral Expressway Toll',
+    location: { lat: 28.71, lng: 77.45 },
+    tollAmount: 180,
+    radius: 0.015,
+    description: 'Eastern Peripheral connecting Kundli to Palwal',
+    vehicleExemptions: ['bike'],
+    priority: 4
+  },
+  {
+    id: 'nh8_gurgaon',
+    name: 'NH-8 Gurgaon Toll Plaza',
+    location: { lat: 28.46, lng: 77.02 },
+    tollAmount: 150,
+    radius: 0.012,
+    description: 'National Highway 8 Gurgaon Section',
+    vehicleExemptions: ['bike'],
+    priority: 5
+  }
+  // ADD MORE TOLLS HERE - Just copy the structure above!
+  // {
+  //   id: 'your_toll_id',
+  //   name: 'Your Toll Name',
+  //   location: { lat: XX.XXXX, lng: XX.XXXX },
+  //   tollAmount: 200,
+  //   radius: 0.015,
+  //   description: 'Your toll description',
+  //   vehicleExemptions: ['bike'],
+  //   priority: 6
+  // }
+];
 
 // Dwarka Expressway (Bijwasan Toll Plaza) detection
 const DWARKA_EXPRESSWAY_TOLL = {
   name: 'Bijwasan Toll Plaza (Dwarka Expressway)',
   location: { lat: 28.53, lng: 77.04 },
   tollAmount: 320,
-  // Detection radius (in degrees, roughly ~5km)
-  radius: 0.05
+  radius: 0.02
 };
 
 function checkDwarkaExpressway(origin, destination) {
@@ -33,12 +95,12 @@ function checkDwarkaExpressway(origin, destination) {
   const { radius } = DWARKA_EXPRESSWAY_TOLL;
 
   // Check if either origin or destination is near Bijwasan Toll Plaza
-  const originNearToll = 
-    Math.abs(origin.latitude - tollLat) <= radius && 
+  const originNearToll =
+    Math.abs(origin.latitude - tollLat) <= radius &&
     Math.abs(origin.longitude - tollLng) <= radius;
-  
-  const destNearToll = 
-    Math.abs(destination.latitude - tollLat) <= radius && 
+
+  const destNearToll =
+    Math.abs(destination.latitude - tollLat) <= radius &&
     Math.abs(destination.longitude - tollLng) <= radius;
 
   // Check if route crosses the toll area (basic bounding box check)
@@ -47,7 +109,7 @@ function checkDwarkaExpressway(origin, destination) {
   const minLng = Math.min(origin.longitude, destination.longitude);
   const maxLng = Math.max(origin.longitude, destination.longitude);
 
-  const routeCrossesToll = 
+  const routeCrossesToll =
     (minLat <= tollLat && maxLat >= tollLat && minLng <= tollLng && maxLng >= tollLng);
 
   if (originNearToll || destNearToll || routeCrossesToll) {
@@ -123,6 +185,113 @@ const CITY_BOUNDARIES = {
     }
   }
 };
+
+const CITY_BORDER_TOLLS = {
+  gurgaon_to_delhi: {
+    amount: 100,
+    route: 'Gurgaon → Delhi (Border Entry Toll)',
+    type: 'Border Entry Toll'
+  },
+  noida_to_delhi: {
+    amount: 100,
+    route: 'Noida → Delhi (DND/Kalindi Toll)',
+    type: 'Border Entry Toll'
+  },
+  up_to_delhi: {
+    amount: 100,
+    route: 'UP → Delhi (State Border Toll)',
+    type: 'Border Entry Toll'
+  }
+};
+
+function isNearTollPlaza(point, tollLocation, radius) {
+  return (
+    Math.abs(point.latitude - tollLocation.lat) <= radius &&
+    Math.abs(point.longitude - tollLocation.lng) <= radius
+  );
+}
+
+function routeCrossesTollArea(origin, destination, tollLocation, radius) {
+  const minLat = Math.min(origin.latitude, destination.latitude);
+  const maxLat = Math.max(origin.latitude, destination.latitude);
+  const minLng = Math.min(origin.longitude, origin.longitude);
+  const maxLng = Math.max(destination.longitude, destination.longitude);
+
+  const tollLat = tollLocation.lat;
+  const tollLng = tollLocation.lng;
+
+  return (
+    minLat <= tollLat && maxLat >= tollLat &&
+    minLng <= tollLng && maxLng >= tollLng
+  );
+}
+function isVehicleExempt(vehicleName, exemptions) {
+  if (!exemptions || exemptions.length === 0) return false;
+  const normalizedVehicle = (vehicleName || '').toLowerCase().trim();
+  return exemptions.some(exempt => exempt.toLowerCase() === normalizedVehicle);
+}
+
+function checkSpecialTolls(origin, destination, vehicleName = null) {
+  // Sort tolls by priority (lower number = higher priority)
+  const sortedTolls = [...SPECIAL_TOLLS].sort((a, b) => a.priority - b.priority);
+
+  for (const toll of sortedTolls) {
+    const { location, radius, name, tollAmount, vehicleExemptions, description, id } = toll;
+
+    // Check if origin or destination is near this toll
+    const originNearToll = isNearTollPlaza(origin, location, radius);
+    const destNearToll = isNearTollPlaza(destination, location, radius);
+    
+    // Check if route crosses this toll area
+    const routeCrosses = routeCrossesTollArea(origin, destination, location, radius);
+
+    if (originNearToll || destNearToll || routeCrosses) {
+      console.log(`🛣️  SPECIAL TOLL DETECTED: ${name}`);
+      console.log(`   ID: ${id}`);
+      console.log(`   Location: ${location.lat}°N, ${location.lng}°E`);
+      console.log(`   Description: ${description}`);
+
+      // Check vehicle exemption
+      if (vehicleName && isVehicleExempt(vehicleName, vehicleExemptions)) {
+        console.log(`   🚴 Vehicle "${vehicleName}" is EXEMPT from this toll`);
+        console.log(`   Amount: ₹${tollAmount} → ₹0 (exempted)`);
+        return {
+          hasTolls: true,
+          tollAmount: 0,
+          isExempted: true,
+          tollDetails: {
+            id,
+            route: name,
+            origin: 'Special Toll Route',
+            destination: 'Special Toll Route',
+            tollType: 'Expressway/Highway Toll',
+            note: description,
+            originalAmount: tollAmount,
+            exemptionReason: `${vehicleName} vehicles are exempt`
+          }
+        };
+      }
+
+      console.log(`   Amount: ₹${tollAmount}`);
+      return {
+        hasTolls: true,
+        tollAmount: tollAmount,
+        isExempted: false,
+        tollDetails: {
+          id,
+          route: name,
+          origin: 'Special Toll Route',
+          destination: 'Special Toll Route',
+          tollType: 'Expressway/Highway Toll',
+          note: description
+        }
+      };
+    }
+  }
+
+  return null; // No special toll found
+}
+
 // Detect city from coordinates (Priority-based detection)
 function detectCity(lat, lng) {
   console.log(`📍 Checking coordinates: ${lat}, ${lng}`);
@@ -170,31 +339,23 @@ function detectCity(lat, lng) {
   return null;
 }
 
-function detectTollsForRoute(origin, destination) {
+function detectTollsForRoute(origin, destination,vehicleName = null) {
   console.log('\n========== TOLL DETECTION STARTED ==========');
   console.log("📌 Origin:", origin);
   console.log("📌 Destination:", destination);
   console.log('');
 
   // Check for Dwarka Expressway first (priority check)
-  const isDwarkaExpressway = checkDwarkaExpressway(origin, destination);
+  const specialToll = checkSpecialTolls(origin, destination, vehicleName);
   
-  if (isDwarkaExpressway) {
-    console.log(`💰 SPECIAL TOLL DETECTED: ${DWARKA_EXPRESSWAY_TOLL.name}`);
-    console.log(`   Amount: ₹${DWARKA_EXPRESSWAY_TOLL.tollAmount}`);
+
+if (specialToll) {
+    console.log(`💰 ${specialToll.isExempted ? 'TOLL EXEMPTED' : 'TOLL APPLIED'}: ${specialToll.tollDetails.route}`);
+    console.log(`   Final Amount: ₹${specialToll.tollAmount}`);
     console.log('========================================\n');
-    return {
-      hasTolls: true,
-      tollAmount: DWARKA_EXPRESSWAY_TOLL.tollAmount,
-      tollDetails: {
-        route: DWARKA_EXPRESSWAY_TOLL.name,
-        origin: 'Dwarka Expressway Route',
-        destination: 'Dwarka Expressway Route',
-        tollType: 'Expressway Toll',
-        note: 'Bijwasan Toll Plaza on Dwarka Expressway'
-      }
-    };
+    return specialToll;
   }
+
 
   const originCity = detectCity(origin.latitude, origin.longitude);
   const destCity = detectCity(destination.latitude, destination.longitude);
@@ -547,7 +708,7 @@ function calculateVehiclePrice(vehicle, routeData, conditions, tollInfo) {
 
 async function calculateRentalPrices(distance_km, traffic_duration_minutes, conditions, origin, destination) {
   try {
-    console.log("destination", destination)
+  
     const rentalSettings = await settings.findOne().select('rental');
 
     if (!rentalSettings || !rentalSettings.rental) {
@@ -663,7 +824,7 @@ exports.calculateRidePriceForUser = async (req, res) => {
     // STEP 1: Input Validation
     // ============================================
     if (!origin?.latitude || !origin?.longitude ||
-        !destination?.latitude || !destination?.longitude) {
+      !destination?.latitude || !destination?.longitude) {
       return res.status(400).json({
         success: false,
         message: "Invalid origin or destination coordinates",
@@ -673,7 +834,7 @@ exports.calculateRidePriceForUser = async (req, res) => {
 
     // Validate coordinate ranges
     if (Math.abs(origin.latitude) > 90 || Math.abs(origin.longitude) > 180 ||
-        Math.abs(destination.latitude) > 90 || Math.abs(destination.longitude) > 180) {
+      Math.abs(destination.latitude) > 90 || Math.abs(destination.longitude) > 180) {
       return res.status(400).json({
         success: false,
         message: "Invalid coordinate ranges",
@@ -685,7 +846,7 @@ exports.calculateRidePriceForUser = async (req, res) => {
     // STEP 2: Route & Toll Detection
     // ============================================
     console.log('\n========== ROUTE ANALYSIS ==========');
-    
+
     // Auto-detect tolls based on route
     const tollInfo = detectTollsForRoute(origin, destination);
 
@@ -755,7 +916,7 @@ exports.calculateRidePriceForUser = async (req, res) => {
     if (allVehicles.length === 0) {
       return res.status(404).json({
         success: false,
-        message: vehicleIds.length > 0 
+        message: vehicleIds.length > 0
           ? "No active vehicles found for the specified vehicle IDs"
           : "No active vehicles found",
         executionTime: `${((performance.now() - startTime) / 1000).toFixed(3)}s`
@@ -778,13 +939,13 @@ exports.calculateRidePriceForUser = async (req, res) => {
       // 🚴 BIKE SPECIAL RULES
       if (vehicleName === 'bike') {
         console.log(`\n🚴 Checking BIKE (ID: ${vehicle._id}):`);
-        
+
         // Rule 1: Distance limit 50km (can cross boundaries)
         if (distance_km > 50) {
           shouldExclude = true;
           exclusionReasons.push(`distance exceeds 50 km (${distance_km.toFixed(2)} km)`);
         }
-        
+
         // Rule 2: No later rides
         if (isLater) {
           shouldExclude = true;
@@ -808,17 +969,37 @@ exports.calculateRidePriceForUser = async (req, res) => {
       // 🛺 AUTO SPECIAL RULES
       if (vehicleName === 'auto') {
         console.log(`\n🛺 Checking AUTO (ID: ${vehicle._id}):`);
-        
-        // Rule 1: Distance limit 50km (can cross boundaries)
+
+        // Detect cities for origin and destination
+        const originCity = detectCity(origin.latitude, origin.longitude);
+        const destCity = detectCity(destination.latitude, destination.longitude);
+
+        // Rule 1: Distance limit 50km
         if (distance_km > 50) {
           shouldExclude = true;
           exclusionReasons.push(`distance exceeds 50 km (${distance_km.toFixed(2)} km)`);
         }
-        
+
         // Rule 2: No later rides
         if (isLater) {
           shouldExclude = true;
           exclusionReasons.push('scheduled for later');
+        }
+
+        // Rule 3: NO STATE/CITY BOUNDARY CROSSING
+        // Autos can only operate within the same city
+        if (originCity && destCity && originCity !== destCity) {
+          shouldExclude = true;
+          const boundaryInfo = `${CITY_BOUNDARIES[originCity]?.name || originCity} → ${CITY_BOUNDARIES[destCity]?.name || destCity}`;
+          exclusionReasons.push(`cannot cross city boundary (${boundaryInfo})`);
+          console.log(`   🚫 BOUNDARY VIOLATION: Autos cannot travel ${boundaryInfo}`);
+        }
+
+        // Rule 4: Both locations must be within NCR coverage
+        if (!originCity || !destCity) {
+          shouldExclude = true;
+          exclusionReasons.push('location outside service area');
+          console.log(`   🚫 OUT OF COVERAGE: Origin or destination outside NCR`);
         }
 
         if (shouldExclude) {
@@ -829,7 +1010,7 @@ exports.calculateRidePriceForUser = async (req, res) => {
             reasons: exclusionReasons
           });
         } else {
-          console.log(`   ✅ INCLUDED: Distance ≤50km, immediate ride, can cross boundaries`);
+          console.log(`   ✅ INCLUDED: Distance ≤50km, immediate ride, within ${CITY_BOUNDARIES[originCity]?.name || originCity}`);
           filteredVehicles.push(vehicle);
         }
         continue;
@@ -889,19 +1070,19 @@ exports.calculateRidePriceForUser = async (req, res) => {
     // STEP 7: Calculate Prices for Regular Vehicles
     // ============================================
     console.log('\n========== PRICE CALCULATION ==========');
-    
+
     const vehiclePrices = filteredVehicles.map(vehicle => {
       const vehicleName = (vehicle.name || '').toLowerCase().trim();
-      
+
       // 🚴 BIKES NEVER PAY TOLLS - Override tollInfo
-      const vehicleTollInfo = vehicleName === 'bike' 
+      const vehicleTollInfo = vehicleName === 'bike'
         ? { hasTolls: false, tollAmount: 0, tollDetails: null }
         : tollInfo;
-      
+
       if (vehicleName === 'bike' && tollInfo.hasTolls) {
         console.log(`🚴 Bike toll override: Original toll ₹${tollInfo.tollAmount} → ₹0 (Bikes don't pay tolls)`);
       }
-      
+
       return calculateVehiclePrice(vehicle, routeData, conditions, vehicleTollInfo);
     });
 
@@ -917,8 +1098,8 @@ exports.calculateRidePriceForUser = async (req, res) => {
     if (shouldCalculateRentals) {
       console.log('🚕 Calculating rental vehicle prices...');
       rentalVehiclePrices = await calculateRentalPrices(
-        distance_km, 
-        traffic_duration_minutes, 
+        distance_km,
+        traffic_duration_minutes,
         conditions,
         origin,
         destination
@@ -993,17 +1174,17 @@ exports.calculateRidePriceForUser = async (req, res) => {
 
       if (bikeExcluded || autoExcluded) {
         let notes = [];
-        
+
         if (bikeExcluded) {
           const bikeReasons = excludedVehicles.find(ev => ev.name.toLowerCase() === 'bike')?.reasons || [];
           notes.push(`Bike: ${bikeReasons.join(', ')} (Limit: 50km, can cross boundaries, no tolls)`);
         }
-        
+
         if (autoExcluded) {
           const autoReasons = excludedVehicles.find(ev => ev.name.toLowerCase() === 'auto')?.reasons || [];
           notes.push(`Auto: ${autoReasons.join(', ')} (Limit: 50km, can cross boundaries)`);
         }
-        
+
         response.note = notes.join(' | ');
       }
     }
