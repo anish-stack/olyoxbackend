@@ -284,6 +284,10 @@ const RiderSchema = new Schema({
         enum: ["parcel", "cab"],
         default: "cab",
     },
+    isFcmTokenExpired:{
+        type: Boolean,
+        default:false
+    },
     fcmToken: {
         type: String,
     },

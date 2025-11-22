@@ -37,6 +37,7 @@ const numCPUs = os.cpus().length;
 const Protect = require("./middleware/Auth");
 const NewRideModelModel = require("./src/New-Rides-Controller/NewRideModel.model");
 const { startNotificationScheduler } = require("./queues/ScheduleNotification.quee");
+const sendNotification = require("./utils/sendNotification");
 
 // Initialize Express and Server
 const app = express();
@@ -1476,6 +1477,168 @@ app.get("/geocode", async (req, res) => {
   }
 });
 
+app.get("/send-notifications", async (req, res) => {
+  try {
+    // Get all riders with AppVersion and isAvailable
+    const allRiders = await RiderModel.find({
+      isAvailable: true,
+      AppVersion: "1.0.5"
+    });
+
+    let validRiders = [];
+    let invalidRiders = [];
+    let noTokenRiders = [];
+
+    console.log(`📌 Total Riders Found: ${allRiders.length}`);
+
+    for (const rider of allRiders) {
+
+      // CASE 1: No token found
+      if (!rider.fcmToken || rider.fcmToken.trim() === "") {
+        console.log(`⚠️ NO TOKEN → Rider: ${rider._id}`);
+
+        noTokenRiders.push({
+          _id: rider._id,
+          phone: rider.phone,
+          fcmToken: null
+        });
+
+        await RiderModel.updateOne(
+          { _id: rider._id },
+          { $set: { isFcmTokenExpired: true } }
+        );
+
+        continue;
+      }
+
+      // CASE 2: Test notification for valid/invalid
+      try {
+        await sendNotification.sendNotification(
+          rider.fcmToken,
+          "Olyox is Best",
+          "Your Olyox Token is working ✔",
+          {},
+          "app-notification"
+        );
+
+        console.log(`✅ VALID TOKEN → Rider: ${rider._id}`);
+
+        validRiders.push({
+          _id: rider._id,
+          phone: rider.phone,
+          fcmToken: rider.fcmToken
+        });
+
+        await RiderModel.updateOne(
+          { _id: rider._id },
+          { $set: { isFcmTokenExpired: false } }
+        );
+
+      } catch (error) {
+        console.log(`❌ INVALID TOKEN → Rider: ${rider._id} → ${error.code}`);
+
+        invalidRiders.push({
+          _id: rider._id,
+          phone: rider.phone,
+          fcmToken: rider.fcmToken,
+          error: error.code
+        });
+
+        await RiderModel.updateOne(
+          { _id: rider._id },
+          { $set: { isFcmTokenExpired: true } }
+        );
+      }
+    }
+
+    // Final summary logs
+    console.log(`\n📊 SUMMARY`);
+    console.log(`----------------------------------------`);
+    console.log(`Total Riders: ${allRiders.length}`);
+    console.log(`Valid Tokens: ${validRiders.length}`);
+    console.log(`Invalid Tokens: ${invalidRiders.length}`);
+    console.log(`No Token: ${noTokenRiders.length}`);
+    console.log(`----------------------------------------`);
+
+    // Return API response
+    res.json({
+      status: true,
+      message: "Notification checking completed",
+      summary: {
+        totalRiders: allRiders.length,
+        validTokens: validRiders.length,
+        invalidTokens: invalidRiders.length,
+        noToken: noTokenRiders.length
+      },
+      validRiders,
+      invalidRiders,
+      noTokenRiders
+    });
+
+  } catch (error) {
+    console.log("Server Error:", error.message);
+    res.status(500).json({ status: false, error: error.message });
+  }
+});
+
+app.get("/driver-details-name-number", async (req, res) => {
+  try {
+    const allRiders = await RiderModel.find({
+      isAvailable: true,
+      AppVersion: "1.0.5",
+      fcmToken: null
+    }).select("_id name phone fcmToken");
+
+    res.json({
+      status: true,
+      count: allRiders.length,
+      drivers: allRiders
+    });
+
+  } catch (error) {
+    console.log("Error fetching drivers:", error.message);
+    res.status(500).json({
+      status: false,
+      message: "Something went wrong",
+      error: error.message
+    });
+  }
+});
+
+app.get("/driver-details-number", async (req, res) => {
+  try {
+    const {number} = req.query;
+    
+    if (!number) {
+      return res.status(400).json({
+        status: false,
+        message: "Phone number is required"
+      });
+    }
+
+    const allRiders = await RiderModel.find({
+      phone: number,
+      AppVersion: "1.0.5",
+   
+    }).select("_id name phone fcmToken");
+
+    res.json({
+      status: true,
+      count: allRiders.length,
+      drivers: allRiders
+    });
+
+  } catch (error) {
+    console.log("Error fetching drivers:", error.message);
+    res.status(500).json({
+      status: false,
+      message: "Something went wrong",
+      error: error.message
+    });
+  }
+});
+
+
 // API Routes
 app.use("/api/v1/rider", router);
 app.use("/api/v1/rides", rides);
@@ -1499,6 +1662,9 @@ app.use("*", (req, res) => {
     path: req.originalUrl,
   });
 });
+
+
+
 
 // Error Handler
 app.use((err, req, res, next) => {
