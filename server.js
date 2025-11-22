@@ -1605,10 +1605,10 @@ app.get("/driver-details-name-number", async (req, res) => {
   }
 });
 
-app.get("/driver-details-number", async (req, res) => {
+app.get("/driver-check-and-notify", async (req, res) => {
   try {
-    const {number} = req.query;
-    
+    const { number } = req.query;
+
     if (!number) {
       return res.status(400).json({
         status: false,
@@ -1616,20 +1616,47 @@ app.get("/driver-details-number", async (req, res) => {
       });
     }
 
-    const allRiders = await RiderModel.find({
+    // Find rider with token + version
+    const rider = await RiderModel.findOne({
       phone: number,
-      AppVersion: "1.0.5",
-   
+      AppVersion: "1.0.5"
     }).select("_id name phone fcmToken");
+
+    if (!rider) {
+      return res.status(404).json({
+        status: false,
+        message: "Rider not found"
+      });
+    }
+
+    // Check token availability
+    if (!rider.fcmToken || rider.fcmToken.trim() === "") {
+      return res.json({
+        status: true,
+        rider,
+        notification: "Token missing — please update token",
+        tokenAvailable: false
+      });
+    }
+
+    // Send notification automatically
+    await sendNotification.sendNotification(
+      rider.fcmToken,
+      "Olyox – Token Working",
+      "Your notification token is active! 🚀",
+      {},
+      "app-notification"
+    );
 
     res.json({
       status: true,
-      count: allRiders.length,
-      drivers: allRiders
+      rider,
+      notification: "Notification sent successfully",
+      tokenAvailable: true
     });
 
   } catch (error) {
-    console.log("Error fetching drivers:", error.message);
+    console.log("Error:", error.message);
     res.status(500).json({
       status: false,
       message: "Something went wrong",
@@ -1637,7 +1664,6 @@ app.get("/driver-details-number", async (req, res) => {
     });
   }
 });
-
 
 // API Routes
 app.use("/api/v1/rider", router);
