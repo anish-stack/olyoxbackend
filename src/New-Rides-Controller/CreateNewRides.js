@@ -652,6 +652,7 @@ const clearRideFromRedis = async (redisClient, rideId) => {
     return false;
   }
 };
+//add this 
 
 const cancelRide = async (
   redisClient,
@@ -660,7 +661,31 @@ const cancelRide = async (
   cancelledBy = "system"
 ) => {
   try {
-    // First check if ride can be cancelled
+    // Fetch ride first to validate later pickup time
+    const ride = await RideBooking.findById(rideId);
+
+    if (!ride) {
+      return { success: false, reason: "Ride not found" };
+    }
+
+    // ⛔ RULE: Do NOT cancel if ride isLater and pickup time is in the future
+    if (ride.isLater && ride.IntercityPickupTime) {
+      const pickupTime = new Date(ride.IntercityPickupTime);
+      const now = new Date();
+
+      if (now < pickupTime) {
+        console.info(
+          `Skipping cancellation for ride ${rideId}: Future pickup at ${pickupTime}`
+        );
+
+        return {
+          success: false,
+          reason: "Ride pickup time is in future, cannot cancel now",
+        };
+      }
+    }
+
+    // Continue normal cancellation process
     const { canCancel, reason: checkReason } = await canCancelRide(rideId);
 
     if (!canCancel) {
@@ -721,6 +746,7 @@ const cancelRide = async (
     return { success: false, reason: error.message };
   }
 };
+
 
 const scheduleRideCancellationCheck = async (redisClient, rideId) => {
   const CANCELLATION_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
