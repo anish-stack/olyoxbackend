@@ -2109,17 +2109,55 @@ exports.FetchAllBookedRides = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const { status, search, isFake } = req.query;   // <-- NEW
+    const { status, search, isFake, createdAtFilter } = req.query;   // <-- added createdAtFilter
 
     // ---------- 1. Base match ----------
     const match = {};
 
     if (status) match.ride_status = status;
 
-    // NEW: isFake filter
-    if (isFake !== undefined) {
-      const bool = isFake === 'true';          // accept true / false strings
+    // isFake filter
+    if (typeof isFake !== 'undefined' && isFake !== '') {
+      const bool = isFake === 'true';          // accept 'true' / 'false'
       match.isFake = bool;
+    }
+
+    // ✅ Created At Date Filter (using created_at field)
+    if (createdAtFilter && createdAtFilter !== 'all') {
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let startDate = null;
+      let endDate = null;
+
+      if (createdAtFilter === 'today') {
+        startDate = todayStart;
+        endDate = new Date(todayStart);
+        endDate.setDate(endDate.getDate() + 1);
+      } else if (createdAtFilter === 'yesterday') {
+        endDate = todayStart;
+        startDate = new Date(todayStart);
+        startDate.setDate(startDate.getDate() - 1);
+      } else if (createdAtFilter === 'thisWeek') {
+        const day = todayStart.getDay() || 7; // Monday as first day (1–7)
+        startDate = new Date(todayStart);
+        startDate.setDate(startDate.getDate() - (day - 1));
+        endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + 7);
+      } else if (createdAtFilter === 'thisMonth') {
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      } else if (createdAtFilter === 'lastMonth') {
+        const year = now.getFullYear();
+        const month = now.getMonth(); // 0–11
+        const lastMonth = month === 0 ? 11 : month - 1;
+        const lastMonthYear = month === 0 ? year - 1 : year;
+        startDate = new Date(lastMonthYear, lastMonth, 1);
+        endDate = new Date(year, month, 1);
+      }
+
+      if (startDate && endDate) {
+        match.created_at = { $gte: startDate, $lt: endDate };
+      }
     }
 
     // ---------- 2. Search pipeline ----------
@@ -2250,6 +2288,7 @@ exports.FetchAllBookedRides = async (req, res) => {
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
+
 
 exports.BookingDetailsAdmin = async (req, res) => {
   try {

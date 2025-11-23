@@ -761,6 +761,7 @@ exports.getAllRiders = async (req, res) => {
     const document = req.query.document;
     const duty = req.query.duty;
     const recharge = req.query.recharge; // 'yes', 'no', 'all'
+    const createdAtFilter = req.query.createdAtFilter; // ✅ 'today', 'yesterday', etc.
 
     let filter = {};
 
@@ -785,47 +786,88 @@ exports.getAllRiders = async (req, res) => {
     }
 
     // Category filter
-    if (category && category !== 'all') {
-      if (category === 'non-parcel') {
-        filter.category = { $ne: 'parcel' };
+    if (category && category !== "all") {
+      if (category === "non-parcel") {
+        filter.category = { $ne: "parcel" };
       } else {
         filter.category = category;
       }
     }
 
     // Document status filter
-    if (document && document !== 'all') {
-      if (document === 'verified') {
+    if (document && document !== "all") {
+      if (document === "verified") {
         filter.DocumentVerify = true;
-      } else if (document === 'under-review') {
+      } else if (document === "under-review") {
         filter.isDocumentUpload = true;
         filter.DocumentVerify = false;
-      } else if (document === 'not-verified') {
+      } else if (document === "not-verified") {
         filter.DocumentVerify = false;
       }
     }
 
     // === RECHARGE FILTER (CORRECTED) ===
-    if (recharge && recharge !== 'all') {
-      if (recharge === 'yes') {
+    if (recharge && recharge !== "all") {
+      if (recharge === "yes") {
         // Only riders with an ACTIVE recharge
-        filter['RechargeData.approveRecharge'] = true;
-      } else if (recharge === 'no') {
+        filter["RechargeData.approveRecharge"] = true;
+      } else if (recharge === "no") {
         // Riders who:
         // 1. Have RechargeData but approveRecharge is false
         // 2. Have RechargeData but approveRecharge field is missing
         // 3. Have no RechargeData at all
         filter.$or = [
-          { 'RechargeData.approveRecharge': false },
-          { 'RechargeData.approveRecharge': { $exists: false }, RechargeData: { $exists: true } },
-          { RechargeData: { $exists: false } }
+          { "RechargeData.approveRecharge": false },
+          {
+            "RechargeData.approveRecharge": { $exists: false },
+            RechargeData: { $exists: true },
+          },
+          { RechargeData: { $exists: false } },
         ];
       }
     }
 
     // Duty status filter
-    if (duty && duty !== 'all') {
-      filter.isAvailable = duty === 'on-duty';
+    if (duty && duty !== "all") {
+      filter.isAvailable = duty === "on-duty";
+    }
+
+    // ✅ Created At filter
+    if (createdAtFilter && createdAtFilter !== "all") {
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let startDate = null;
+      let endDate = null;
+
+      if (createdAtFilter === "today") {
+        startDate = todayStart;
+        endDate = new Date(todayStart);
+        endDate.setDate(endDate.getDate() + 1);
+      } else if (createdAtFilter === "yesterday") {
+        endDate = todayStart;
+        startDate = new Date(todayStart);
+        startDate.setDate(startDate.getDate() - 1);
+      } else if (createdAtFilter === "thisWeek") {
+        const day = todayStart.getDay() || 7; // 1–7, Monday as 1
+        startDate = new Date(todayStart);
+        startDate.setDate(startDate.getDate() - (day - 1));
+        endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + 7);
+      } else if (createdAtFilter === "thisMonth") {
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      } else if (createdAtFilter === "lastMonth") {
+        const year = now.getFullYear();
+        const month = now.getMonth(); // 0–11
+        const lastMonth = month === 0 ? 11 : month - 1;
+        const lastMonthYear = month === 0 ? year - 1 : year;
+        startDate = new Date(lastMonthYear, lastMonth, 1);
+        endDate = new Date(year, month, 1);
+      }
+
+      if (startDate && endDate) {
+        filter.createdAt = { $gte: startDate, $lt: endDate };
+      }
     }
 
     const [riders, total] = await Promise.all([
@@ -833,7 +875,9 @@ exports.getAllRiders = async (req, res) => {
         .skip(skip)
         .limit(limit)
         .sort({ createdAt: -1 })
-        .select("-preferences -updateLogs -activityLog -howManyTimesHitResend -her_referenced -rides")
+        .select(
+          "-preferences -updateLogs -activityLog -howManyTimesHitResend -her_referenced -rides"
+        )
         .lean(),
       Rider.countDocuments(filter),
     ]);
@@ -850,6 +894,7 @@ exports.getAllRiders = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 exports.getAllRidersFcmToken = async (req, res) => {
   try {
