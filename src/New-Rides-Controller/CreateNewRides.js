@@ -932,11 +932,11 @@ const fetchEligibleDrivers = async (rideId, rideData, searchAreaLimit) => {
     }
 
     const [longitude, latitude] = pickup_location.coordinates;
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    const fiftyMinutesAgo = new Date(Date.now() - 50 * 60 * 1000);
     const currentDate = new Date();
 
     console.log("Pickup coords:", { latitude, longitude });
-    console.log("Time filter:", { lastUpdatedAfter: tenMinutesAgo });
+    console.log("Time filter:", { lastUpdatedAfter: fiftyMinutesAgo });
 
     // ——————— REJECTED DRIVERS ———————
     const rejectedDriverIds = rejected_by_drivers
@@ -954,9 +954,9 @@ const fetchEligibleDrivers = async (rideId, rideData, searchAreaLimit) => {
       NOTIFICATION_CONFIG.INITIAL_RADIUS
     );
     const searchLimit = searchAreaLimit * 1000;
-    let searchRadius = searchLimit || NOTIFICATION_CONFIG.INITIAL_RADIUS;
+    let searchRadius = searchLimit || 10000; // Fixed 10km radius
     console.log("searchRadius", searchRadius);
-    const MAX_RETRIES = 4;
+    const MAX_RETRIES = 1; // Single search attempt
     let attempt = 0;
     let allDrivers = [];
 
@@ -1069,7 +1069,7 @@ const fetchEligibleDrivers = async (rideId, rideData, searchAreaLimit) => {
             on_ride_id: null,
             "RechargeData.expireData": { $gte: currentDate },
             fcmToken: { $exists: true, $ne: null },
-            lastUpdated: { $gte: tenMinutesAgo },
+            lastUpdated: { $gte: fiftyMinutesAgo },
           },
         },
         {
@@ -1114,7 +1114,7 @@ const fetchEligibleDrivers = async (rideId, rideData, searchAreaLimit) => {
           driver.preferences
         );
 
-        const isRecent = new Date(driver.lastUpdated) >= tenMinutesAgo;
+        const isRecent = new Date(driver.lastUpdated) >= fiftyMinutesAgo;
         const isFree = !driver.on_ride_id && driver.isAvailable;
 
         // 🧩 PARCEL DRIVER LOGIC
@@ -1140,7 +1140,7 @@ const fetchEligibleDrivers = async (rideId, rideData, searchAreaLimit) => {
 
         if (!isEligible) {
           if (!match) console.log(`REJECTED ${driver._id} (${driver.name}) — Vehicle mismatch`);
-          else if (!isRecent) console.log(`REJECTED ${driver._id} (${driver.name}) — Last updated >10 mins`);
+          else if (!isRecent) console.log(`REJECTED ${driver._id} (${driver.name}) — Last updated >50 mins`);
           else if (!isFree) console.log(`REJECTED ${driver._id} (${driver.name}) — Busy or unavailable`);
           else if (!parcelAllowed) console.log(`REJECTED ${driver._id} (${driver.name}) — Parcel rule`);
         } else {
@@ -1157,17 +1157,6 @@ const fetchEligibleDrivers = async (rideId, rideData, searchAreaLimit) => {
         allDrivers = eligibleDrivers;
         console.log(`Found ${allDrivers.length} eligible drivers — stopping`);
         break;
-      }
-
-      if (attempt < MAX_RETRIES) {
-        searchRadius += 1000;
-        const delay = attempt * 10 * 1000;
-        console.log(
-          `No drivers → retry in ${delay / 1000}s with radius ${(
-            searchRadius / 1000
-          ).toFixed(1)} km`
-        );
-        await new Promise((r) => setTimeout(r, delay));
       }
     }
 
@@ -4538,21 +4527,21 @@ exports.FindRiderNearByUser = async (req, res) => {
       });
     }
 
-    const tenMinutesAgo = new Date(Date.now() - 20 * 60 * 1000); // 10 minutes ago
+    const fiftyMinutesAgo = new Date(Date.now() - 50 * 60 * 1000); // 50 minutes ago
 
     const riders = await RiderModel.aggregate([
       {
         $geoNear: {
           near: { type: "Point", coordinates: [lng, lat] },
           distanceField: "distance",
-          maxDistance: 1500,
+          maxDistance: 10000, // 10km in meters
           spherical: true,
         },
       },
       {
         $match: {
           isAvailable: true,
-          lastUpdated: { $gte: tenMinutesAgo },
+          lastUpdated: { $gte: fiftyMinutesAgo },
           $or: [{ on_ride_id: null }, { on_ride_id: "" }],
         },
       },
@@ -4579,7 +4568,7 @@ exports.FindRiderNearByUser = async (req, res) => {
       { $sort: { distance: 1 } },
     ]);
 
-    console.info(`Found ${riders.length} riders within 3km.`);
+    console.info(`Found ${riders.length} riders within 10km.`);
 
     const currentDate = new Date();
 
@@ -4647,7 +4636,7 @@ exports.FindRiderNearByUser = async (req, res) => {
     });
 
     console.info(
-      `Found ${validRiders.length} valid riders within 3km after filtering.`
+      `Found ${validRiders.length} valid riders within 10km after filtering.`
     );
 
     return res.status(200).json({

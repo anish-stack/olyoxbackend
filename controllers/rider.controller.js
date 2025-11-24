@@ -167,16 +167,16 @@ exports.registerRider = async (req, res) => {
     // ---------------------------
     // 5️⃣ Check Duplicate Vehicle
     //----------------------------
-    const existingVehicle = await Rider.findOne({
-      "rideVehicleInfo.VehicleNumber": VehicleNumber,
-    });
+    // const existingVehicle = await Rider.findOne({
+    //   "rideVehicleInfo.VehicleNumber": VehicleNumber,
+    // });
 
-    if (existingVehicle) {
-      return res.status(409).json({
-        success: false,
-        message: `Vehicle Number ${VehicleNumber} is already registered with another rider.`,
-      });
-    }
+    // if (existingVehicle) {
+    //   return res.status(409).json({
+    //     success: false,
+    //     message: `Vehicle Number ${VehicleNumber} is already registered with another rider.`,
+    //   });
+    // }
 
     // ---------------------------
     // 6️⃣ Handle Position (Both New & Existing)
