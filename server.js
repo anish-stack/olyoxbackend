@@ -1112,22 +1112,25 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
       platform,
     });
 
-    console.log(`📍 [${riderId.slice(-6)}] Cached location (${latitude.toFixed(6)}, ${longitude.toFixed(6)}) | Speed: ${speed?.toFixed(1) || 'N/A'} | ${shouldUpdateDB ? '💾 DB Update' : '⏭️ Skipped'}`);
+    // console.log(`📍 [${riderId.slice(-6)}] Cached location (${latitude.toFixed(6)}, ${longitude.toFixed(6)}) | Speed: ${speed?.toFixed(1) || 'N/A'} | ${shouldUpdateDB ? '💾 DB Update' : '⏭️ Skipped'}`);
 
-    // Update database only if throttle interval has passed
-    if (shouldUpdateDB) {
-      // Non-blocking DB update
-      RiderModel.findByIdAndUpdate(
-        riderId,
-        {
-          location: newLocation,
-          lastUpdated: now,
-        },
-        { new: false } // Don't return updated document to save processing
-      ).catch(err => {
-        console.error(`❌ DB Update failed for ${riderId}:`, err.message);
-      });
-    }
+   // Update database only if throttle interval has passed
+if (shouldUpdateDB) {
+  RiderModel.findByIdAndUpdate(
+    riderId,
+    {
+      location: newLocation,
+      lastUpdated: now,
+    },
+    { new: false } // Don't return updated document to save processing
+  )
+    .then(() => {
+      console.log(`📍 [${riderId.slice(-6)}] DB update initiated.`);
+    })
+    .catch(err => {
+      console.error(`❌ DB Update failed for ${riderId}:`, err.message);
+    });
+}
 
     // Quick response to client
     return res.status(200).json({
