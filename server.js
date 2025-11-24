@@ -1058,6 +1058,23 @@ setInterval(flushLocationsToDB, DB_FLUSH_INTERVAL);
 // In-memory cache to throttle database writes
 const locationUpdateCache = new Map();
 const UPDATE_INTERVAL = 5000; // Update DB every 5 seconds per rider
+const MIN_DISTANCE_METERS = 100; // Minimum distance to trigger update
+
+// Helper function to calculate distance between two coordinates (Haversine formula)
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371e3; // Earth's radius in meters
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // Distance in meters
+};
 
 // Cleanup old cache entries every 10 minutes
 setInterval(() => {
@@ -1095,7 +1112,18 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
     const now = timestamp || Date.now();
     const cacheKey = riderId.toString();
     const cachedData = locationUpdateCache.get(cacheKey);
-    const shouldUpdateDB = !cachedData || (now - cachedData.lastUpdate) >= UPDATE_INTERVAL;
+    
+    // Calculate distance from last cached location
+    let distanceMoved = 0;
+    if (cachedData && cachedData.location) {
+      const [oldLon, oldLat] = cachedData.location.coordinates;
+      distanceMoved = calculateDistance(oldLat, oldLon, latitude, longitude);
+    }
+
+    // Determine if DB update should happen
+    const timePassed = cachedData ? (now - cachedData.lastUpdate) >= UPDATE_INTERVAL : true;
+    const distanceThreshold = distanceMoved >= MIN_DISTANCE_METERS;
+    const shouldUpdateDB = !cachedData || (timePassed && distanceThreshold);
 
     // Always respond quickly to the client
     const newLocation = {
@@ -1112,31 +1140,32 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
       platform,
     });
 
-    // console.log(`📍 [${riderId.slice(-6)}] Cached location (${latitude.toFixed(6)}, ${longitude.toFixed(6)}) | Speed: ${speed?.toFixed(1) || 'N/A'} | ${shouldUpdateDB ? '💾 DB Update' : '⏭️ Skipped'}`);
+    console.log(`📍 [${riderId.slice(-6)}] Distance: ${distanceMoved.toFixed(1)}m | ${shouldUpdateDB ? '💾 DB Update' : `⏭️ Skipped (${distanceMoved < MIN_DISTANCE_METERS ? 'distance' : 'time'})`}`);
 
-   // Update database only if throttle interval has passed
-if (shouldUpdateDB) {
-  RiderModel.findByIdAndUpdate(
-    riderId,
-    {
-      location: newLocation,
-      lastUpdated: now,
-    },
-    { new: false } // Don't return updated document to save processing
-  )
-    .then(() => {
-      console.log(`📍 [${riderId.slice(-6)}] DB update initiated.`);
-    })
-    .catch(err => {
-      console.error(`❌ DB Update failed for ${riderId}:`, err.message);
-    });
-}
+    // Update database only if throttle interval has passed AND distance > 100m
+    if (shouldUpdateDB) {
+      RiderModel.findByIdAndUpdate(
+        riderId,
+        {
+          location: newLocation,
+          lastUpdated: now,
+        },
+        { new: false } // Don't return updated document to save processing
+      )
+        .then(() => {
+          console.log(`✅ [${riderId.slice(-6)}] DB updated (${distanceMoved.toFixed(1)}m moved)`);
+        })
+        .catch(err => {
+          console.error(`❌ DB Update failed for ${riderId}:`, err.message);
+        });
+    }
 
     // Quick response to client
     return res.status(200).json({
       success: true,
       message: "Location received",
       cached: !shouldUpdateDB,
+      distanceMoved: Math.round(distanceMoved),
       nextDbUpdate: shouldUpdateDB ? 0 : UPDATE_INTERVAL - (now - cachedData.lastUpdate),
     });
 
@@ -1182,8 +1211,7 @@ setInterval(async () => {
     }
   }
 }, 30000); // Run every 30 seconds
-// GET /admin/active-drivers-20min
-// GET /admin/active-drivers-20min
+
 app.get("/admin/active-drivers-20min", async (req, res) => {
   try {
     const apiStart = Date.now(); // ⏳ start time
