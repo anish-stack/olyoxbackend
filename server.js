@@ -1055,85 +1055,130 @@ const flushLocationsToDB = async () => {
 
 setInterval(flushLocationsToDB, DB_FLUSH_INTERVAL);
 
+// In-memory cache to throttle database writes
+const locationUpdateCache = new Map();
+const UPDATE_INTERVAL = 5000; // Update DB every 5 seconds per rider
+
+// Cleanup old cache entries every 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [riderId, data] of locationUpdateCache.entries()) {
+    if (now - data.lastUpdate > 600000) { // 10 minutes
+      locationUpdateCache.delete(riderId);
+    }
+  }
+}, 600000);
+
 app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
   try {
-    console.log("📩 Incoming Location Webhook");
-
     const riderId = req.user?.userId;
     if (!riderId) {
-      console.log("⛔ No Rider ID in token → Protect triggered");
-      return Protect(req, res);
+      console.log("⛔ No Rider ID in token");
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized - No rider ID",
+      });
     }
 
     const { latitude, longitude, accuracy, speed, timestamp, platform } = req.body;
 
-    console.log("🌍 Received Data:", {
-      riderId,
-      latitude,
-      longitude,
-      accuracy,
-      speed,
-      timestamp,
-      platform,
-    });
-
-    const now = timestamp || Date.now();
-
-    const activeRide = await RiderModel.findById(riderId);
-
-    if (!activeRide) {
-      console.log("❌ No active ride found for rider:", riderId);
+    // Validate coordinates
+    if (!latitude || !longitude || 
+        latitude < -90 || latitude > 90 || 
+        longitude < -180 || longitude > 180) {
       return res.status(400).json({
         success: false,
-        message: "No active ride found for this rider.",
+        message: "Invalid coordinates",
       });
     }
 
+    const now = timestamp || Date.now();
+    const cacheKey = riderId.toString();
+    const cachedData = locationUpdateCache.get(cacheKey);
+    const shouldUpdateDB = !cachedData || (now - cachedData.lastUpdate) >= UPDATE_INTERVAL;
+
+    // Always respond quickly to the client
     const newLocation = {
       type: "Point",
       coordinates: [longitude, latitude],
     };
 
-    console.log("📌 Updating Location For Rider:", riderId);
+    // Store in cache immediately
+    locationUpdateCache.set(cacheKey, {
+      location: newLocation,
+      lastUpdate: now,
+      accuracy,
+      speed,
+      platform,
+    });
 
-    const updatedRider = await RiderModel.findByIdAndUpdate(
-      riderId,
-      {
-        location: newLocation,
-        lastUpdated: now,
-      },
-      { new: true }
-    );
+    console.log(`📍 [${riderId.slice(-6)}] Cached location (${latitude.toFixed(6)}, ${longitude.toFixed(6)}) | Speed: ${speed?.toFixed(1) || 'N/A'} | ${shouldUpdateDB ? '💾 DB Update' : '⏭️ Skipped'}`);
 
-    if (!updatedRider) {
-      console.log("⚠️ Rider not found while updating:", riderId);
-      return res.status(404).json({
-        success: false,
-        message: "Rider not found.",
+    // Update database only if throttle interval has passed
+    if (shouldUpdateDB) {
+      // Non-blocking DB update
+      RiderModel.findByIdAndUpdate(
+        riderId,
+        {
+          location: newLocation,
+          lastUpdated: now,
+        },
+        { new: false } // Don't return updated document to save processing
+      ).catch(err => {
+        console.error(`❌ DB Update failed for ${riderId}:`, err.message);
       });
     }
 
-    console.log("✅ Location Updated Successfully:", {
-      riderId,
-      updatedLocation: updatedRider.location,
-      lastUpdated: updatedRider.lastUpdated,
-    });
-
+    // Quick response to client
     return res.status(200).json({
       success: true,
-      message: "Rider location updated successfully.",
-      data: updatedRider,
+      message: "Location received",
+      cached: !shouldUpdateDB,
+      nextDbUpdate: shouldUpdateDB ? 0 : UPDATE_INTERVAL - (now - cachedData.lastUpdate),
     });
 
   } catch (err) {
-    console.error("❌ Error updating rider location:", err);
+    console.error("❌ Error in location webhook:", err);
     return res.status(500).json({
       success: false,
-      message: "Internal server error while updating rider location",
+      message: "Internal server error",
     });
   }
 });
 
+// Optional: Periodic bulk update from cache to DB (backup mechanism)
+setInterval(async () => {
+  if (locationUpdateCache.size === 0) return;
+
+  console.log(`🔄 Bulk sync: ${locationUpdateCache.size} riders`);
+  
+  const bulkOps = [];
+  const now = Date.now();
+
+  for (const [riderId, data] of locationUpdateCache.entries()) {
+    // Only sync if not updated in last 2 seconds (avoid duplicate writes)
+    if (now - data.lastUpdate > 2000) {
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: riderId },
+          update: {
+            location: data.location,
+            lastUpdated: data.lastUpdate,
+          },
+        },
+      });
+    }
+  }
+
+  if (bulkOps.length > 0) {
+    try {
+      await RiderModel.bulkWrite(bulkOps, { ordered: false });
+      console.log(`✅ Bulk synced ${bulkOps.length} locations`);
+    } catch (err) {
+      console.error("❌ Bulk sync error:", err.message);
+    }
+  }
+}, 30000); // Run every 30 seconds
 // GET /admin/active-drivers-20min
 // GET /admin/active-drivers-20min
 app.get("/admin/active-drivers-20min", async (req, res) => {
