@@ -896,6 +896,76 @@ exports.getAllRiders = async (req, res) => {
 };
 
 
+exports.getAllRidersStatics = async (req, res) => {
+  const startTime = Date.now(); // start timer
+
+  try {
+    // Time for 30 minutes ago
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+
+    const statsPromise = Promise.all([
+      Rider.countDocuments(),                                     // Total drivers
+      Rider.countDocuments({ isAvailable: true }),                // Available drivers
+      Rider.countDocuments({ DocumentVerify: true }),             // Verified drivers
+
+      // Uploaded docs but not verified
+      Rider.countDocuments({
+        DocumentVerify: false,
+        documents: { $exists: true, $ne: [] }
+      }),
+
+      // No documents uploaded
+      Rider.countDocuments({
+        $or: [
+          { documents: { $exists: false } },
+          { documents: { $size: 0 } }
+        ]
+      }),
+
+      // Inactive drivers (last update older than 30 min)
+      Rider.countDocuments({
+        lastUpdated: { $lt: thirtyMinutesAgo }
+      }),
+
+      // Active drivers (last update within 30 min)
+      Rider.countDocuments({
+        lastUpdated: { $gte: thirtyMinutesAgo }
+      }),
+    ]);
+
+    const [
+      totalDrivers,
+      availableDrivers,
+      verifiedDrivers,
+      underReviewDrivers,
+      noDocumentsDrivers,
+      inactiveDrivers30Min,
+      activeDrivers30Min
+    ] = await statsPromise;
+
+    const endTime = Date.now();
+    const queryTimeMs = endTime - startTime;
+
+    res.status(200).json({
+      statistics: {
+        totalDrivers,
+        availableDrivers,
+        verifiedDrivers,
+        underReviewDrivers,
+        noDocumentsDrivers,
+        inactiveDrivers30Min,
+        activeDrivers30Min, // NEW
+      },
+      queryTimeMs,
+    });
+
+  } catch (error) {
+    console.error("Error fetching riders:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+
 exports.getAllRidersFcmToken = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
