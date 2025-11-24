@@ -1219,7 +1219,7 @@ app.get("/admin/active-drivers-20min", async (req, res) => {
     const { vehicleType } = req.query;
 
     // Time window: last 20 minutes
-    const TWENTY_MIN = 20 * 60 * 1000;
+    const TWENTY_MIN = 50 * 60 * 1000;
     const twentyMinAgo = Date.now() - TWENTY_MIN;
 
     // 🔍 Base filter — only CAB category riders
