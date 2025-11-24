@@ -1140,7 +1140,7 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
       platform,
     });
 
-    console.log(`📍 [${riderId.slice(-6)}] Distance: ${distanceMoved.toFixed(1)}m | ${shouldUpdateDB ? '💾 DB Update' : `⏭️ Skipped (${distanceMoved < MIN_DISTANCE_METERS ? 'distance' : 'time'})`}`);
+    // console.log(`📍 [${riderId.slice(-6)}] Distance: ${distanceMoved.toFixed(1)}m | ${shouldUpdateDB ? '💾 DB Update' : `⏭️ Skipped (${distanceMoved < MIN_DISTANCE_METERS ? 'distance' : 'time'})`}`);
 
     // Update database only if throttle interval has passed AND distance > 100m
     if (shouldUpdateDB) {
@@ -1153,7 +1153,7 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
         { new: false } // Don't return updated document to save processing
       )
         .then(() => {
-          console.log(`✅ [${riderId.slice(-6)}] DB updated (${distanceMoved.toFixed(1)}m moved)`);
+          // console.log(`✅ [${riderId.slice(-6)}] DB updated (${distanceMoved.toFixed(1)}m moved)`);
         })
         .catch(err => {
           console.error(`❌ DB Update failed for ${riderId}:`, err.message);
