@@ -14,7 +14,6 @@ const cron = require('node-cron')
 const connectDb = require("./database/db");
 const { connectwebDb } = require("./PaymentWithWebDb/db");
 const TrackEvent = require("./models/Admin/Tracking");
-
 const RiderModel = require("./models/Rider.model");
 const { Server } = require("socket.io");
 const setupBullBoard = require("./bullboard");
@@ -38,12 +37,13 @@ const Protect = require("./middleware/Auth");
 const NewRideModelModel = require("./src/New-Rides-Controller/NewRideModel.model");
 const { startNotificationScheduler } = require("./queues/ScheduleNotification.quee");
 const sendNotification = require("./utils/sendNotification");
+const seedHotels = require("./seed/Hotel.seed");
 
 // Initialize Express and Server
 const app = express();
 app.set("trust proxy", 1);
 const server = http.createServer(app);
-
+// seedHotels()
 // Socket.IO Configuration
 const io = new Server(server, {
   cors: {
@@ -1912,7 +1912,7 @@ async function startServer() {
       `[${new Date().toISOString()}] Worker ${process.pid} starting...`
     );
 
-    await startNotificationScheduler()
+    // await startNotificationScheduler()
     // Connect to Redis first
     await connectRedis();
 

@@ -336,9 +336,8 @@ exports.find_Hotel_Login = async (req, res) => {
 
 exports.LoginHotel = async (req, res) => {
   try {
-    const { BH, type } = req.body;
-
-    // Ensure BH ID is provided
+    const { BH, type, fcmToken, appVersion, androidId, location } = req.body;
+    console.log("Body",req.body)
     if (!BH) {
       return res.status(400).json({
         success: false,
@@ -346,17 +345,12 @@ exports.LoginHotel = async (req, res) => {
       });
     }
 
-    // Function to generate OTP or return hardcoded OTP for specific BH
     const generateOtp = (bhId) => {
-      if (bhId === "BH424960") {
-        return "123456"; // Hardcoded OTP for BH424960
-      }
-      return Math.floor(100000 + Math.random() * 900000).toString(); // Random OTP for other BH IDs
+      if (bhId === "BH424960") return "123456";
+      return Math.floor(100000 + Math.random() * 900000).toString();
     };
 
-    // Check if the hotel exists in the database
     let foundHotel = await HotelUser.findOne({ bh: BH });
-
     if (!foundHotel) {
       try {
         // Fetch hotel details from external API if not found in the database
@@ -390,26 +384,60 @@ exports.LoginHotel = async (req, res) => {
         });
       }
     }
-
-    // Generate OTP
+    /* ============================
+       🔐 OTP
+    ============================ */
     const otpCode = generateOtp(BH);
-    const otpExpireTime = Date.now() + 5 * 60 * 1000; // OTP valid for 5 minutes
-
-    // Update the hotel's OTP details in the database
     foundHotel.otp = otpCode;
-    foundHotel.otp_expires = otpExpireTime;
-    await foundHotel.save();
+    foundHotel.otp_expires = Date.now() + 5 * 60 * 1000;
 
-    // Construct and send WhatsApp or text message
-    const message = `Please verify your hotel login. Your OTP is ${otpCode}, sent to your WhatsApp number ${foundHotel.hotel_phone}.`;
+    /* ============================
+       📱 CONDITIONAL DEVICE UPDATE
+    ============================ */
+    let shouldSave = false;
 
-    if (type === "text") {
-      await SendWhatsAppMessage(message, foundHotel.hotel_phone);
-    } else {
-      await sendDltMessage(otpCode, foundHotel.hotel_phone);
+    // 🔥 FCM TOKEN
+    if (fcmToken && fcmToken !== foundHotel.fcmToken) {
+      foundHotel.fcmToken = fcmToken;
+      foundHotel.fcmUpdatedAt = new Date();
+      shouldSave = true;
     }
 
-    // Respond to the client with success
+    // 📱 ANDROID DEVICE ID
+    if (androidId && androidId !== foundHotel.deviceId) {
+      foundHotel.deviceId = androidId;
+      shouldSave = true;
+    }
+
+    // 📦 APP VERSION
+    if (appVersion && appVersion !== foundHotel.appversion) {
+      foundHotel.appversion = appVersion;
+      shouldSave = true;
+    }
+
+    // 📍 LOCATION (optional — store only latest)
+    if (location?.coords) {
+      foundHotel.hotel_geo_location = {
+        type: "Point",
+        coordinates: [location.longitude, location.latitude],
+        accuracy: location.accuracy,
+        updatedAt: new Date(),
+      };
+      shouldSave = true;
+    }
+
+    // Save only if anything changed
+    if (shouldSave) {
+      await foundHotel.save();
+    }
+
+    /* ============================
+       📩 SEND OTP
+    ============================ */
+    const message = `Please verify your hotel login. Your OTP is ${otpCode}, sent to your WhatsApp number ${foundHotel.hotel_phone}.`;
+
+       await sendDltMessage(otpCode, foundHotel.hotel_phone);
+
     return res.status(200).json({
       success: true,
       message: "Hotel login initiated. Please verify your OTP.",
@@ -422,6 +450,7 @@ exports.LoginHotel = async (req, res) => {
     });
   }
 };
+
 exports.find_My_rooms = async (req, res) => {
   try {
     const user = req.user.id;
@@ -451,48 +480,38 @@ exports.uploadDocuments = async (req, res) => {
   try {
     const userId = req.user.id;
     if (!userId) {
-      return res
-        .status(401)
-        .json({
-          success: false,
-          message: "Unauthorized access. Please log in.",
-        });
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized access. Please log in.",
+      });
     }
 
     const findUser = await HotelUser.findById(userId);
     if (!findUser) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "User not found. Please check your account details.",
-        });
+      return res.status(404).json({
+        success: false,
+        message: "User not found. Please check your account details.",
+      });
     }
 
     if (findUser.DocumentUploaded) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "You have already uploaded your documents.",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "You have already uploaded your documents.",
+      });
     }
     if (findUser.DocumentUploadedVerified) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Your documents have already been verified.",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Your documents have already been verified.",
+      });
     }
 
     if (!req.files || Object.keys(req.files).length === 0) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "No files uploaded. Please upload the required documents.",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "No files uploaded. Please upload the required documents.",
+      });
     }
 
     const documentFields = [
@@ -528,12 +547,10 @@ exports.uploadDocuments = async (req, res) => {
     }
 
     if (documents.length === 0) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "File upload failed. Please try again.",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "File upload failed. Please try again.",
+      });
     }
 
     // Update user document fields
@@ -548,13 +565,11 @@ exports.uploadDocuments = async (req, res) => {
     });
   } catch (error) {
     console.error("Upload Error:", error);
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message:
-          "An error occurred while uploading documents. Please try again later.",
-      });
+    return res.status(500).json({
+      success: false,
+      message:
+        "An error occurred while uploading documents. Please try again later.",
+    });
   }
 };
 
@@ -1047,12 +1062,10 @@ exports.getHotelsNearByMe = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching hotels:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Server error. Please try again later.",
-      });
+    res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+    });
   }
 };
 
@@ -1086,12 +1099,10 @@ exports.getHotelsDetails = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching hotels:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Server error. Please try again later.",
-      });
+    res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+    });
   }
 };
 
@@ -1221,13 +1232,11 @@ exports.getAllHotel = async (req, res) => {
         message: "No hotel found",
       });
     }
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Hotels fetched successfully",
-        data: hotel_listing,
-      });
+    res.status(200).json({
+      success: true,
+      message: "Hotels fetched successfully",
+      data: hotel_listing,
+    });
   } catch (error) {
     console.log("Internal server error", error);
     res.status(500).json({
@@ -1599,13 +1608,11 @@ exports.HotelAnalyticData = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in HotelAnalyticData:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Internal Server Error",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
   }
 };
 

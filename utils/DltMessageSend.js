@@ -36,7 +36,7 @@ exports.sendDltMessage = async (otp, number) => {
     };
 
     console.log('[DLT] Sending DLT SMS to:', cleanNumber);
-    console.log('[DLT] SMS Params:', smsParams);
+    // console.log('[DLT] SMS Params:', smsParams);
 
     // ================== 3️⃣ Retry Mechanism ==================
     let attempt = 0;

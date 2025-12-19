@@ -278,7 +278,10 @@ exports.getMyBookingAll = async (req, res) => {
         console.log(bookings);
 
         if (!bookings.length) {
-            return res.status(404).json({ success: false, message: "No bookings found matching the criteria." });
+            return res.status(200).json({    success: true,
+            message: "Bookings retrieved successfully.",
+            totalBookings: 0,
+            data: [] });
         }
 
         return res.status(200).json({

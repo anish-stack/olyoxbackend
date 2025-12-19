@@ -751,8 +751,14 @@ function calculateVehiclePrice(vehicle, routeData, conditions, tollInfo) {
     distance_km,
     demandLevel,
   });
-// 8. Base price before surge
-  let basePrice = baseFare + distanceCost + timeCost + waitingTimeCost + nightSurcharge + fuelSurcharge;
+  // 8. Base price before surge
+  let basePrice =
+    baseFare +
+    distanceCost +
+    timeCost +
+    waitingTimeCost +
+    nightSurcharge +
+    fuelSurcharge;
 
   // 9. Apply surge multiplier
   let totalPrice = basePrice * surgeMultiplier;
@@ -762,10 +768,15 @@ function calculateVehiclePrice(vehicle, routeData, conditions, tollInfo) {
 
   // 11. Jaipur Route Discount (10% off final fare for Jaipur-bound rides)
   let jaipurDiscount = 0;
-  if (distance_km > 69 && isJaipurRoute(origin, destination)) { // Only intercity
+  if (distance_km > 69 && isJaipurRoute(origin, destination)) {
+    // Only intercity
     jaipurDiscount = totalPrice * (JAIPUR_DIRECTION.discountPercent / 100);
     totalPrice -= jaipurDiscount;
-    console.log(`Jaipur route discount applied: -₹${jaipurDiscount.toFixed(2)} (${JAIPUR_DIRECTION.discountPercent}%)`);
+    console.log(
+      `Jaipur route discount applied: -₹${jaipurDiscount.toFixed(2)} (${
+        JAIPUR_DIRECTION.discountPercent
+      }%)`
+    );
   }
 
   // 12. Apply minimum fare
@@ -781,16 +792,16 @@ function calculateVehiclePrice(vehicle, routeData, conditions, tollInfo) {
     surgeMultiplier,
     jaipurDiscount: Math.round(jaipurDiscount * 100) / 100, // ← Add this
     pricing: {
- baseFare: Math.round(baseFare * 100) / 100,
+      baseFare: Math.round(baseFare * 100) / 100,
       distanceCost: Math.round(distanceCost * 100) / 100,
       timeCost: Math.round(timeCost * 100) / 100,
       waitingTimeCost: Math.round(waitingTimeCost * 100) / 100,
       nightSurcharge: Math.round(nightSurcharge * 100) / 100,
       fuelSurcharge: Math.round(fuelSurcharge * 100) / 100,
       tollCharges: Math.round(tollCharges * 100) / 100,
-      surgeAmount: Math.round((basePrice * (surgeMultiplier - 1)) * 100) / 100,
+      surgeAmount: Math.round(basePrice * (surgeMultiplier - 1) * 100) / 100,
       jaipurDiscount: Math.round(jaipurDiscount * 100) / 100, // ← Add this
-      priceBeforeSurge: Math.round(basePrice * 100) / 100
+      priceBeforeSurge: Math.round(basePrice * 100) / 100,
     },
     conditions: {
       isNightTime,
@@ -802,7 +813,7 @@ function calculateVehiclePrice(vehicle, routeData, conditions, tollInfo) {
       avgMileage: vehicle.avgMileage,
       hasTolls: tollInfo.hasTolls,
       tollDetails: tollInfo.tollDetails,
-      jaipurRoute: distance_km > 69 && isJaipurRoute(origin, destination)
+      jaipurRoute: distance_km > 69 && isJaipurRoute(origin, destination),
     },
     isRental: false,
   };

@@ -135,7 +135,6 @@ const startNotificationScheduler = () => {
         jobAdded: false,
       });
 
-      console.log("schedules", schedules);
 
       if (!schedules.length) return;
 
