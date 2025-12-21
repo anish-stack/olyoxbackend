@@ -1776,9 +1776,13 @@ app.use("/api/v1/coupons/validate", (req, res, next) => {
     return res.status(200).json({
       success: true,
       discount: 99,
+      coupon:{
       code: code,
-      message: "Jaipur special coupon applied successfully",
-      couponData: null, // optional placeholder
+      isActive: true,
+      discount: 99,
+    },
+    message: "Jaipur special coupon applied successfully",
+    couponData: null, // optional placeholder
     });
   }
 
