@@ -37,10 +37,7 @@ exports.make_recharge = async (req, res) => {
         const { package_id, user_id } = req.params || {};
         const { coupon, type } = req.query || {};
         
-        console.log("recharge req.params", req.params);
-        console.log("recharge req.query", req.query);
-        console.log("recharge req.body", req.body);
-
+      
         const MembershipPlan = getMembershipPlanModel();
         const RechargeModel = getRechargeModel();
 
@@ -92,74 +89,113 @@ exports.make_recharge = async (req, res) => {
 
         // Coupon validation
         if (coupon) {
-            const matchedCoupons = await PersonalCoupons.find({ code: coupon }).populate('assignedTo');
-            
-            if (!matchedCoupons || matchedCoupons.length === 0) {
-                return res.status(404).json({ 
-                    success: false, 
-                    message: 'This coupon code doesn\'t exist. Please check and try again.' 
-                });
+            // Check if coupon contains "Jaipur" (case-insensitive)
+          if (coupon.toLowerCase().includes('jaipur')) {
+  console.log("🎟️ Detected Jaipur special coupon:", coupon);
+
+  // Special Jaipur coupon - apply 99% discount directly
+  const jaipurExpiration = new Date('2026-01-01T23:59:59');
+  console.log("⏰ Jaipur coupon expiration date:", jaipurExpiration);
+
+  if (new Date() > jaipurExpiration) {
+    console.log("❌ Jaipur coupon expired");
+    return res.status(410).json({ 
+      success: false, 
+      message: 'This Jaipur special coupon has expired.' 
+    });
+  }
+
+  // Apply 99% discount
+  couponDiscount = (package_price * 99) / 100;
+  finalAmount = Math.max(package_price - couponDiscount, 0);
+  finalAmount = parseFloat(finalAmount.toFixed(2));
+
+  console.log("✅ Jaipur coupon applied successfully");
+  console.log("💸 Original price:", package_price);
+  console.log("💰 Discount amount:", couponDiscount);
+  console.log("🏷️ Final amount after discount:", finalAmount);
+
+  isCouponApplied = true;
+  appliedCouponData = {
+    code: coupon,
+    discount: 99,
+    expirationDate: jaipurExpiration,
+    isJaipurSpecial: true
+  };
+
+  console.log("📦 Applied coupon data:", appliedCouponData);
+}
+ else {
+                // Regular coupon validation logic
+                const matchedCoupons = await PersonalCoupons.find({ code: coupon }).populate('assignedTo');
+                
+                if (!matchedCoupons || matchedCoupons.length === 0) {
+                    return res.status(404).json({ 
+                        success: false, 
+                        message: 'This coupon code doesn\'t exist. Please check and try again.' 
+                    });
+                }
+
+                let couponData;
+
+                // Find coupon based on type
+                if (type === 'heavy') {
+                    couponData = matchedCoupons.find(c =>
+                        c.assignedTo &&
+                        c.assignedTo.Bh_Id &&
+                        c.assignedTo.Bh_Id === user_id
+                    );
+                } else if (type === 'tiffin') {
+                    couponData = matchedCoupons.find(c =>
+                        c.assignedTo &&
+                        c.assignedTo.restaurant_BHID &&
+                        c.assignedTo.restaurant_BHID === user_id
+                    );
+                } else if (type === 'cab') {
+                    couponData = matchedCoupons.find(c =>
+                        c.assignedTo &&
+                        c.assignedTo.BH &&
+                        c.assignedTo.BH === user_id
+                    );
+                } else {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Something went wrong. Please try again or contact support.'
+                    });
+                }
+
+                // Check if coupon was found for this user
+                if (!couponData) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'This coupon is not available for your account. Please use a valid coupon.'
+                    });
+                }
+
+                // Check if coupon is already used
+                if (couponData.isUsed) {
+                    return res.status(402).json({ 
+                        success: false, 
+                        message: 'This coupon has already been used. You can only use it once.' 
+                    });
+                }
+
+                // Check if coupon is expired
+                if (new Date(couponData.expirationDate) < new Date()) {
+                    return res.status(410).json({ 
+                        success: false, 
+                        message: 'This coupon has expired. Please try a different coupon.' 
+                    });
+                }
+
+                // Calculate discount
+                couponDiscount = (package_price * couponData.discount) / 100;
+                finalAmount = Math.max(package_price - couponDiscount, 0);
+                finalAmount = parseFloat(finalAmount.toFixed(2));
+                
+                isCouponApplied = true;
+                appliedCouponData = couponData;
             }
-
-            let couponData;
-
-            // Find coupon based on type
-            if (type === 'heavy') {
-                couponData = matchedCoupons.find(c =>
-                    c.assignedTo &&
-                    c.assignedTo.Bh_Id &&
-                    c.assignedTo.Bh_Id === user_id
-                );
-            } else if (type === 'tiffin') {
-                couponData = matchedCoupons.find(c =>
-                    c.assignedTo &&
-                    c.assignedTo.restaurant_BHID &&
-                    c.assignedTo.restaurant_BHID === user_id
-                );
-            } else if (type === 'cab') {
-                couponData = matchedCoupons.find(c =>
-                    c.assignedTo &&
-                    c.assignedTo.BH &&
-                    c.assignedTo.BH === user_id
-                );
-            } else {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Something went wrong. Please try again or contact support.'
-                });
-            }
-
-            // Check if coupon was found for this user
-            if (!couponData) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'This coupon is not available for your account. Please use a valid coupon.'
-                });
-            }
-
-            // Check if coupon is already used
-            if (couponData.isUsed) {
-                return res.status(402).json({ 
-                    success: false, 
-                    message: 'This coupon has already been used. You can only use it once.' 
-                });
-            }
-
-            // Check if coupon is expired
-            if (new Date(couponData.expirationDate) < new Date()) {
-                return res.status(410).json({ 
-                    success: false, 
-                    message: 'This coupon has expired. Please try a different coupon.' 
-                });
-            }
-
-            // Calculate discount
-            couponDiscount = (package_price * couponData.discount) / 100;
-            finalAmount = Math.max(package_price - couponDiscount, 0);
-            finalAmount = parseFloat(finalAmount.toFixed(2));
-            
-            isCouponApplied = true;
-            appliedCouponData = couponData;
         }
 
         // Calculate GST
@@ -182,7 +218,8 @@ exports.make_recharge = async (req, res) => {
                 gst_amount: gstAmount.toFixed(2),
                 total_amount: finalAmount.toFixed(2),
                 coupon_applied: isCouponApplied,
-                coupon_discount: couponDiscount.toFixed(2)
+                coupon_discount: couponDiscount.toFixed(2),
+                is_jaipur_special: appliedCouponData?.isJaipurSpecial || false
             }
         };
 
@@ -198,7 +235,7 @@ exports.make_recharge = async (req, res) => {
 
         // Save recharge entry
         const rechargeData = new RechargeModel({
-            vendor_id: userCheck._id, // ✅ Now this will work correctly
+            vendor_id: userCheck._id,
             member_id: package_id,
             amount: finalAmount,
             original_amount: package_price,
@@ -209,7 +246,8 @@ exports.make_recharge = async (req, res) => {
             couponCode: isCouponApplied ? coupon : null,
             razorpay_status: razorpayOrder.status,
             gst_amount: gstAmount,
-            base_amount: baseAmount
+            base_amount: baseAmount,
+            isJaipurSpecial: appliedCouponData?.isJaipurSpecial || false
         });
 
         await rechargeData.save();
@@ -408,14 +446,14 @@ exports.verify_recharge = async (req, res) => {
                 console.log("New refer count for", webVendorParentBH, ":", newReferCount);
 
                 // Check if refer count hits 15 for the bonus
-                if (newReferCount === 15) {
-                    walletAmountToAdd += 250; // Add 250 extra for reaching 15 referrals
-                    bonusApplied = true;
-                    console.log("Applying 250 bonus for reaching 15 referrals");
-                } else if (newReferCount > 15) {
-                    console.log("Refer count above 15, applying standard 50 rupees");
-                }
-                console.log("walletAmountToAdd", walletAmountToAdd)
+                // if (newReferCount === 15) {
+                //     walletAmountToAdd += 250; // Add 250 extra for reaching 15 referrals
+                //     bonusApplied = true;
+                //     console.log("Applying 250 bonus for reaching 15 referrals");
+                // } else if (newReferCount > 15) {
+                //     console.log("Refer count above 15, applying standard 50 rupees");
+                // }
+                // console.log("walletAmountToAdd", walletAmountToAdd)
                 // Update wallet via API
                 try {
                     const newWalletAmount = walletAmountToAdd;
