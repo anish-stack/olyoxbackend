@@ -10,7 +10,7 @@ const axios = require("axios");
 require("dotenv").config();
 const compression = require("compression");
 // Database and Models
-const cron = require('node-cron')
+const cron = require("node-cron");
 const connectDb = require("./database/db");
 const { connectwebDb } = require("./PaymentWithWebDb/db");
 const TrackEvent = require("./models/Admin/Tracking");
@@ -35,7 +35,9 @@ const numCPUs = os.cpus().length;
 
 const Protect = require("./middleware/Auth");
 const NewRideModelModel = require("./src/New-Rides-Controller/NewRideModel.model");
-const { startNotificationScheduler } = require("./queues/ScheduleNotification.quee");
+const {
+  startNotificationScheduler,
+} = require("./queues/ScheduleNotification.quee");
 const sendNotification = require("./utils/sendNotification");
 const seedHotels = require("./seed/Hotel.seed");
 
@@ -250,7 +252,8 @@ io.on("connection", (socket) => {
       }
 
       console.log(
-        `[${new Date().toISOString()}] Location update from ${socket.userType
+        `[${new Date().toISOString()}] Location update from ${
+          socket.userType
         }:${socket.userId}`
       );
       socket.emit("location_ack", { success: true });
@@ -273,7 +276,8 @@ io.on("connection", (socket) => {
     socket.ride_id = ride_id;
     socket.join(`ride_chat:${ride_id}`);
     console.log(
-      `[${new Date().toISOString()}] 🗨️ ${socket.userType}:${socket.userId
+      `[${new Date().toISOString()}] 🗨️ ${socket.userType}:${
+        socket.userId
       } joined chat for ride ${ride_id}`
     );
 
@@ -420,7 +424,8 @@ io.on("connection", (socket) => {
   // Handle reconnection
   socket.on("reconnect", async (attemptNumber) => {
     console.log(
-      `[${new Date().toISOString()}] Socket ${socket.id
+      `[${new Date().toISOString()}] Socket ${
+        socket.id
       } reconnected after ${attemptNumber} attempts`
     );
 
@@ -445,7 +450,8 @@ io.on("connection", (socket) => {
   // Handle disconnection
   socket.on("disconnect", async (reason) => {
     console.log(
-      `[${new Date().toISOString()}] ❌ Socket disconnected: ${socket.id
+      `[${new Date().toISOString()}] ❌ Socket disconnected: ${
+        socket.id
       }, Reason: ${reason}`
     );
 
@@ -454,7 +460,8 @@ io.on("connection", (socket) => {
       try {
         await pubClient.del(`socket:${socket.userType}:${socket.userId}`);
         console.log(
-          `[${new Date().toISOString()}] Cleaned up Redis data for ${socket.userType
+          `[${new Date().toISOString()}] Cleaned up Redis data for ${
+            socket.userType
           }:${socket.userId}`
         );
       } catch (error) {
@@ -520,7 +527,8 @@ app.use(cookieParser());
 app.use((req, res, next) => {
   if (!pubClient || !pubClient.isOpen) {
     console.warn(
-      `[${new Date().toISOString()}] Redis client not available for request: ${req.path
+      `[${new Date().toISOString()}] Redis client not available for request: ${
+        req.path
       }`
     );
   }
@@ -570,53 +578,57 @@ app.get("/updates/:userId/:userType", async (req, res) => {
   }
 });
 
-
 app.get("/run-migration", async (req, res) => {
-    try {
-        // Step 1: Clean up invalid position values
-        await RiderModel.updateMany(
-            {
-                $or: [
-                    { position: { $exists: false } },
-                    { position: null },
-                    { position: { $type: ["null", "undefined"] } },
-                ],
-            },
-            { $unset: { position: "" } }
+  try {
+    // Step 1: Clean up invalid position values
+    await RiderModel.updateMany(
+      {
+        $or: [
+          { position: { $exists: false } },
+          { position: null },
+          { position: { $type: ["null", "undefined"] } },
+        ],
+      },
+      { $unset: { position: "" } }
+    );
+    console.log("Cleared invalid position values");
+
+    // Step 2: Find riders without a position
+    const riders = await RiderModel.find({
+      position: { $exists: false },
+    }).exec();
+    console.log(`Found ${riders.length} riders without a position`);
+
+    // Step 3: Find the rider with the highest valid position
+    const lastRider = await RiderModel.findOne({
+      position: { $exists: true, $ne: null, $type: "number" },
+    })
+      .sort({ position: -1 })
+      .exec();
+
+    let currentPosition =
+      lastRider && Number.isFinite(lastRider.position) ? lastRider.position : 0;
+    console.log(`Starting position: ${currentPosition}`);
+
+    // Step 4: Assign positions to riders
+    for (const rider of riders) {
+      currentPosition += 1;
+      rider.position = currentPosition;
+      try {
+        await rider.save();
+        console.log(
+          `Assigned position ${currentPosition} to rider ${rider._id}`
         );
-        console.log("Cleared invalid position values");
-
-        // Step 2: Find riders without a position
-        const riders = await RiderModel.find({ position: { $exists: false } }).exec();
-        console.log(`Found ${riders.length} riders without a position`);
-
-        // Step 3: Find the rider with the highest valid position
-        const lastRider = await RiderModel.findOne({
-            position: { $exists: true, $ne: null, $type: "number" },
-        })
-            .sort({ position: -1 })
-            .exec();
-
-        let currentPosition = lastRider && Number.isFinite(lastRider.position) ? lastRider.position : 0;
-        console.log(`Starting position: ${currentPosition}`);
-
-        // Step 4: Assign positions to riders
-        for (const rider of riders) {
-            currentPosition += 1;
-            rider.position = currentPosition;
-            try {
-                await rider.save();
-                console.log(`Assigned position ${currentPosition} to rider ${rider._id}`);
-            } catch (err) {
-                console.error(`Failed to save rider ${rider._id}:`, err);
-            }
-        }
-
-        res.send("Migration completed successfully.");
-    } catch (error) {
-        console.error("Migration failed:", error);
-        res.status(500).send(`Migration failed: ${error.message}`);
+      } catch (err) {
+        console.error(`Failed to save rider ${rider._id}:`, err);
+      }
     }
+
+    res.send("Migration completed successfully.");
+  } catch (error) {
+    console.error("Migration failed:", error);
+    res.status(500).send(`Migration failed: ${error.message}`);
+  }
 });
 
 app.post("/track", Protect, async (req, res) => {
@@ -841,11 +853,16 @@ app.get("/rider/:tempRide", async (req, res) => {
       .exec();
 
     if (!ride) {
-      console.log(`ℹ️ Ride not found by _id, checking intercityRideModel for ${tempRide}...`);
+      console.log(
+        `ℹ️ Ride not found by _id, checking intercityRideModel for ${tempRide}...`
+      );
       ride = await NewRideModelModel.findOne({ intercityRideModel: tempRide })
         .select("-__v -updatedAt -notified_riders")
         .populate("user", "name email number")
-        .populate("driver", "-documents -preferences -updateLogs -RechargeData -activityLog")
+        .populate(
+          "driver",
+          "-documents -preferences -updateLogs -RechargeData -activityLog"
+        )
         .lean();
     }
 
@@ -908,12 +925,10 @@ app.post("/autocomplete", async (req, res) => {
       response.data.status !== "OK" &&
       response.data.status !== "ZERO_RESULTS"
     ) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: response.data.error_message || "Failed to fetch suggestions",
-        });
+      return res.status(400).json({
+        success: false,
+        message: response.data.error_message || "Failed to fetch suggestions",
+      });
     }
 
     const suggestions = response.data.predictions.map((p) => ({
@@ -938,12 +953,10 @@ app.post("/autocomplete", async (req, res) => {
       `[${new Date().toISOString()}] Autocomplete error:`,
       err.message
     );
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch autocomplete results",
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch autocomplete results",
+    });
   }
 });
 
@@ -1080,7 +1093,8 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
 setInterval(() => {
   const now = Date.now();
   for (const [riderId, data] of locationUpdateCache.entries()) {
-    if (now - data.lastUpdate > 600000) { // 10 minutes
+    if (now - data.lastUpdate > 600000) {
+      // 10 minutes
       locationUpdateCache.delete(riderId);
     }
   }
@@ -1097,12 +1111,18 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
       });
     }
 
-    const { latitude, longitude, accuracy, speed, timestamp, platform } = req.body;
+    const { latitude, longitude, accuracy, speed, timestamp, platform } =
+      req.body;
 
     // Validate coordinates
-    if (!latitude || !longitude || 
-        latitude < -90 || latitude > 90 || 
-        longitude < -180 || longitude > 180) {
+    if (
+      !latitude ||
+      !longitude ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
       return res.status(400).json({
         success: false,
         message: "Invalid coordinates",
@@ -1112,7 +1132,7 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
     const now = timestamp || Date.now();
     const cacheKey = riderId.toString();
     const cachedData = locationUpdateCache.get(cacheKey);
-    
+
     // Calculate distance from last cached location
     let distanceMoved = 0;
     if (cachedData && cachedData.location) {
@@ -1121,7 +1141,9 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
     }
 
     // Determine if DB update should happen
-    const timePassed = cachedData ? (now - cachedData.lastUpdate) >= UPDATE_INTERVAL : true;
+    const timePassed = cachedData
+      ? now - cachedData.lastUpdate >= UPDATE_INTERVAL
+      : true;
     const distanceThreshold = distanceMoved >= MIN_DISTANCE_METERS;
     const shouldUpdateDB = !cachedData || (timePassed && distanceThreshold);
 
@@ -1155,7 +1177,7 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
         .then(() => {
           // console.log(`✅ [${riderId.slice(-6)}] DB updated (${distanceMoved.toFixed(1)}m moved)`);
         })
-        .catch(err => {
+        .catch((err) => {
           console.error(`❌ DB Update failed for ${riderId}:`, err.message);
         });
     }
@@ -1166,9 +1188,10 @@ app.post("/webhook/cab-receive-location", Protect, async (req, res) => {
       message: "Location received",
       cached: !shouldUpdateDB,
       distanceMoved: Math.round(distanceMoved),
-      nextDbUpdate: shouldUpdateDB ? 0 : UPDATE_INTERVAL - (now - cachedData.lastUpdate),
+      nextDbUpdate: shouldUpdateDB
+        ? 0
+        : UPDATE_INTERVAL - (now - cachedData.lastUpdate),
     });
-
   } catch (err) {
     console.error("❌ Error in location webhook:", err);
     return res.status(500).json({
@@ -1183,7 +1206,7 @@ setInterval(async () => {
   if (locationUpdateCache.size === 0) return;
 
   console.log(`🔄 Bulk sync: ${locationUpdateCache.size} riders`);
-  
+
   const bulkOps = [];
   const now = Date.now();
 
@@ -1224,7 +1247,7 @@ app.get("/admin/active-drivers-20min", async (req, res) => {
 
     // 🔍 Base filter — only CAB category riders
     const filter = {
-      category: "cab",  // ⛔ Only CAB included
+      category: "cab", // ⛔ Only CAB included
       lastUpdated: { $gte: twentyMinAgo },
     };
 
@@ -1248,7 +1271,6 @@ app.get("/admin/active-drivers-20min", async (req, res) => {
       checkedFrom: new Date(twentyMinAgo),
       apiExecutionTime: apiExecutionTime + " ms",
     });
-
   } catch (err) {
     console.error("❌ Error checking active drivers:", err);
 
@@ -1258,8 +1280,6 @@ app.get("/admin/active-drivers-20min", async (req, res) => {
     });
   }
 });
-
-
 
 app.post("/webhook/receive-location", Protect, async (req, res) => {
   try {
@@ -1288,7 +1308,7 @@ app.post("/webhook/receive-location", Protect, async (req, res) => {
 
 // Root Endpoint
 app.get("/", (req, res) => {
-  console.log("https://pzl22gdb-3200.inc1.devtunnels.ms/")
+  console.log("https://pzl22gdb-3200.inc1.devtunnels.ms/");
   res.status(200).json({
     message: "Welcome to the API",
     timestamp: new Date().toISOString(),
@@ -1558,7 +1578,7 @@ app.get("/send-notifications", async (req, res) => {
     // Get all riders with AppVersion and isAvailable
     const allRiders = await RiderModel.find({
       isAvailable: true,
-      AppVersion: "1.0.5"
+      AppVersion: "1.0.5",
     });
 
     let validRiders = [];
@@ -1568,7 +1588,6 @@ app.get("/send-notifications", async (req, res) => {
     console.log(`📌 Total Riders Found: ${allRiders.length}`);
 
     for (const rider of allRiders) {
-
       // CASE 1: No token found
       if (!rider.fcmToken || rider.fcmToken.trim() === "") {
         console.log(`⚠️ NO TOKEN → Rider: ${rider._id}`);
@@ -1576,7 +1595,7 @@ app.get("/send-notifications", async (req, res) => {
         noTokenRiders.push({
           _id: rider._id,
           phone: rider.phone,
-          fcmToken: null
+          fcmToken: null,
         });
 
         await RiderModel.updateOne(
@@ -1602,14 +1621,13 @@ app.get("/send-notifications", async (req, res) => {
         validRiders.push({
           _id: rider._id,
           phone: rider.phone,
-          fcmToken: rider.fcmToken
+          fcmToken: rider.fcmToken,
         });
 
         await RiderModel.updateOne(
           { _id: rider._id },
           { $set: { isFcmTokenExpired: false } }
         );
-
       } catch (error) {
         console.log(`❌ INVALID TOKEN → Rider: ${rider._id} → ${error.code}`);
 
@@ -1617,7 +1635,7 @@ app.get("/send-notifications", async (req, res) => {
           _id: rider._id,
           phone: rider.phone,
           fcmToken: rider.fcmToken,
-          error: error.code
+          error: error.code,
         });
 
         await RiderModel.updateOne(
@@ -1644,13 +1662,12 @@ app.get("/send-notifications", async (req, res) => {
         totalRiders: allRiders.length,
         validTokens: validRiders.length,
         invalidTokens: invalidRiders.length,
-        noToken: noTokenRiders.length
+        noToken: noTokenRiders.length,
       },
       validRiders,
       invalidRiders,
-      noTokenRiders
+      noTokenRiders,
     });
-
   } catch (error) {
     console.log("Server Error:", error.message);
     res.status(500).json({ status: false, error: error.message });
@@ -1662,21 +1679,20 @@ app.get("/driver-details-name-number", async (req, res) => {
     const allRiders = await RiderModel.find({
       isAvailable: true,
       AppVersion: "1.0.5",
-      fcmToken: null
+      fcmToken: null,
     }).select("_id name phone fcmToken");
 
     res.json({
       status: true,
       count: allRiders.length,
-      drivers: allRiders
+      drivers: allRiders,
     });
-
   } catch (error) {
     console.log("Error fetching drivers:", error.message);
     res.status(500).json({
       status: false,
       message: "Something went wrong",
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -1688,20 +1704,20 @@ app.get("/driver-check-and-notify", async (req, res) => {
     if (!number) {
       return res.status(400).json({
         status: false,
-        message: "Phone number is required"
+        message: "Phone number is required",
       });
     }
 
     // Find rider with token + version
     const rider = await RiderModel.findOne({
       phone: number,
-      AppVersion: "1.0.5"
+      AppVersion: "1.0.5",
     }).select("_id name phone fcmToken");
 
     if (!rider) {
       return res.status(404).json({
         status: false,
-        message: "Rider not found"
+        message: "Rider not found",
       });
     }
 
@@ -1711,7 +1727,7 @@ app.get("/driver-check-and-notify", async (req, res) => {
         status: true,
         rider,
         notification: "Token missing — please update token",
-        tokenAvailable: false
+        tokenAvailable: false,
       });
     }
 
@@ -1728,15 +1744,14 @@ app.get("/driver-check-and-notify", async (req, res) => {
       status: true,
       rider,
       notification: "Notification sent successfully",
-      tokenAvailable: true
+      tokenAvailable: true,
     });
-
   } catch (error) {
     console.log("Error:", error.message);
     res.status(500).json({
       status: false,
       message: "Something went wrong",
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -1754,12 +1769,21 @@ app.use("/api/v1/new", NewRoutes);
 
 // Middleware to bypass /api/v1/coupons/validate
 app.use("/api/v1/coupons/validate", (req, res, next) => {
-  console.log("🎟️ /api/v1/coupons/validate hit - bypassing logic");
-  return res.status(200).json({
-    success: true,
-    message: "Coupon applied  successful",
-    couponData: null, // optional placeholder
-  });
+  const { code } = req.query;
+
+  if (code && code.toLowerCase().includes("jaipur")) {
+    console.log(`🎟️ Jaipur coupon detected: ${code} - bypassing logic`);
+    return res.status(200).json({
+      success: true,
+      discount: 99,
+      code: code,
+      message: "Jaipur special coupon applied successfully",
+      couponData: null, // optional placeholder
+    });
+  }
+
+  // If not Jaipur, continue to normal route handlers
+  next();
 });
 
 app.use(
@@ -1775,9 +1799,6 @@ app.use("*", (req, res) => {
     path: req.originalUrl,
   });
 });
-
-
-
 
 // Error Handler
 app.use((err, req, res, next) => {
@@ -1797,8 +1818,6 @@ app.use((err, req, res, next) => {
 // cron.schedule('*/4 * * * * *', async () => {
 //   await startNotificationScheduler();
 // });
-
-
 
 // Graceful Shutdown with Force Disconnect
 process.on("SIGTERM", async () => {
@@ -1936,7 +1955,8 @@ async function startServer() {
     // Start the server
     server.listen(PORT, () => {
       console.log(
-        `[${new Date().toISOString()}] 🚀 Server running on port ${PORT} (Worker ${process.pid
+        `[${new Date().toISOString()}] 🚀 Server running on port ${PORT} (Worker ${
+          process.pid
         })`
       );
       console.log(`[${new Date().toISOString()}] 🔌 Socket.IO server ready`);
@@ -1944,7 +1964,8 @@ async function startServer() {
         `Bull Board available at http://localhost:${PORT}/admin/queues`
       );
       console.log(
-        `[${new Date().toISOString()}] 🌍 Environment: ${process.env.NODE_ENV || "development"
+        `[${new Date().toISOString()}] 🌍 Environment: ${
+          process.env.NODE_ENV || "development"
         }`
       );
       console.log(
@@ -1953,13 +1974,13 @@ async function startServer() {
     });
   } catch (error) {
     console.error(
-      `[${new Date().toISOString()}] ❌ Failed to start server (Worker ${process.pid
+      `[${new Date().toISOString()}] ❌ Failed to start server (Worker ${
+        process.pid
       }):`,
       error.message
     );
     process.exit(1);
   }
 }
-
 
 startServer();
