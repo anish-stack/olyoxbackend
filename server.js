@@ -1751,6 +1751,17 @@ app.use("/api/v1/parcel", parcel);
 app.use("/api/v1/heavy", Heavy);
 app.use("/api/v1/admin", admin);
 app.use("/api/v1/new", NewRoutes);
+
+// Middleware to bypass /api/v1/coupons/validate
+app.use("/api/v1/coupons/validate", (req, res, next) => {
+  console.log("🎟️ /api/v1/coupons/validate hit - bypassing logic");
+  return res.status(200).json({
+    success: true,
+    message: "Coupon applied  successful",
+    couponData: null, // optional placeholder
+  });
+});
+
 app.use(
   compression({
     threshold: 0, // compress everything, even small responses
