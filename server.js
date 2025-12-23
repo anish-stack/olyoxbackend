@@ -507,7 +507,7 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 // Middleware
-app.use(cors({ origin: "*", credentials: true }));
+app.use(cors());
 setupBullBoard(app);
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,

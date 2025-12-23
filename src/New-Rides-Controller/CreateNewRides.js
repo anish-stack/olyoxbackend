@@ -1465,6 +1465,11 @@ const initiateDriverSearch = async (rideId, searchAreaLimit, req, res) => {
     searchAreaLimit
   );
 
+  // Define retry constants (adjust as needed)
+  const MAX_RETRIES = 4; // e.g., 0km (initial), +3km, +4.5km, +6.75km → up to ~14km
+  const RETRY_INTERVAL_SECONDS = 30; // Fixed 30 seconds between retries
+  const TOTAL_RETRY_TIME_SECONDS = MAX_RETRIES * RETRY_INTERVAL_SECONDS; // ~2 minutes (120s)
+
   try {
     console.log("🔍 Fetching ride details...");
     const ride = await RideBooking.findById(rideId)
@@ -1501,91 +1506,128 @@ const initiateDriverSearch = async (rideId, searchAreaLimit, req, res) => {
       return { success: false, message: "Invalid pickup location" };
     }
 
-    console.log(
-      "🕐 Updating ride status to 'searching'...",
-      NOTIFICATION_CONFIG.INITIAL_RADIUS / 1000
-    );
+    // Update ride to searching with initial radius
+    const initialRadiusKm = searchAreaLimit || NOTIFICATION_CONFIG.INITIAL_RADIUS / 1000;
     await RideBooking.findByIdAndUpdate(rideId, {
       $set: {
         ride_status: "searching",
         search_started_at: new Date(),
         retry_count: 0,
-        search_radius:
-          searchAreaLimit || NOTIFICATION_CONFIG.INITIAL_RADIUS / 1000,
+        search_radius: initialRadiusKm,
       },
     });
 
-    console.log("✅ Ride status updated. Fetching eligible drivers...");
-    const drivers = await fetchEligibleDrivers(rideId, ride, searchAreaLimit);
+    // Start the retry loop
+    let currentRetry = 0;
+    let totalDriversFound = 0;
+    let totalNotificationsSent = 0;
 
-    console.log(`👥 Total eligible drivers found: ${drivers.length}`);
+    while (currentRetry <= MAX_RETRIES) {
+      const currentRadiusKm = searchAreaLimit || initialRadiusKm * Math.pow(1.5, currentRetry); // Optional: expand radius each retry
 
-    if (drivers.length === 0) {
-      console.warn("⚠️ No eligible drivers found after multiple attempts");
+      console.log(`🔍 Attempt ${currentRetry + 1}/${MAX_RETRIES + 1}: Fetching drivers in radius ${currentRadiusKm.toFixed(2)} km`);
+
+      const drivers = await fetchEligibleDrivers(rideId, ride, currentRadiusKm);
+
+      console.log(`👥 Eligible drivers found this attempt: ${drivers.length}`);
+
+      if (drivers.length > 0) {
+        console.log("📨 Sending notifications to drivers...");
+        const notificationResults = await sendBatchNotifications(
+          drivers,
+          ride,
+          io,
+          currentRetry + 1,
+          currentRetry === 0 // initial = true only first time
+        );
+
+        console.log("📊 Notification results:", {
+          totalSent: notificationResults.totalSent,
+          successful: notificationResults.successful?.length,
+          failed: notificationResults.failed?.length,
+        });
+
+        if (notificationResults.totalSent > 0) {
+          await RideBooking.findByIdAndUpdate(rideId, {
+            $push: {
+              notified_riders: {
+                $each: notificationResults.successful.map((n) => ({
+                  rider_id: n.driverId,
+                  notification_time: n.timestamp,
+                  notification_count: n.notificationCount,
+                  distance_from_pickup: n.distance,
+                })),
+              },
+            },
+            $set: {
+              last_notification_sent_at: new Date(),
+              search_radius: currentRadiusKm, // update current radius
+            },
+            $inc: {
+              riders_found: drivers.length,
+              total_notifications_sent: notificationResults.totalSent,
+            },
+          });
+
+          totalDriversFound += drivers.length;
+          totalNotificationsSent += notificationResults.totalSent;
+
+          // Start background notifications only once (after first successful batch)
+          if (currentRetry === 0) {
+            startBackgroundNotifications(rideId, ride, io);
+          }
+
+          // As soon as we notify some drivers, we can consider search active
+          // No break here if you want to continue expanding for more drivers
+          // But typically, once notified, we wait for response, not send more immediately
+          // Assuming your system allows multiple batches
+        }
+      }
+
+      currentRetry++;
+
+      // If this was the last retry, exit loop
+      if (currentRetry > MAX_RETRIES) {
+        break;
+      }
+
+      // Wait before next retry (only if no drivers notified yet, or always?)
+      // To strictly follow "retry up to 2 minutes, not instant cancel":
+      // We always retry the full cycle if no success yet.
+      // But if we sent notifications, we probably stop expanding immediately.
+      if (totalNotificationsSent === 0) {
+        console.log(`⏳ No drivers notified yet. Waiting ${RETRY_INTERVAL_SECONDS}s before next retry...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL_SECONDS * 1000));
+      } else {
+        console.log("✅ Notifications sent to drivers. Stopping further immediate retries.");
+        break; // Stop expanding once we found and notified some
+      }
+    }
+
+    // Schedule cancellation check regardless (your original code has it)
+    scheduleRideCancellationCheck(redisClient, rideId);
+
+    // Final check: if still no notifications sent after all retries
+    if (totalNotificationsSent === 0) {
+      console.warn("⚠️ No drivers found/notified after all retry attempts (~2 minutes)");
       await cancelRide(
         redisClient,
         rideId,
-        "No drivers found after multiple attempts",
+        "No drivers available after multiple search attempts",
         "system"
       );
       return {
         success: false,
-        message: "No drivers found after multiple attempts",
+        message: "No drivers found after retry attempts",
       };
-    }
-
-    console.log("📨 Sending initial notifications to drivers...");
-    const notificationResults = await sendBatchNotifications(
-      drivers,
-      ride,
-      io,
-      1,
-      true
-    );
-
-    console.log("📊 Notification results:", {
-      totalSent: notificationResults.totalSent,
-      successful: notificationResults.successful?.length,
-      failed: notificationResults.failed?.length,
-    });
-
-    if (notificationResults.totalSent > 0) {
-      console.log("📝 Updating ride with notification details...");
-      await RideBooking.findByIdAndUpdate(rideId, {
-        $push: {
-          notified_riders: {
-            $each: notificationResults.successful.map((n) => ({
-              rider_id: n.driverId,
-              notification_time: n.timestamp,
-              notification_count: n.notificationCount,
-              distance_from_pickup: n.distance,
-            })),
-          },
-        },
-        $set: {
-          last_notification_sent_at: new Date(),
-          riders_found: drivers.length,
-        },
-        $inc: {
-          total_notifications_sent: notificationResults.totalSent,
-        },
-      });
-
-      console.log("⚙️ Starting background notifications...");
-      startBackgroundNotifications(rideId, ride, io);
-
-      console.log("🕓 Scheduling cancellation check...");
-      scheduleRideCancellationCheck(redisClient, rideId);
-    } else {
-      console.warn("⚠️ No notifications sent to any driver.");
     }
 
     console.log("✅ Driver search process completed successfully.");
     return {
       success: true,
-      message: "Driver search initiated",
-      drivers_notified: notificationResults.totalSent,
-      total_drivers: drivers.length,
+      message: "Driver search initiated with retries",
+      drivers_notified: totalNotificationsSent,
+      total_drivers_found: totalDriversFound,
     };
   } catch (error) {
     console.error(`💥 Error in driver search for ride ${rideId}:`, error);
