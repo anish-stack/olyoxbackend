@@ -702,7 +702,14 @@ function calculateTollCharges(distance_km, vehicle, tollInfo) {
 }
 
 // Main pricing calculation for regular vehicles
-function calculateVehiclePrice(vehicle, routeData, conditions, tollInfo) {
+function calculateVehiclePrice(
+  vehicle,
+  routeData,
+  conditions,
+  tollInfo,
+  origin,
+  destination
+) {
   const {
     distance_km,
     traffic_duration_minutes,
@@ -767,9 +774,14 @@ function calculateVehiclePrice(vehicle, routeData, conditions, tollInfo) {
   totalPrice += tollCharges;
 
   // 11. Jaipur Route Discount (10% off final fare for Jaipur-bound rides)
+  // 11. Jaipur Route Discount (10% off final fare for Jaipur-bound rides)
   let jaipurDiscount = 0;
-  if (distance_km > 69 && isJaipurRoute(origin, destination)) {
-    // Only intercity
+  if (
+    origin &&
+    destination &&
+    distance_km > 69 &&
+    isJaipurRoute(origin, destination)
+  ) {
     jaipurDiscount = totalPrice * (JAIPUR_DIRECTION.discountPercent / 100);
     totalPrice -= jaipurDiscount;
     console.log(
@@ -1277,7 +1289,9 @@ exports.calculateRidePriceForUser = async (req, res) => {
         vehicle,
         routeData,
         conditions,
-        vehicleTollInfo
+        vehicleTollInfo,
+        origin, // ← Add this
+        destination // ← Add this
       );
     });
 

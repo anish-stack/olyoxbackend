@@ -24,6 +24,7 @@ const SendWhatsAppMessageNormal = async (Message, MobileNumber) => {
             };
         }
 
+        console.log("MobileNumber",MobileNumber)
         const apiKey = process.env.WHATSAPP_API_KEY;
         if (!apiKey) {
             console.log('Missing WhatsApp API key.');
@@ -54,7 +55,7 @@ const SendWhatsAppMessageNormal = async (Message, MobileNumber) => {
                 message: 'WhatsApp message sent successfully!',
             };
         } else {
-            console.log('Failed to send WhatsApp message, API response:', waResponse.data);
+            console.log('Failed to send WhatsApp message, API response:', waResponse);
             return {
                 success: false,
                 message: 'Failed to send WhatsApp message.',
@@ -63,7 +64,7 @@ const SendWhatsAppMessageNormal = async (Message, MobileNumber) => {
         }
 
     } catch (error) {
-        console.error('Error sending WhatsApp message:', error.message || error);
+        console.error('Error sending WhatsApp message:', error);
         return {
             success: false,
             message: 'An error occurred while sending the WhatsApp message.',

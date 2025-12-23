@@ -964,47 +964,56 @@ app.get("/rider-light/:tempRide", async (req, res) => {
   const { tempRide } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(tempRide)) {
-    console.warn("[STEP 2] Invalid ride ID");
     return res.status(400).json({ error: "Invalid ride ID" });
   }
 
   try {
-    console.log("[STEP 3] Fetching lightweight ride data from MongoDB...");
-
     const ride = await NewRideModelModel.findById(tempRide)
-      .select("ride_status payment_status pickup_location")
+      .select(
+        "ride_status payment_status pickup_location pricing.total_fare updated_at driver"
+      )
       .populate({
         path: "driver",
-        select: "location", // Only select driver's location field
+        select:
+          "name number location documents.profile rideVehicleInfo.vehicleName rideVehicleInfo.vehicleType rideVehicleInfo.phone",
       })
-      .lean()
-      .exec();
+      .lean();
 
     if (!ride) {
-      console.warn("[STEP 4] Ride not found in MongoDB");
       return res.status(404).json({ error: "Ride not found" });
     }
+    console.log("ride.driver",ride.driver)
 
-    // Return only the essential fields in a clean structure
     return res.status(200).json({
       success: true,
       data: {
-        rideId: tempRide || ride?._id,
+        rideId: tempRide,
         payment_status: ride.payment_status,
         ride_status: ride.ride_status,
         pickup: ride.pickup_location,
-        driver_location: ride.driver?.location,
-        updated_at: ride.updatedAt, // Optional: for client-side timestamp tracking
+        fare: ride?.pricing?.total_fare ?? null,
+        updated_at: ride.updated_at,
+
+        driver_location: ride.driver?.location ?? null,
+
+        driver: ride.driver
+          ? {
+              name: ride.driver.name,
+              number: ride.driver.number,
+              vehicleName: ride.driver?.rideVehicleInfo?.vehicleName,
+              vehicleType: ride.driver?.rideVehicleInfo?.vehicleType,
+              vehicleNumber: ride.driver?.rideVehicleInfo?.phone,
+              profile: ride.driver?.documents?.profile,
+            }
+          : null,
       },
     });
   } catch (error) {
-    console.error(
-      `[ERROR] ${new Date().toISOString()} Internal server error:`,
-      error
-    );
+    console.error("[ERROR] rider-light:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 const GEO_UPDATE_TTL = 30; // seconds
 const GEO_BATCH_KEY = "rider:location:batch";
