@@ -1034,24 +1034,30 @@ exports.getHotelsNearByMe = async (req, res) => {
   try {
     const { lat, lng } = req.query;
 
-    let hotel_listing = await HotelUser.find({
-      hotel_geo_location: {
-        $near: {
-          $geometry: {
-            type: "Point",
-            coordinates: [parseFloat(lng), parseFloat(lat)],
+    let hotel_listing = [];
+
+    // ✅ CASE 1: lat & lng present → nearby hotels
+    if (lat && lng) {
+      hotel_listing = await HotelUser.find({
+        hotel_geo_location: {
+          $near: {
+            $geometry: {
+              type: "Point",
+              coordinates: [parseFloat(lng), parseFloat(lat)],
+            },
+            $maxDistance: 200000, // 2 km
           },
-          $maxDistance: 2000,
         },
-      },
-    });
+      });
+    }
 
-    // If no nearby hotels are found, fetch all hotels and shuffle the data
-    if (hotel_listing.length === 0) {
+    // ✅ CASE 2: No location OR no nearby hotels → show all
+    if (!lat || !lng || hotel_listing.length === 0) {
       hotel_listing = await HotelListing.find()
-        .sort({ isRoomAvailable: -1 })
-        .populate("hotel_user");
+        .sort({ isRoomAvailable: -1 }) // available rooms first
+        .populate("hotel_user").select('-amenities');
 
+      // optional random order
       hotel_listing = hotel_listing.sort(() => Math.random() - 0.5);
     }
 
@@ -1068,6 +1074,7 @@ exports.getHotelsNearByMe = async (req, res) => {
     });
   }
 };
+
 
 exports.getHotelsDetails = async (req, res) => {
   try {

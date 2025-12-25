@@ -2,7 +2,7 @@ const express = require('express');
 const { register_hotel_user, add_hotel_listing,find_My_rooms, getHotelsNearByMe, getHotelsDetails, getHotelsListingDetails, verifyOtp, resendOtp, find_Hotel_Login, toggleHotelStatus, LoginHotel, toggleRoomStatus, deleteHotelRoom, uploadDocuments, getAllHotel, verifyDocuments, getSingleHotelDetails, updateHotelBlock, updateHotelUserDetail, updateHotelDetail, geHotelListingByHotelUser, HotelAnalyticData, deleteHotelVendor } = require('../hotel_controllers/hotel.user.controller');
 const Protect = require('../middleware/Auth');
 const upload = require('../middleware/multer');
-const { makeBookingOffline, verifyOtpForBooking, resendOtpForBookingConfirm, UpdateBooking, getMyBookingAll, markCheckIn, markCheckOut, getAllUniqueGuestAndBookingAndHerAmount, UserMakesBooking, getAllHotelBooking, getSingleHotelBooking, cancelBooking, acceptBooking, deleleteHotelOrder, changeOrderStatusBookingByAdmin } = require('../hotel_controllers/BookingHotel');
+const { makeBookingOffline, verifyOtpForBooking, resendOtpForBookingConfirm, UpdateBooking, getMyBookingAll, markCheckIn, markCheckOut, getAllUniqueGuestAndBookingAndHerAmount, UserMakesBooking, getAllHotelBooking, getSingleHotelBooking, cancelBooking, acceptBooking, deleleteHotelOrder, changeOrderStatusBookingByAdmin, getUserMyBookingAll } = require('../hotel_controllers/BookingHotel');
 const hotel_router = express.Router()
 const uploadFields = upload.fields([
     { name: 'aadhar_front', maxCount: 1 },
@@ -59,6 +59,10 @@ hotel_router.post('/verify-booking', Protect, verifyOtpForBooking)
 hotel_router.post('/resend-otp-booking', Protect, resendOtpForBookingConfirm)
 hotel_router.post('/update-booking', Protect, UpdateBooking)
 hotel_router.get('/get-bookings', Protect, getMyBookingAll)
+hotel_router.get('/get-bookings-user', Protect, getUserMyBookingAll)
+
+
+
 hotel_router.post('/mark-check-in-booking', Protect, markCheckIn)
 hotel_router.post('/mark-check-out-booking', Protect, markCheckOut)
 hotel_router.get('/get-guests', Protect, getAllUniqueGuestAndBookingAndHerAmount)

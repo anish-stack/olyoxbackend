@@ -54,23 +54,23 @@ exports.makeBookingOffline = async (req, res) => {
         // Date Validations
         const today = new Date(new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }));
         today.setHours(0, 0, 0, 0); // Normalize to start of the day
-        
+
         const checkIn = new Date(checkInDate);
         checkIn.setHours(0, 0, 0, 0); // Normalize to start of the day
-        
+
         const checkOut = new Date(checkOutDate);
         checkOut.setHours(0, 0, 0, 0); // Normalize to start of the day
-        
+
         // Allow today's date but not past dates
         if (checkIn < today) {
             return res.status(400).json({ success: false, message: "Check-in date cannot be in the past." });
         }
-        
+
         // Check-out must be after check-in
         if (checkOut <= checkIn) {
             return res.status(400).json({ success: false, message: "Check-out date must be after check-in date." });
         }
-        
+
 
         // Create New Booking
         const newBooking = new BookingRequestSchema({
@@ -252,14 +252,15 @@ exports.UpdateBooking = async (req, res) => {
 
 exports.getMyBookingAll = async (req, res) => {
     try {
-        if (!req.user || !req.user.id) {
+        if (!req.user || !req.user?.user?._id) {
             return res.status(401).json({ success: false, message: "Unauthorized: User ID is required" });
         }
+        console.log(req.user?.user?._id)
 
         const { status, Booking_id, userCheckOutStatus, isUserCheckedIn, booking_payment_done, paymentMode, guestPhone } = req.query;
 
         // Base filter with HotelUserId
-        let filter = { HotelUserId: req.user.id };
+        let filter = { HotelUserId: req.user?.user?._id || req.user._id };
 
         // Add filters only if they are present in the query
         if (status) filter.status = status;
@@ -278,10 +279,12 @@ exports.getMyBookingAll = async (req, res) => {
         console.log(bookings);
 
         if (!bookings.length) {
-            return res.status(200).json({    success: true,
-            message: "Bookings retrieved successfully.",
-            totalBookings: 0,
-            data: [] });
+            return res.status(200).json({
+                success: true,
+                message: "Bookings retrieved successfully.",
+                totalBookings: 0,
+                data: []
+            });
         }
 
         return res.status(200).json({
@@ -296,6 +299,59 @@ exports.getMyBookingAll = async (req, res) => {
         return res.status(500).json({ success: false, message: "Internal server error." });
     }
 };
+
+
+exports.getUserMyBookingAll = async (req, res) => {
+    try {
+        if (!req.user || !req.user?.user?._id) {
+            return res.status(401).json({ success: false, message: "Unauthorized: User ID is required" });
+        }
+        console.log(req.user?.user?._id)
+
+        const { status, Booking_id, userCheckOutStatus, isUserCheckedIn, booking_payment_done, paymentMode, guestPhone } = req.query;
+
+        // Base filter with HotelUserId
+        let filter = { guest_id: req.user?.user?._id };
+        
+
+        // Add filters only if they are present in the query
+        if (status) filter.status = status;
+        if (Booking_id) filter.Booking_id = Booking_id;
+        if (userCheckOutStatus !== undefined) filter.userCheckOutStatus = userCheckOutStatus === "true";
+        if (isUserCheckedIn !== undefined) filter.isUserCheckedIn = isUserCheckedIn === "true";
+        if (booking_payment_done !== undefined) filter.booking_payment_done = booking_payment_done === "true";
+        if (paymentMode) filter.paymentMode = paymentMode;
+        if (guestPhone) filter["guestInformation.guestPhone"] = guestPhone;
+
+        // Fetch bookings
+        const bookings = await BookingRequestSchema.find(filter)
+            .populate("listing_id")
+            .populate("HotelUserId")
+            .lean();
+        console.log(bookings);
+
+        if (!bookings.length) {
+            return res.status(200).json({
+                success: true,
+                message: "Bookings retrieved successfully.",
+                totalBookings: 0,
+                data: []
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Bookings retrieved successfully.",
+            totalBookings: bookings.length,
+            data: bookings
+        });
+
+    } catch (error) {
+        console.error("Error fetching bookings:", error);
+        return res.status(500).json({ success: false, message: "Internal server error." });
+    }
+};
+
 
 
 exports.markCheckIn = async (req, res) => {
@@ -409,7 +465,7 @@ exports.getAllUniqueGuestAndBookingAndHerAmount = async (req, res) => {
 
 exports.UserMakesBooking = async (req, res) => {
     try {
-       
+
         if (!req.user || !req.user?.user?._id) {
             return res.status(401).json({ success: false, message: "Unauthorized: User ID is required" });
         }
@@ -458,25 +514,25 @@ exports.UserMakesBooking = async (req, res) => {
         const today = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
         const currentIST = new Date(today);
         currentIST.setHours(0, 0, 0, 0); // Normalize to start of the day
-        
+
         const checkIn = new Date(checkInDate);
         checkIn.setHours(0, 0, 0, 0); // Normalize to start of the day
-        
+
         const checkOut = new Date(checkOutDate);
         checkOut.setHours(0, 0, 0, 0); // Normalize to start of the day
-        
-        console.log("currentIST",currentIST)
-        console.log("checkIn",checkIn)
+
+        console.log("currentIST", currentIST)
+        console.log("checkIn", checkIn)
         // Allow today's date but not past dates
         if (checkIn < currentIST) {
             return res.status(400).json({ success: false, message: "Check-in date cannot be in the past." });
         }
-        
+
         // Check-out must be after check-in
         if (checkOut <= checkIn) {
             return res.status(400).json({ success: false, message: "Check-out date must be after check-in date." });
         }
-        
+
 
         // Determine Payment Mode
         const mode = paymentMethod === "hotel"
@@ -643,7 +699,7 @@ exports.getSingleHotelBooking = async (req, res) => {
 exports.cancelBooking = async (req, res) => {
     try {
         const { Booking_id, reason } = req.body || {};
-        console.log(req.body)
+      
 
         // Check if Booking ID is provided
         if (!Booking_id) {
