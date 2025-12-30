@@ -19,14 +19,14 @@ function generateFourDigitOTP() {
 /**
  * Add ride job to queue for driver search
  */
-async function addRideJob(rideId,req) {
+async function addRideJob(rideId, req) {
     if (!rideId) {
         throw new Error("Ride ID is required to add job");
     }
     const searchDelay = 20 * 1000; // 20 seconds
     try {
         const job = await DriverSearchQueue.add(
-            { rideId: rideId.toString(),req, searchAttempt: 2 },
+            { rideId: rideId.toString(), req, searchAttempt: 2 },
             { delay: searchDelay }
         );
 
@@ -390,8 +390,8 @@ exports.bookIntercityRide = async (req, res) => {
             scheduled_at: departureTime,
             IntercityPickupTime: departureTime,
             rideType: tripType,
-            isIntercity: estimatedKm > 69 ? true:false,
-            isIntercityRides: estimatedKm > 69 ? true:false,
+            isIntercity: estimatedKm > 69 ? true : false,
+            isIntercityRides: estimatedKm > 69 ? true : false,
             isLater: isLater,
             is_rental: isRental || false,
             rentalHours: rentalHours || 0,
@@ -451,7 +451,7 @@ exports.bookIntercityRide = async (req, res) => {
         };
 
         let message = `🎉 Hi ${user.name || 'Rider'}!\n\n`;
-        message += `✅ Your intercity ${tripType} ride has been *confirmed*!\n\n`;
+        message += `✅ Your intercity ${tripType} ride is currently *Pending*.\n\n🚗 We are finding the best driver for you. Once a driver is assigned, you will be notified right away.\n\n`;
 
         if (isLater) {
             message += `⏰ *Later Ride Scheduled*\n\n`;
